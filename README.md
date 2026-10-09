@@ -1,9 +1,11 @@
 # SessionCost
 
-What did this chat with your coding agent cost, and why?
+See how many tokens each turn of your coding-agent chat sends, why, and what to cut.
 
-Type `/sessioncost` in a chat. You get the cost of each message you sent, the one that cost the most, and a fix with
-the money it would have saved, measured from that chat. It works in **Claude Code, Codex, Cursor and Antigravity**,
+Every message you send makes the agent send the whole conversation again, plus its setup, plus whatever it read.
+Type `/sessioncost` in a chat and see, for each of your messages, how many tokens went out and what they were, the
+heaviest turn, and the fixes that would have sent fewer, measured from that chat. Fewer tokens is what makes an agent
+cheaper and faster, so the cost is shown too, as the result. It works in **Claude Code, Codex, Cursor and Antigravity**,
 runs on your computer, and sends nothing anywhere.
 
 ## Get it
@@ -37,21 +39,22 @@ A short summary in the chat:
 
 ```
 SessionCost: Add a CSV export to the reports page
-$2.31 exact (API prices 2026-10-08) · 5 turns · 31 calls · 22 min working, 6.0 min waiting for you
-Costliest turn: #3 “now add tests” · $1.12 (48%)
-Top fix: Turn off tools this session never used · saves $0.214 (measured from this session)
+1.9M tokens sent, 24k written · 5 turns · 31 calls · 22 min working, 6.0 min waiting for you
+Heaviest turn: #3 “now add tests” · 910k tokens sent (48%) · $1.12
+Top fix: Turn off tools this session never used · 420k fewer tokens sent · saves $0.214 (measured from this session)
+Cost: $2.31 exact (API prices 2026-10-08)
 Report: ~/.sessioncost/reports/<session-id>.html
 ```
 
 (The numbers above are an example.) Say yes when it offers to open the report: a page in your browser with
 
-- **Turn by turn**: one row per thing you asked, with its cost, calls, minutes and a bar of where the money went.
-  Click a turn to see its calls, and a call to see what it sent and what it wrote. Every set of parts adds up to the
-  number above it.
-- **Replay**: step or play through the chat call by call and watch the cost climb.
-- **Where the cost went**: by kind of step (reading, running commands, writing files, helpers...) and by kind of
+- **Turn by turn**: one row per thing you asked, with the tokens it sent and wrote, its calls and minutes, and its
+  cost. Click a turn to see its calls, and a call to see what it sent (fixed setup, carried history, new input) and
+  what it wrote. Every set of parts adds up to the number above it.
+- **Replay**: step or play through the chat call by call and watch the context grow.
+- **Where the tokens went**: by kind of step (reading, running commands, writing files, helpers...) and by kind of
   token.
-- **What to fix**: the fixes that apply to this chat, each with its measured saving.
+- **What to fix**: the fixes that apply to this chat, each with the tokens it would cut and the money that saves.
 - **Sent with every call**: the agent's fixed setup, and which tools were never used.
 
 Asking costs almost nothing: the agent runs the tool and shows its summary, and never reads the log or the report
@@ -131,7 +134,7 @@ the token counts in the log. They are marked "~ estimated" on the page.
 
 ## The built-in fixes
 
-Three simple checks. Each saving is the cost of the tokens or calls involved, in this session.
+Three simple checks. Each one shows the tokens it would cut and what they cost, in this session.
 
 1. **Tools never used, sent with every call.** Tool definitions travel with every model call. The saving is what
    the unused ones cost across the session's calls.

@@ -1,7 +1,7 @@
 {
   "name": "sessioncost",
-  "description": "See where the tokens and money of this chat went, turn by turn, and what to fix. Type /sessioncost.",
-  "version": "0.1.0",
+  "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
+  "version": "0.2.0",
   "author": {
     "name": "kish21"
   },

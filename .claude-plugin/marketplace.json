@@ -1,12 +1,12 @@
 {
   "name": "sessioncost",
-  "description": "SessionCost: what did this chat cost, and why?",
+  "description": "SessionCost: where the tokens of each turn go, and what to cut",
   "owner": { "name": "kish21" },
   "plugins": [
     {
       "name": "sessioncost",
-      "description": "See where the tokens and money of this chat went, turn by turn, and what to fix. Type /sessioncost.",
-      "version": "0.1.0",
+      "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
+      "version": "0.2.0",
       "source": "./",
       "author": { "name": "kish21" }
     }

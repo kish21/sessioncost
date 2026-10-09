@@ -29,25 +29,36 @@ def minutes(m: float) -> str:
     return f"{m:.0f} min" if m >= 10 else f"{m:.1f} min"
 
 
+def tokens(n: float) -> str:
+    n = float(n or 0)
+    if n >= 999_500:
+        return f"{n / 1e6:.1f}M"
+    return f"{n / 1e3:.0f}k" if n >= 1000 else f"{n:.0f}"
+
+
 def summary(a: dict, path: Path | None) -> str:
     t, mo = a["totals"], a["money"]
     title = a["meta"]["title"]
     title = title if len(title) <= 70 else title[:69] + "…"
     lines = [f"SessionCost: {title}"]
     helpers = f" (+{plural(t['helper_calls'], 'helper call')})" if t["helper_calls"] else ""
-    lines.append(f"{money(t['usd'])} {mo['short']} · {plural(t['turns'], 'turn')} · {plural(t['calls'], 'call')}{helpers} · "
+    lines.append(f"{tokens(t['sent'])} tokens sent, {tokens(t['output'])} written · {plural(t['turns'], 'turn')} · "
+                 f"{plural(t['calls'], 'call')}{helpers} · "
                  f"{minutes(t['working_min'])} working, {minutes(t['waiting_min'])} waiting for you")
     turns = [x for x in a["turns"] if x["calls"]]
-    if turns and t["usd"]:
-        top = max(turns, key=lambda x: x["usd"] + x["helper_usd"])
-        cost = top["usd"] + top["helper_usd"]
+    if turns and t["sent"]:
+        top = max(turns, key=lambda x: x["sent"] + x["helper_sent"])
+        sent = top["sent"] + top["helper_sent"]
         text = top["text"] if len(top["text"]) <= 50 else top["text"][:49] + "…"
-        lines.append(f"Costliest turn: #{top['n']} “{text}” · {money(cost)} ({cost / t['usd']:.0%})")
+        lines.append(f"Heaviest turn: #{top['n']} “{text}” · {tokens(sent)} tokens sent ({sent / t['sent']:.0%}) · "
+                     f"{money(top['usd'] + top['helper_usd'])}")
     if a["fixes"]:
         f = a["fixes"][0]
-        lines.append(f"Top fix: {f['title']} · saves {money(f['saving_usd'])} (measured from this session)")
+        lines.append(f"Top fix: {f['title']} · {tokens(f['saving_tokens'])} fewer tokens sent · "
+                     f"saves {money(f['saving_usd'])} (measured from this session)")
     else:
         lines.append("Top fix: none of the built-in checks fired")
+    lines.append(f"Cost: {money(t['usd'])} {mo['short']}")
     if path:
         lines.append(f"Report: {path}")
     return "\n".join(lines)

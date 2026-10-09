@@ -1,9 +1,9 @@
 ---
 name: sessioncost
-description: Show where the tokens and money of THIS coding session went, turn by turn, with the costliest turn and the top fix. Use when the user asks what this session or chat cost, where the tokens went, why it was expensive, or runs /sessioncost.
+description: Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
 ---
 
-# SessionCost: what did this session cost?
+# SessionCost: where did this session's tokens go?
 
 Run SessionCost, which came with this plugin, on the current session. It reads the session's log on this machine,
 writes an HTML report and prints a short summary. It sends nothing anywhere and uses no AI model.

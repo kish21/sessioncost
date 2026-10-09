@@ -178,5 +178,5 @@ def find(session: Session, pricer, engines: list | None = None) -> list[Fix]:
                 f.source = eng.name
             out.append(f)
     out = [f for f in out if f.saving_usd > 0]
-    out.sort(key=lambda f: -f.saving_usd)
+    out.sort(key=lambda f: (-f.saving_tokens, -f.saving_usd))   # tokens cut first; money follows
     return out[:MAX_FIXES]

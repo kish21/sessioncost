@@ -14,10 +14,10 @@ no AI model.
 1. Run this from the project folder of the current session (one command, nothing else):
 
    ```
-   {{RUN}} last --no-open
+   {{RUN}} last
    ```
 
-   If that fails because the program is missing, try `sessioncost last --no-open`. If that fails too, tell the user
+   If that fails because the program is missing, try `sessioncost last`. If that fails too, tell the user
    SessionCost is not installed and give them the one line for their system, then stop:
 
    - Windows (PowerShell): `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex`
@@ -25,9 +25,9 @@ no AI model.
 
 2. Show the user the printed summary exactly as printed, in a code block. Do not reword or recompute it.
 
-3. Add one line: the report path from the summary, and offer to open it ("Want me to open the report?").
-   If they say yes, open the file with the system's default opener (`start "" <path>` on Windows, `open <path>`
-   on macOS, `xdg-open <path>` on Linux).
+3. The tool opens the report in the browser by itself. Add one line: "The full report is open in your browser"
+   and its path from the summary. Do not offer to open it. Only if the user says it did not open, open the file with
+   the system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
 
 ## Never
 

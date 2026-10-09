@@ -6,7 +6,7 @@
     {
       "name": "sessioncost",
       "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "source": "./",
       "author": { "name": "kish21" }
     }

@@ -1,5 +1,13 @@
 # What's new
 
+## 0.2.2
+
+- The Claude Code plugin now also finds SessionCost when the one-line install brought it with its own Python, so
+  computers without Python work with the plugin too.
+- `/sessioncost` opens the report in your browser right away instead of asking first.
+- The README leads with the one-line install, which needs neither Git nor Python; the plugin is for people who
+  already have both (Claude Code downloads plugins with Git).
+
 ## 0.2.1
 
 - `sessioncost setup` (and the one-line install) leaves Claude Code alone when the SessionCost plugin is

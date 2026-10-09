@@ -10,28 +10,41 @@ runs on your computer, and sends nothing anywhere.
 
 ## Get it
 
-**Using Claude Code?** Type these two lines in a Claude Code chat:
+Works with **Claude Code, Codex, Cursor and Antigravity**. You don't need Python or Git: the installer brings what
+it needs.
+
+**1. Open a terminal**
+
+- **Windows:** press the Windows key, type `powershell`, press Enter.
+- **Mac:** press Cmd + Space, type `terminal`, press Enter.
+
+**2. Paste this line and press Enter**
+
+| Your computer | Paste this |
+|---|---|
+| Windows | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
+| Mac or Linux | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
+
+Wait about a minute. It ends with a line like `Claude Code  /sessioncost added` for each agent it found.
+
+**3. Restart your agent, and type `/sessioncost` in any chat**
+
+To update later, paste the same line again.
+
+<details>
+<summary>Already have Git and Python? Install it as a Claude Code plugin instead</summary>
+
+In a Claude Code chat:
 
 ```
 /plugin marketplace add kish21/sessioncost
 /plugin install sessioncost@sessioncost
 ```
 
-(Or in the editor: **Manage Plugins → Marketplaces**, add `kish21/sessioncost`, then install **sessioncost** from
-the **Plugins** tab.) This needs Python 3.10 or newer on your computer. If you have none, `/sessioncost` says so and
-gives you the line below.
-
-**Using Codex, Cursor or Antigravity (or Claude Code without Python)?** Paste one line in a terminal:
-
-| Your computer | Paste this |
-|---|---|
-| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
-| macOS or Linux | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
-
-It installs SessionCost (bringing its own Python if your computer has none, via [uv](https://docs.astral.sh/uv/)),
-then adds `/sessioncost` to every agent you have. Run the same line again to update.
-
-**Then:** restart your agent and type `/sessioncost` in any chat.
+(Or **Manage Plugins → Marketplaces**, add `kish21/sessioncost`, then install **sessioncost** from the **Plugins**
+tab.) Claude Code downloads plugins with Git, so this needs [Git](https://git-scm.com/downloads), and SessionCost
+needs Python 3.10 or newer. If the plugin says "git not found", use the line above instead.
+</details>
 
 ## What you get
 
@@ -65,11 +78,11 @@ into the chat.
 - **`/sessioncost` does nothing:** restart the agent after installing.
 - **Two `/sessioncost` in Claude Code** (the plugin and the one-line install): run `sessioncost setup` again; with the
   plugin installed it removes the extra copy.
+- **"git not found" when adding the plugin:** use the one-line install instead; it needs neither Git nor Python.
 - **"Python is not found" with the Claude Code plugin:** paste the one line for your computer from above.
 - **Windows says running scripts is disabled:** run the line as
   `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.
-- **Already have Python and prefer pip:** `pip install https://github.com/kish21/sessioncost/archive/refs/heads/main.zip`,
-  then `python -m sessioncost setup`.
+- **Already have Python and prefer pip:** `pip install sessioncost`, then `python -m sessioncost setup`.
 
 ## Which agents, and how exact
 

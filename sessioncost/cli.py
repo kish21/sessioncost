@@ -64,6 +64,34 @@ def summary(a: dict, path: Path | None) -> str:
     return "\n".join(lines)
 
 
+OLD_REPORTS_HINT = 10      # past this many older reports, the summary says how to delete them (it never asks)
+
+
+def old_reports(keep: Path | None, folder: Path = REPORTS) -> list[Path]:
+    """Every saved report except the one to keep (the current one; by default the newest)."""
+    files = sorted(folder.glob("*.html"), key=lambda f: f.stat().st_mtime, reverse=True) if folder.is_dir() else []
+    keep = keep or (files[0] if files else None)
+    return [f for f in files if keep is None or f.resolve() != keep.resolve()]
+
+
+def size(n: int) -> str:
+    return f"{n / 1e6:.1f} MB" if n >= 1e6 else f"{max(1, round(n / 1e3))} KB"
+
+
+def cmd_clean(folder: Path = REPORTS) -> int:
+    old = old_reports(None, folder)
+    if not old:
+        print("No older reports to delete.")
+        return 0
+    freed = sum(f.stat().st_size for f in old)
+    for f in old:
+        f.unlink()
+    kept = sorted(folder.glob("*.html"))
+    print(f"Deleted {plural(len(old), 'older report')} ({size(freed)})." +
+          (f" Kept the latest: {kept[0]}" if kept else ""))
+    return 0
+
+
 def build(path, args) -> tuple[dict, Path | None]:
     s = readers.read(path)
     if args.cursor_usage:
@@ -173,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local only: reads log files, sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--json", action="store_true", help="print the full model as JSON instead of a report")
@@ -188,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.target == "setup":
         return cmd_setup()
+    if args.target == "clean":
+        return cmd_clean()
     if args.target == "list":
         return cmd_list(args)
     if args.target == "last":
@@ -213,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
         return 0
     print(summary(a, out))
+    old = old_reports(out) if out else []
+    if len(old) > OLD_REPORTS_HINT:
+        print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
     if out and not args.no_open:
         webbrowser.open(out.resolve().as_uri())
     return 0

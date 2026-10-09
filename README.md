@@ -73,6 +73,20 @@ Report: ~/.sessioncost/reports/<session-id>.html
 Asking costs almost nothing: the agent runs the tool and shows its summary, and never reads the log or the report
 into the chat.
 
+## Updating
+
+| How you installed it | How to update |
+|---|---|
+| The one line above | Paste the same line again, then restart your agent. |
+| Claude Code plugin | **/plugin → Marketplaces → sessioncost → Update** (or type `/plugin marketplace update sessioncost`, then `/plugin update sessioncost@sessioncost`), then restart Claude Code. You can also turn on auto-update for this marketplace there. |
+| pip | `pip install -U sessioncost`, then `sessioncost setup`. |
+
+## Old reports
+
+Each chat keeps one report in `~/.sessioncost/reports/` (a few hundred KB each). When more than 10 older ones pile up,
+the summary says so. Type `/sessioncost clean` in a chat, or `sessioncost clean` in a terminal, to delete all of them
+except the latest. Nothing is ever deleted unless you ask.
+
 ## If something goes wrong
 
 - **`/sessioncost` does nothing:** restart the agent after installing.
@@ -109,6 +123,7 @@ sessioncost 3f2a9c1e           # one chat, by the first characters of its id
 sessioncost path/to/session.jsonl   # or an Antigravity .db
 sessioncost 3f2a9c1e --cursor-usage usage-events.csv   # a Cursor chat, with exact tokens from your export
 sessioncost setup              # add /sessioncost to your agents again
+sessioncost clean              # delete all saved reports except the latest
 ```
 
 Options: `--project <dir>` (another project folder), `--no-open` (write the report, do not open it), `--json`

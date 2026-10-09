@@ -29,11 +29,24 @@ no AI model.
    and its path from the summary. Do not offer to open it. Only if the user says it did not open, open the file with
    the system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
 
+## Deleting old reports
+
+Each session keeps one report in `~/.sessioncost/reports/`. If the summary ends with an "Old reports: ..." line, show
+it as printed and do not ask anything about it. Only when the user asks to delete or clean old reports (for example
+"/sessioncost clean"), run (with the same fallbacks as step 1):
+
+```
+{{RUN}} clean
+```
+
+It deletes every saved report except the latest and prints what it freed. Show that line.
+
 ## Never
 
 - Never read the session log or the HTML report into the conversation. Both are large; reading them would cost more
   tokens than the session you are measuring.
 - Never run `--json` unless the user asks for the raw numbers, and then show only the part they asked about.
 - Never estimate costs yourself. The tool's numbers are the answer.
+- Never delete reports unless the user asked for it.
 - If the user says they are on a subscription plan (Claude Pro or Max, a ChatGPT plan), add `--subscription` so money
   is labelled API-equivalent. Antigravity is always labelled that way.

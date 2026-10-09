@@ -13,7 +13,7 @@
 :root{
   --bg:#f5f6f8; --surface:#ffffff; --raise:#f9fafb; --line:#e3e6eb; --grid:#eceef2;
   --ink:#14171c; --ink-2:#454b56; --ink-3:#5d636e;
-  --c-write:#4a3aa7; --c-new:#1baf7a; --c-reread:#d99400; --c-setup:#8a93a3;
+  --c-write:#4a3aa7; --c-new:#1baf7a; --c-reread:#d99400; --c-setup:#8a93a3; --c-hist:#3d7fd1;
   --accent:#2a78d6; --helper:#eb6834;
   --chip-bg:#e3f1ff; --chip:#1c5cab; --warn-bg:#fdf0e3; --warn:#9a4d0b;
   --focus:#2a78d6;
@@ -24,14 +24,14 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#101216; --surface:#181b20; --raise:#1d2026; --line:#2a2e35; --grid:#22262c;
   --ink:#f2f3f5; --ink-2:#cdd1d8; --ink-3:#a6acb7;
-  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381;
+  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381; --c-hist:#5b95e0;
   --accent:#5b9be8; --helper:#e2723f;
   --chip-bg:#16273d; --chip:#9ec5f4; --warn-bg:#3a2a16; --warn:#f2bf86;
   --focus:#86b6ef; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#101216; --surface:#181b20; --raise:#1d2026; --line:#2a2e35; --grid:#22262c;
   --ink:#f2f3f5; --ink-2:#cdd1d8; --ink-3:#a6acb7;
-  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381;
+  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381; --c-hist:#5b95e0;
   --accent:#5b9be8; --helper:#e2723f;
   --chip-bg:#16273d; --chip:#9ec5f4; --warn-bg:#3a2a16; --warn:#f2bf86;
   --focus:#86b6ef; color-scheme:dark}
@@ -158,6 +158,20 @@ button{font:inherit;color:inherit}
 /* stacked mini bar */
 .stack{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--grid);min-width:0}
 .stack span{display:block;height:100%}
+.s-hist{background:var(--c-hist)}
+/* under each bar: the share of what was sent that was re-read from the cache (cheap); the rest went at full price */
+.cacheline{height:4px;margin-top:3px;border-radius:2px;background:var(--grid);overflow:hidden;min-width:0}
+.cacheline span{display:block;height:100%;background:var(--c-reread)}
+.sw.line{height:4px;vertical-align:2px}
+/* the numbers right under a bar: its parts in the bar's colours, then what came from the cache */
+.barnums{font-size:12px;color:var(--ink-2);margin-top:5px;line-height:1.45;font-variant-numeric:tabular-nums}
+.barnums .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:0}
+.barnums .dot.line{height:4px;width:10px;vertical-align:2px}
+.barnums b{font-weight:600;color:var(--ink)}
+.barnums .cache{color:var(--ink-3)}
+table.t.steps .sub-item{display:block;padding-left:22px;color:var(--ink-3);font-size:12.5px}
+table.t.steps .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.sumline .dot{display:inline-block;width:10px;height:4px;border-radius:2px;margin-right:6px;vertical-align:2px}
 .s-write{background:var(--c-write)} .s-new{background:var(--c-new)} .s-reread{background:var(--c-reread)} .s-setup{background:var(--c-setup)}
 
 /* bar lists: label | track | value (the value has its own column, so it is never clipped) */
@@ -176,6 +190,8 @@ button{font:inherit;color:inherit}
 .turn > button:hover{background:var(--raise)}
 .turn > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
 .turn .no{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+.turn.step0{border-style:dashed;background:var(--raise)}
+.turn.step0 .no{font-weight:700;color:var(--ink-2)}
 .turn .ask{font-weight:500;overflow-wrap:anywhere}
 .turn .meta{font-size:13px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:2px}
 .turn .cost{text-align:right;font-weight:600}
@@ -321,9 +337,9 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
 
   <section class="panel" aria-labelledby="h-turns" id="turns-panel">
     <div class="panel-head"><h2 id="h-turns">Turn by turn</h2>
-      <span class="legend"><span><span class="sw s-setup"></span>0 · fixed setup</span><span><span class="sw s-reread"></span>1 · earlier conversation</span><span><span class="sw s-new"></span>2 · new</span></span></div>
+      <span class="legend"><span><span class="sw s-setup"></span>0 · fixed setup</span><span><span class="sw s-hist"></span>1 · earlier conversation</span><span><span class="sw s-new"></span>2 · new</span><span><span class="sw line s-reread"></span>re-read from cache</span></span></div>
     <p class="lede">Each row is one thing you asked. Click a row to open its model calls, then click a call to see what it sent and what it wrote. The parts always add up to the number above them.</p>
-    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> one row per message you sent. The bar is the tokens it sent, in three parts: grey, the agent's fixed setup (step 0, sent with every call); amber, the earlier conversation sent again; green, what was new. Longer means more tokens. Click a row to see the model calls behind it.</span></div>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> one row per message you sent. The bar is the tokens it sent, in three parts: grey, the agent's fixed setup (step 0, sent with every call); blue, the earlier conversation sent again (step 1); green, what was new (step 2). The thin amber line under it is how much of that was re-read from the cache, cheaply; the rest went at full price. Click a row to see the model calls behind it.</span></div>
     <div class="turns" id="turns"></div>
   </section>
 
@@ -377,7 +393,7 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
     </div>
   </section>
 
-  <section class="panel" aria-labelledby="h-setup">
+  <section class="panel" aria-labelledby="h-setup" id="setup-panel">
     <div class="panel-head"><h2 id="h-setup">Sent with every call</h2><span class="eyebrow num" id="setup-total"></span></div>
     <p class="lede" id="setup-lede"></p>
     <div class="bars" id="setup-parts"></div>
@@ -448,6 +464,7 @@ const GLOSS = {
   step0: ['Step 0 · fixed setup', 'What the agent sends before you type a word, again with every call: its instructions, the list of its tools and skills, your project rules. Measured from the first call of the session. Turning off tools and skills you do not use makes it smaller.'],
   history: ['Step 1 · earlier conversation', 'Everything said and read earlier in the chat, sent again with every call. It grows with every step, which is why long chats get expensive.'],
   fresh: ['Step 2 · new', 'What is sent for the first time in a call: your message, a file just read, a command\'s output.'],
+  cache: ['Re-read from the cache', 'Text the model provider already has from a moment ago is read back from its cache at about a tenth of the price. The setup and the earlier conversation usually come from the cache; after a pause of more than a few minutes (one hour at most) the cache expires and everything is sent again at full price.'],
   sent: ['Tokens sent', 'Everything the agent sent to the model, added up over all its calls: its setup, the whole conversation so far, and whatever it read. Each call re-sends all of it, so this grows fast. It is what you can cut.'],
 };
 const q = k => `<span class="q" role="button" tabindex="0" data-help="${k}" aria-label="What is ${esc(GLOSS[k][0])}?">?</span>`;
@@ -475,12 +492,13 @@ const q = k => `<span class="q" role="button" tabindex="0" data-help="${k}" aria
 })();
 const SB = T.sent_by || {setup: 0, history: 0, new: T.sent};
 const RR_T = (T.by_class.find(c => c.key === 'cache_read') || {tokens: 0}).tokens;
-const STEPS = [['setup', '0 · fixed setup', 'var(--c-setup)', 'step0'], ['history', '1 · earlier conversation', 'var(--c-reread)', 'history'], ['new', '2 · new', 'var(--c-new)', 'fresh']];
+const OUT_USD = (T.by_class.find(c => c.key === 'output') || {usd: 0}).usd;
+const STEPS = [['setup', '0 · fixed setup', 'var(--c-setup)', 'step0'], ['history', '1 · earlier conversation', 'var(--c-hist)', 'history'], ['new', '2 · new', 'var(--c-new)', 'fresh']];
 const SAVE = D.fixes.reduce((a, f) => a + f.saving_usd, 0), SAVE_T = D.fixes.reduce((a, f) => a + f.saving_tokens, 0);
 const ENGINE = (D.fix_engines || []).some(n => n !== 'built-in');
 const kp = [
   ['Tokens sent', K(T.sent), `${K(SB.setup)} setup · ${K(SB.history)} conversation · ${K(SB.new)} new`,
-   T.sent ? `<span class="chip">${K(RR_T)} from the cache</span>` : '', '', 'tokens'],
+   T.sent ? `<span class="chip">${K(RR_T)} from the cache</span>` : '', `<div class="why">+ ${K(T.output)} written by the model</div>`, 'tokens'],
   ['Turns', T.turns, `message${T.turns === 1 ? '' : 's'} you sent`, T.turns ? `<span class="chip">${K(T.sent / T.turns)} sent per message</span>` : '', '', 'turns'],
   ['Model calls', T.calls + T.helper_calls, T.helper_calls ? `${T.calls} main · ${T.helper_calls} by helpers` : 'all in the main chat',
    T.turns ? `<span class="chip">${((T.calls + T.helper_calls) / T.turns).toFixed(1).replace(/\.0$/, '')} per message</span>` : '', '', 'calls'],
@@ -518,6 +536,7 @@ function openTurn(n){
   const label = MO.subscription ? 'would have cost' : 'cost';
   $('story').innerHTML = `<p class="headline">This ${esc(M.agent_label)} session sent <b>${K(T.sent)} tokens</b>${q('sent')} to the model
       for <b>${T.turns} message${T.turns === 1 ? '' : 's'}</b> from you: <b>${K(SB.setup)}</b> fixed setup${q('step0')}, <b>${K(SB.history)}</b> earlier conversation${q('history')} and <b>${K(SB.new)}</b> new${q('fresh')}.
+      It wrote <b>${K(T.output)}</b> back${q('out')}: few tokens, but <b>${pct(OUT_USD, T.usd)}</b> of the cost.
       That ${label} <b>${$$(T.usd)}</b>${MO.subscription ? ' at pay-per-use prices' : ''}${MO.exact ? '' : ' (an estimate)'}.</p>
     <div class="cards">
       ${top ? `<div class="card warm"><div class="eyebrow">Heaviest message</div>
@@ -526,7 +545,7 @@ function openTurn(n){
       <div class="card"><div class="eyebrow">What was sent</div>
         <div class="split">${STEPS.filter(x => SB[x[0]] > 0).map(x => `<i style="flex:${SB[x[0]]};background:${x[2]}" title="${x[1]}: ${K(SB[x[0]])} tokens"></i>`).join('')}</div>
         <div class="split-key">${STEPS.map(x => `<span><b style="background:${x[2]}"></b><b class="num" style="background:none;width:auto;height:auto">${K(SB[x[0]])}</b>&nbsp;${x[1]}${q(x[3])}</span>`).join('')}
-          <span class="muted">${K(RR_T)} of it re-read from the cache · ${K(T.output)} written back</span></div></div>
+          <span class="muted">${K(RR_T)} of it re-read from the cache${q('cache')}, ${K(T.sent - RR_T)} at full price · ${K(T.output)} written back</span></div></div>
       <div class="card work"><div class="eyebrow">How hard it worked</div>
         <div class="say">It made <b>${C.length} model call${C.length === 1 ? '' : 's'}</b>${q('call')}, about <b>${per.toFixed(per >= 10 ? 0 : 1)} per message</b>${T.helper_calls ? `, ${T.helper_calls} of them by helpers${q('helper')}` : ''}. Each call re-sends the conversation so far.</div>
         <button type="button" class="act" data-drill-go="calls">See every call →</button></div>
@@ -562,7 +581,7 @@ function tbl(head, rows, sum){
 const ofTurn = n => C.filter(c => c.turn === n);
 const turnNs = [...new Set([...D.turns.map(t => t.n), ...C.map(c => c.turn)])].sort((a, b) => a - b).filter(n => ofTurn(n).length || n);
 /* charts for the drill-downs: HTML bars (label | bar | value), one hover tip per panel, numbers one click away */
-const COL = {new: 'var(--c-new)', reread: 'var(--c-reread)', out: 'var(--c-write)', setup: 'var(--c-setup)', main: 'var(--accent)', helper: 'var(--helper)'};
+const COL = {new: 'var(--c-new)', hist: 'var(--c-hist)', reread: 'var(--c-reread)', out: 'var(--c-write)', setup: 'var(--c-setup)', main: 'var(--accent)', helper: 'var(--helper)'};
 const KQ = {'new input': 'new', 'new in': 'new', 're-read from cache': 'reread', 're-read': 'reread', 'written by the model': 'out', 'out': 'out',
   'fixed setup': 'setup', 'helpers': 'helper', 'main chat': 'call'};
 const key = items => `<div class="ch-key">${items.map(([name, col]) => `<span><b style="background:${col}"></b>${name}${KQ[name] ? q(KQ[name]) : ''}</span>`).join('')}</div>`;
@@ -579,7 +598,7 @@ function chart(rows, opts = {}){
   }).join('') + `</div>`;
 }
 const nums = html => `<details class="nums"><summary>Show the numbers</summary>${html}</details>`;
-const HOW = {"total": "the top bar is the whole cost, split by kind of token; the bars below show each kind and each of your messages. Longer means more money.", "tokens": "each row is one of your messages; its bar is the tokens it sent: grey the fixed setup (step 0), amber the earlier conversation (step 1), green what was new (step 2). Longer means more tokens: that is what to cut.", "calls": "each row is one of your messages; the bar counts its model calls, blue in the main chat and orange by helpers. On the right, the costliest single calls.", "working": "each row is one of your messages; the bar is its working time, blue while the AI read and wrote, grey while tools (commands, searches) ran.", "waiting": "each row is a message where the AI stopped and waited: blue before you wrote, orange while a question card was open. Longer means a longer wait.", "savings": "each bar is one fix; its length is how many fewer tokens this session would have sent with it. The last row is the total."};
+const HOW = {"total": "the top bar is the whole cost, split by kind of token; the bars below show each kind and each of your messages. Longer means more money.", "tokens": "each row is one of your messages; its bar is the tokens it sent: grey the fixed setup (step 0), blue the earlier conversation (step 1), green what was new (step 2). The table adds how much was re-read from the cache. Longer means more tokens: that is what to cut.", "calls": "each row is one of your messages; the bar counts its model calls, blue in the main chat and orange by helpers. On the right, the costliest single calls.", "working": "each row is one of your messages; the bar is its working time, blue while the AI read and wrote, grey while tools (commands, searches) ran.", "waiting": "each row is a message where the AI stopped and waited: blue before you wrote, orange while a question card was open. Longer means a longer wait.", "savings": "each bar is one fix; its length is how many fewer tokens this session would have sent with it. The last row is the total."};
 const howto = k => `<div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> ${HOW[k]}</span></div>`;
 const tname = n => n ? `#${n} ${(D.turns.find(t => t.n === n) || {text: ''}).text}` : 'before your first message';
 const DRILL = {
@@ -606,10 +625,10 @@ const DRILL = {
       Steps 0 and 1 go out again with every call, so they are what grows the bill and what you can cut.</p><div class="grid2">
       <div><h3>Sent per turn</h3>${key(STEPS.map(x => [x[1], x[2]]))}
         ${chart([...rows.map(x => ({label: tname(x.n), segs: [
-            {v: x.setup, col: COL.setup, tip: `fixed setup: ${K(x.setup)}`}, {v: x.history, col: COL.reread, tip: `earlier conversation: ${K(x.history)}`}, {v: x.new, col: COL.new, tip: `new: ${K(x.new)}`}],
+            {v: x.setup, col: COL.setup, tip: `fixed setup: ${K(x.setup)}`}, {v: x.history, col: COL.hist, tip: `earlier conversation: ${K(x.history)}`}, {v: x.new, col: COL.new, tip: `new: ${K(x.new)}`}],
             value: K(x.setup + x.history + x.new), sub: pct(x.setup + x.history + x.new, I)})), {label: 'Total', sum: true, segs: [], value: K(I), sub: '100%'}])}
-        ${nums(tbl(['Turn', '0 · Setup', '1 · Conversation', '2 · New', 'Sent', 'Written'], rows.map(x => [esc(tname(x.n).slice(0, 60)), K(x.setup), K(x.history), K(x.new), K(x.setup + x.history + x.new), K(x.written)]),
-          ['Total', K(sum('setup')), K(sum('history')), K(sum('new')), K(I), K(O)]))}</div>
+        ${nums(tbl(['Turn', '0 · Setup', '1 · Conversation', '2 · New', 'Sent', 'From cache', 'Written'], rows.map(x => [esc(tname(x.n).slice(0, 60)), K(x.setup), K(x.history), K(x.new), K(x.setup + x.history + x.new), K(x.cache), K(x.written)]),
+          ['Total', K(sum('setup')), K(sum('history')), K(sum('new')), K(I), K(sum('cache')), K(O)]))}</div>
       <div><h3>What was sent, in three steps</h3>${key(STEPS.map(x => [x[1], x[2]]))}
         ${chart([{label: 'Sent in all', segs: STEPS.map(x => ({v: SB[x[0]], col: x[2], tip: `${x[1]}: ${K(SB[x[0]])} (${pct(SB[x[0]], I)})`})), value: K(I)},
           ...STEPS.map(x => ({label: x[1], segs: [{v: SB[x[0]], col: x[2], tip: GLOSS[x[3]][1]}], value: K(SB[x[0]]), sub: pct(SB[x[0]], I)}))])}
@@ -709,12 +728,25 @@ if (!reduce && 'IntersectionObserver' in window){
 const maxTurn = Math.max(...D.turns.map(t => t.sent + t.helper_sent), 1);
 /* a turn's tokens by kind: new text read, conversation re-sent, written */
 const tmix = n => { const cs = ofTurn(n), s = k => cs.reduce((a, c) => a + (c.sent[k] || 0), 0);
-  return {setup: s('setup'), history: s('history'), new: s('new'), written: tout(cs)}; };
+  return {setup: s('setup'), history: s('history'), new: s('new'), written: tout(cs), cache: cs.reduce((a, c) => a + c.usage.cache_read, 0)}; };
 const FIXBY = {}; D.fixes.forEach(f => FIXBY[f.id] = f);
+const dot = c => `<i class="dot ${c}"></i>`;
+/* under a bar, numbers only (the colours say which part): "■45K + ■1.3K + ■8.2K = 55K", then "▬44K" from the cache.
+   The words are in the hover text and for screen readers. */
+function barNums(mix){
+  const tot = mix.setup + mix.history + mix.new;
+  const parts = [['s-setup', mix.setup, 'fixed setup'], ['s-hist', mix.history, 'earlier conversation'], ['s-new', mix.new, 'new']].filter(x => x[1] > 0);
+  const said = parts.map(([, v, w]) => `${K(v)} ${w}`).join(' + ') + ` = ${K(tot)} sent; ${K(mix.cache)} re-read from the cache, ${K(tot - mix.cache)} at full price`;
+  return `<div class="barnums" title="${said}" aria-label="${said}"><div aria-hidden="true">${parts.map(([c, v]) => `${dot(c)}<b>${K(v)}</b>`).join(' + ')}${parts.length > 1 ? ` = <b>${K(tot)}</b>` : ''}` +
+    `<span class="cache">&nbsp;&nbsp;${dot('s-reread line')}${K(mix.cache)}</span></div></div>`;
+}
 function stack(mix, scale){
   const tot = mix.setup + mix.history + mix.new; if (!tot) return '<div class="stack" style="width:2%"></div>';
-  return `<div class="stack" style="width:${Math.max(2, scale * 100)}%" title="sent ${K(tot)}: fixed setup ${K(mix.setup)} · earlier conversation ${K(mix.history)} · new ${K(mix.new)}">` +
-    [['s-setup', mix.setup], ['s-reread', mix.history], ['s-new', mix.new]].map(([c, v]) => v > 0 ? `<span class="${c}" style="width:${v / tot * 100}%"></span>` : '').join('') + '</div>';
+  const w = Math.max(2, scale * 100);
+  return `<div class="stack" style="width:${w}%" title="sent ${K(tot)}: fixed setup ${K(mix.setup)} · earlier conversation ${K(mix.history)} · new ${K(mix.new)}">` +
+    [['s-setup', mix.setup], ['s-hist', mix.history], ['s-new', mix.new]].map(([c, v]) => v > 0 ? `<span class="${c}" style="width:${v / tot * 100}%"></span>` : '').join('') + '</div>' +
+    `<div class="cacheline" style="width:${w}%" title="re-read from the cache: ${K(mix.cache)} of ${K(tot)} (${pct(mix.cache, tot)}); full price: ${K(tot - mix.cache)}"><span style="width:${mix.cache / tot * 100}%"></span></div>` +
+    barNums(mix);
 }
 function turnRow(t, i){
   const cost = t.usd + t.helper_usd, sent = t.sent + t.helper_sent;
@@ -723,23 +755,39 @@ function turnRow(t, i){
   return `<div class="turn"><button type="button" aria-expanded="false" data-turn="${i}">
     <span class="no">${t.n ? '#' + t.n : '·'}</span>
     <span><span class="ask"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${esc(t.text)}</span>
-      <span class="meta"><span>${t.calls.length} call${t.calls.length === 1 ? '' : 's'}</span>${(m => `<span>${K(m.setup)} setup · ${K(m.history)} conversation · ${K(m.new)} new</span>`)(tmix(t.n))}<span>${K(t.written)} written</span><span>${$$(cost)}</span><span>${mins(t.minutes)} working</span>${kind ? `<span>${kind}</span>` : ''}${t.waited_min >= 0.1 ? `<span>you replied after ${mins(t.waited_min)}</span>` : ''}</span>
+      <span class="meta"><span>${t.calls.length} call${t.calls.length === 1 ? '' : 's'}</span><span>${K(t.written)} written</span><span>${$$(cost)}</span><span>${mins(t.minutes)} working</span>${kind ? `<span>${kind}</span>` : ''}${t.waited_min >= 0.1 ? `<span>you replied after ${mins(t.waited_min)}</span>` : ''}</span>
       ${chips ? `<span class="events" style="margin-top:4px">${chips}</span>` : ''}</span>
     <span class="mini">${stack(tmix(t.n), sent / maxTurn)}</span>
     <span class="cost num">${K(sent)}<small>sent · ${pct(sent, T.sent)} of all</small></span>
   </button><div class="drill" hidden></div></div>`;
 }
-$('turns').innerHTML = D.turns.map(turnRow).join('');
+/* step 0: the agent's setup, sent before your first message and again with every call */
+function step0Row(){
+  const s = D.setup.tokens || 0, mainCalls = C.filter(c => c.agent === 'main').length;
+  if (!s) return '';
+  const sCache = C.filter(c => c.agent === 'main').reduce((a, c) => a + Math.min(c.sent.setup || 0, c.usage.cache_read), 0);
+  return `<div class="turn step0"><button type="button" data-go="setup-panel">
+    <span class="no">0</span>
+    <span><span class="ask">Step 0 · the agent's setup, before your first message</span>
+      <span class="meta"><span>its instructions, tools and skills</span><span>sent again with every call</span><span>the grey part of every bar below</span></span></span>
+    <span class="mini"><div class="stack" style="width:${Math.max(2, s / maxTurn * 100)}%" title="fixed setup: ${K(s)} per call"><span class="s-setup" style="width:100%"></span></div><div class="cacheline" style="width:${Math.max(2, s / maxTurn * 100)}%" title="re-read from the cache: ${pct(sCache, SB.setup)} of the setup sent"><span style="width:${SB.setup ? sCache / SB.setup * 100 : 0}%"></span></div>
+      <div class="barnums" title="${K(s)} per call × ${mainCalls} call${mainCalls === 1 ? '' : 's'} = ${K(SB.setup)}; ${K(sCache)} re-read from the cache" aria-label="${K(s)} per call times ${mainCalls} calls = ${K(SB.setup)}; ${K(sCache)} re-read from the cache"><div aria-hidden="true">${dot('s-setup')}<b>${K(s)}</b> × ${mainCalls} = <b>${K(SB.setup)}</b><span class="cache">&nbsp;&nbsp;${dot('s-reread line')}${K(sCache)}</span></div></div></span>
+    <span class="cost num">${K(s)}<small>per call</small></span>
+  </button></div>`;
+}
+$('turns').innerHTML = step0Row() + D.turns.map(turnRow).join('');
 function turnDrill(t){
   const cs = t.calls.map(i => C[i]);
   const evs = t.events.map(e => `<span class="ev ${['typed','command','queued','answer'].includes(e.kind) ? 'you' : ''}" title="${esc(e.text)}">${esc(e.label)}${e.kind === 'answer' && e.text ? ': “' + esc(e.text.slice(0, 60)) + '”' : ''}${e.tokens ? ' · ~' + K(e.tokens) : ''}</span>`).join('');
-  let sum = (cs.length <= 6 ? 'sent ' + cs.map(c => K(c.context)).join(' + ') + ' = <b>' + K(t.sent) + ' tokens</b>'
+  let sum = (cs.length === 1 ? `1 call sent <b>${K(t.sent)} tokens</b>`
+            : cs.length <= 6 ? `${cs.length} calls sent ` + cs.map(c => K(c.context)).join(' + ') + ' = <b>' + K(t.sent) + ' tokens</b>'
                              : `${cs.length} calls (each listed below) sent <b>${K(t.sent)} tokens</b>`) + ` · cost ${$$(t.usd, 4)}`;
   if (t.helper_sent) sum += ` · plus helpers started in this turn: ${K(t.helper_sent)} tokens, ${$$(t.helper_usd, 4)}`;
   return `${evs ? `<div><div class="eyebrow" style="margin-bottom:4px">What came in this turn (~ tokens)</div><div class="events">${evs}</div></div>` : ''}
     <div class="sumline num">${sum}</div>
     <div class="calls">${t.calls.map(i => { const c = C[i]; return `<div class="call"><button type="button" aria-expanded="false" data-call="${i}">
-      <span><span class="what"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${md(c.label)}</span><br><span class="tag">${who(c)} · ${c.time} · ${esc(catLabel(c.category))} · wrote ${K(c.usage.output)} · ${$$(c.usd, 4)}</span></span>
+      <span><span class="what"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${md(c.label)}</span><br><span class="tag">${who(c)} · ${c.time} · ${esc(catLabel(c.category))} · wrote ${K(c.usage.output)} · ${$$(c.usd, 4)}</span>
+      ${barNums({setup: c.sent.setup || 0, history: c.sent.history || 0, new: c.sent.new || 0, cache: c.usage.cache_read})}</span>
       <span class="c num">${K(c.context)}<small style="display:block;font-size:11px;color:var(--muted);font-weight:400">sent</small></span></button><div class="parts" hidden></div></div>`; }).join('')}</div>`;
 }
 function partsTable(title, block, unit){
@@ -749,19 +797,38 @@ function partsTable(title, block, unit){
 }
 function callDrill(c){
   const u = c.usage, cc = c.cost_by_class;
-  const items = c.new_items.length ? `<details><summary>Where the new input came from (${c.new_items.length})</summary><table class="t">${c.new_items.map(x => `<tr><td>${md(x.what)}</td><td class="n num">~${N(x.tokens)}</td></tr>`).join('')}</table></details>` : '';
+  const part = pre => c.sent.parts.find(x => x.what.startsWith(pre)) || {tokens: 0, usd: 0, what: ''};
+  const s0 = part('fixed setup'), s1 = part('earlier conversation'), s2 = part('new input');
+  const row = (label, tokens, usd, cls = '') => `<tr class="${cls}"><td>${label}</td><td class="n num">${tokens}</td><td class="n num">${usd}</td></tr>`;
+  /* step 2 itemised: what the log names, then the rest it does not */
+  const named = c.new_items.reduce((a, x) => a + x.tokens, 0), rest = s2.tokens - named;
+  const items = c.new_items.map(x => row(`<span class="sub-item">${md(x.what)}</span>`, '~' + N(x.tokens), ''))
+    .concat(rest > 50 && c.new_items.length ? [row('<span class="sub-item">not itemised in the log (added by the agent without recording it)</span>', '~' + N(rest), '')] : []).join('');
+  const expired = s1.what.includes('expired') ? ' <span class="chip warn">sent again: the cache had expired</span>' : '';
+  const wrote = c.written.parts.map(x => row(`<span class="sub-item">${esc(x.what)}${x.estimated ? ' <span class="est">~ estimated split</span>' : ''}</span>`, N(x.tokens), $$(x.usd, 4))).join('');
   const acts = c.actions.length ? `<details><summary>Actions in this call (${c.actions.length})</summary><table class="t">${c.actions.map(a => `<tr><td>${md(a.label)}${a.error ? ' <span class="chip warn">error</span>' : ''}</td><td class="n num">${a.result_tokens ? '~' + N(a.result_tokens) + ' came back' : ''}</td></tr>`).join('')}</table></details>` : '';
   const think = u.thinking == null ? '<p class="est">This log does not separate hidden thinking from the rest of the output, so it is estimated.</p>' : '';
-  return `<div class="parts-grid">${partsTable('What it sent', c.sent, 'sent this call')}${partsTable('What it wrote', c.written, 'written this call')}</div>
+  const notCached = Math.max(0, c.context - u.cache_read - u.cache_write_5m - u.cache_write_1h);
+  return `<table class="t steps"><thead><tr><th>What this call sent</th><th class="n">tokens</th><th class="n">cost</th></tr></thead><tbody>
+      ${c.agent === 'main' ? row(`${dot('s-setup')}Step 0 · fixed setup`, N(s0.tokens), $$(s0.usd, 4)) : ''}
+      ${row(`${dot('s-hist')}Step 1 · earlier conversation${expired}`, N(s1.tokens), $$(s1.usd, 4))}
+      ${row(`${dot('s-new')}Step 2 · new`, N(s2.tokens), $$(s2.usd, 4))}
+      ${items}
+      ${row('= sent', N(c.context), $$(c.sent.usd, 4), 'sum')}
+    </tbody></table>
+    <div class="sumline num">${dot('s-reread line')}of which re-read from the cache <b>${N(u.cache_read)}</b> (cheap) · written to the cache ${N(u.cache_write_5m + u.cache_write_1h)} · not cached ${N(notCached)}</div>
+    <table class="t steps"><thead><tr><th>What it wrote</th><th class="n">tokens</th><th class="n">cost</th></tr></thead><tbody>
+      ${wrote}${row('= written', N(c.written.tokens), $$(c.written.usd, 4), 'sum')}</tbody></table>
     <div class="sumline num">sent ${$$(c.sent.usd, 4)} + written ${$$(c.written.usd, 4)} = <b>${$$(c.usd, 4)}</b> for this call · ${esc(c.model)}</div>
-    <details><summary>Exact token counts from the log</summary><table class="t">
-      <tr><td>new input, not cached</td><td class="n num">${N(u.input)}</td><td class="n num">${$$(cc.input, 4)}</td></tr>
-      <tr><td>new input, cached for 5 minutes</td><td class="n num">${N(u.cache_write_5m)}</td><td class="n num">${$$(cc.cache_write_5m, 4)}</td></tr>
-      <tr><td>new input, cached for 1 hour</td><td class="n num">${N(u.cache_write_1h)}</td><td class="n num">${$$(cc.cache_write_1h, 4)}</td></tr>
-      <tr><td>re-read from cache</td><td class="n num">${N(u.cache_read)}</td><td class="n num">${$$(cc.cache_read, 4)}</td></tr>
-      <tr><td>written${u.thinking != null ? ' (of which ' + N(u.thinking) + ' hidden thinking)' : ''}</td><td class="n num">${N(u.output)}</td><td class="n num">${$$(cc.output, 4)}</td></tr>
-      <tr class="sum"><td>= this call</td><td class="n num">${N(c.context + u.output)}</td><td class="n num">${$$(c.usd, 4)}</td></tr></table></details>
-    ${items}${acts}${think}`;
+    <details><summary>As the log records it (by cache status)</summary><table class="t">
+      ${row('new input, not cached', N(u.input), $$(cc.input, 4))}
+      ${row('new input, cached for 5 minutes', N(u.cache_write_5m), $$(cc.cache_write_5m, 4))}
+      ${row('new input, cached for 1 hour', N(u.cache_write_1h), $$(cc.cache_write_1h, 4))}
+      ${row('re-read from cache', N(u.cache_read), $$(cc.cache_read, 4))}
+      ${row(`written${u.thinking != null ? ' (of which ' + N(u.thinking) + ' hidden thinking)' : ''}`, N(u.output), $$(cc.output, 4))}
+      ${row('= this call', N(c.context + u.output), $$(c.usd, 4), 'sum')}</table>
+      <p class="muted" style="font-size:12px">The same tokens as above, grouped the way the log counts them. The steps above group them by what they are.</p></details>
+    ${acts}${think}`;
 }
 function toggle(btn, box, fill){
   const open = btn.getAttribute('aria-expanded') !== 'true';
@@ -771,6 +838,8 @@ function toggle(btn, box, fill){
   return open;
 }
 $('turns').addEventListener('click', e => {
+  const go = e.target.closest('[data-go]');
+  if (go){ $(go.dataset.go).scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'}); return; }
   const cb = e.target.closest('button[data-call]');
   if (cb){ toggle(cb, cb.nextElementSibling, () => callDrill(C[+cb.dataset.call])); return; }
   const tb = e.target.closest('button[data-turn]');

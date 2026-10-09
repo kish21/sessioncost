@@ -1,5 +1,25 @@
 # What's new
 
+## 0.3.1
+
+- **A Step 0 row** at the top of "Turn by turn": the agent's setup, sent before your first message and again with
+  every call, with its size per call and in all. Click it to see what it is made of.
+- **Earlier conversation is counted by what it is**, not by whether it came from the cache. After a long pause the
+  cache expires and the conversation is sent again at full price: it used to show as "new", now it shows as earlier
+  conversation, marked "sent again at full price: the cache had expired".
+- **What came from the cache, per turn:** each turn shows how much was re-read from the cache (cheap) and how much
+  went at full price, as numbers and as a thin amber line under its bar; Step 0 shows it for the setup. Earlier
+  conversation is now blue, so amber always means "re-read from cache".
+- **Output tokens back in the headline and on the tile:** "It wrote 1.7K back: few tokens, but 12% of the cost."
+- **Numbers right under every bar**, in the bar's colours: setup + conversation + new = sent, then what came from
+  the cache (the words are in the hover text). Also for Step 0 and for each call.
+- **An opened call reads step by step and adds up:** step 0 + step 1 + step 2 (with what came in, including the part
+  the log does not itemise) = sent; then what came from the cache, what it wrote, and the cost. The log's own grouping
+  by cache status is one click away.
+- **`sessioncost clean`** (or `/sessioncost clean`) deletes all saved reports except the latest. Past 10 older
+  reports the summary reminds you, without asking.
+- README: how to update, for each way of installing.
+
 ## 0.3.0
 
 - **What was sent, in three steps, in numbers:** step 0 the agent's fixed setup (sent before you type, with every

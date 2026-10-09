@@ -119,23 +119,34 @@ def call_label(c: Call) -> str:
     return "thought, wrote nothing visible"
 
 
-def sent_parts(c: Call, r: dict, setup_tokens: int) -> list[dict]:
-    """What was sent: fixed setup + carried history + new input = the call's context, exactly."""
+def sent_parts(c: Call, r: dict, setup_tokens: int, carried_max: int | None) -> list[dict]:
+    """What was sent, by what it is: fixed setup (step 0) + earlier conversation (step 1) + new (step 2) = the call's
+    context, exactly. Earlier conversation is what the previous call of this thread sent and wrote, minus the setup,
+    whether it came from the cache or not (after a pause the cache expires and it is sent again at full price).
+    The cache only sets the price: cache reads are counted against the setup first, then the conversation."""
     u = c.usage
     cr_rate, new_rate = r["cache_read"], pricemod.new_input_rate(u, r)
     setup = min(setup_tokens, u.context) if c.agent == "main" else 0
-    s_cr = min(setup, u.cache_read)
-    s_new = setup - s_cr
-    carried = u.cache_read - s_cr
-    new = u.new_input - s_new
+    if carried_max is None:                       # first call of its thread: nothing earlier to carry
+        carried_max = 0 if c.agent == "main" else u.cache_read
+    carried = max(0, min(u.context - setup, carried_max))
+    new = u.context - setup - carried
+    cr_left = u.cache_read
+    s_cr = min(setup, cr_left); cr_left -= s_cr
+    h_cr = min(carried, cr_left); cr_left -= h_cr
+    n_cr = min(new, cr_left)
+    price = lambda tokens, cr: (cr * cr_rate + (tokens - cr) * new_rate) / 1e6
     parts = []
     if setup_tokens and c.agent == "main":
         parts.append({"what": "fixed setup (instructions, tools, skills: step 0)", "tokens": setup,
-                      "usd": (s_cr * cr_rate + s_new * new_rate) / 1e6, "estimated": False})
-    parts.append({"what": "earlier conversation (re-read from cache)", "tokens": carried, "usd": carried * cr_rate / 1e6,
+                      "usd": price(setup, s_cr), "estimated": False})
+    # the newest piece (the last reply and tool results) is always written to the cache on this call, not read:
+    # only call it an expired cache when most of the earlier conversation missed it
+    expired = carried > 2000 and h_cr < carried / 2
+    parts.append({"what": "earlier conversation" + (" (sent again at full price: the cache had expired)" if expired else ""),
+                  "tokens": carried, "usd": price(carried, h_cr), "estimated": False})
+    parts.append({"what": "new input (sent for the first time)", "tokens": new, "usd": price(new, n_cr),
                   "estimated": False})
-    parts.append({"what": "new input (read for the first time)", "tokens": new, "usd": new * new_rate / 1e6,
-                  "estimated": bool(s_new)})
     return parts
 
 
@@ -198,11 +209,15 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     # ---- calls (main first, then helpers), each with its parts
     calls: list[dict] = []
     by_obj: dict[int, dict] = {}
+    prev_of: dict[str, Call] = {}                 # the previous call of each thread (main, or one helper)
     for c in s.all_calls:
         r = P.rates(c)
         cc = pricemod.cost(c.usage, r)
         total = sum(cc.values())
-        sp = sent_parts(c, r, setup_tokens)
+        pv = prev_of.get(c.agent)
+        prev_setup = min(setup_tokens, pv.usage.context) if pv is not None and c.agent == "main" else 0
+        sp = sent_parts(c, r, setup_tokens, None if pv is None else pv.usage.context - prev_setup + pv.usage.output)
+        prev_of[c.agent] = c
         sp_by = {"setup": sum(x["tokens"] for x in sp if x["what"].startswith("fixed setup")),
                  "history": sum(x["tokens"] for x in sp if x["what"].startswith("earlier conversation")),
                  "new": sum(x["tokens"] for x in sp if x["what"].startswith("new input"))}

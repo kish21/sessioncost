@@ -91,8 +91,18 @@ SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it
 ]
 
 
-def setup(home: Path | None = None) -> list[tuple[str, Path]]:
-    """Add the /sessioncost skill to every agent installed for this user. Returns (agent, skill file) written."""
+def claude_plugin_installed(home: Path) -> bool:
+    """True when Claude Code has the SessionCost plugin, which brings its own /sessioncost."""
+    try:
+        plugins = json.loads((home / ".claude" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return any(k.startswith("sessioncost@") for k in (plugins.get("plugins") or {}))
+
+
+def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
+    """Add the /sessioncost skill to every agent installed for this user. Returns (agent, skill file written), with
+    None for Claude Code when the plugin already provides /sessioncost."""
     home = home or Path.home()
     # The skill names this exact Python, so it runs even when no 'python' or 'sessioncost' is on the PATH.
     exe = Path(sys.executable).as_posix()
@@ -105,6 +115,14 @@ def setup(home: Path | None = None) -> list[tuple[str, Path]]:
         if not (home / folder).is_dir():
             continue
         dest = home / folder / sub / "sessioncost" / "SKILL.md"
+        if folder == ".claude" and claude_plugin_installed(home):
+            # Two /sessioncost in one agent confuse people: remove a copy an earlier setup wrote, add none.
+            if dest.is_file() and "name: sessioncost" in dest.read_text(encoding="utf-8", errors="replace"):
+                dest.unlink()
+                if not any(dest.parent.iterdir()):
+                    dest.parent.rmdir()
+            done.append((agent, None))
+            continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
         done.append((agent, dest))
@@ -117,7 +135,8 @@ def cmd_setup() -> int:
         print("No Claude Code, Codex, Antigravity or Cursor folder found for this user; nothing to set up.")
         return 1
     for agent, dest in done:
-        print(f"{agent:12} /sessioncost added ({dest})")
+        print(f"{agent:12} /sessioncost added ({dest})" if dest else
+              f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
     print("\nRestart the agent if it is open, then type /sessioncost in a chat.")
     return 0
 

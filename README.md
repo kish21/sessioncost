@@ -63,6 +63,8 @@ into the chat.
 ## If something goes wrong
 
 - **`/sessioncost` does nothing:** restart the agent after installing.
+- **Two `/sessioncost` in Claude Code** (the plugin and the one-line install): run `sessioncost setup` again; with the
+  plugin installed it removes the extra copy.
 - **"Python is not found" with the Claude Code plugin:** paste the one line for your computer from above.
 - **Windows says running scripts is disabled:** run the line as
   `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.

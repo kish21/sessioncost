@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__ · SessionCost</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<script>try{var th=localStorage.getItem('sessioncost-theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th;}catch(e){}</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
 /* One column of panels: headline, turns (with drill-down), replay, where the cost went, fixes, fixed setup.
@@ -35,6 +36,12 @@
   --chip-bg:#16273d; --chip:#9ec5f4; --warn-bg:#3a2a16; --warn:#f2bf86;
   --focus:#86b6ef; color-scheme:dark}
 *{box-sizing:border-box}
+header{position:relative}
+.theme{position:absolute;top:0;right:0;display:inline-flex;align-items:center;gap:6px;font:600 12px var(--f-body);color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer}
+.theme:hover{color:var(--ink);border-color:var(--ink-3)}
+.theme:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.theme svg{width:14px;height:14px}
+@media (max-width:640px){.theme{position:static;margin-bottom:8px}}
 [hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
@@ -60,7 +67,10 @@ code{font-family:var(--f-mono);font-size:.92em;overflow-wrap:anywhere}
 .kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0;display:flex;flex-direction:column;gap:4px}
 .kpi .v{font-size:26px;white-space:nowrap;font-weight:700;line-height:1.15;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .kpi .s{color:var(--ink-2);font-size:13px}
-.kpi .eyebrow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .eyebrow{white-space:normal;overflow-wrap:anywhere;line-height:1.3}
+/* inside a tile nothing is cut: chips wrap onto a second line */
+.kpi .chip{white-space:normal;border-radius:8px;line-height:1.3;padding:3px 8px;max-width:100%}
+.kpi .s{overflow-wrap:anywhere}
 button.kpi{font:inherit;color:inherit;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
 button.kpi:hover{border-color:var(--ink-3)}
 button.kpi:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
@@ -271,6 +281,14 @@ input[type=range]{flex:1 1 160px;accent-color:var(--accent);min-width:120px}
 
 /* fixes, setup, footer */
 .fixes{display:grid;gap:10px}
+.deeper{margin-top:14px;border:1px dashed var(--line);border-radius:10px;padding:14px 16px;background:var(--surface)}
+.deeper-head{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.deeper-head > div{flex:1 1 420px;min-width:0}
+.deeper h3{margin:0 0 4px;font-size:15px}
+.deeper .soon{margin:12px 0 8px;padding:10px 12px;border-radius:8px;background:var(--chip-bg);color:var(--chip);font-weight:600}
+.deeper ul{margin:6px 0 10px;padding-left:18px;color:var(--ink-2);font-size:13px}
+.deeper pre{max-height:360px;overflow:auto;background:var(--raise);border:1px solid var(--line);border-radius:8px;padding:10px;font:12px/1.45 var(--f-mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.deeper .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
 .fix{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:6px;background:var(--raise)}
 .fix .top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:baseline}
 .fix ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2);font-size:12px}
@@ -290,6 +308,7 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
 <body>
 <div class="wrap">
   <header>
+    <button type="button" class="theme" id="theme" aria-label="Switch between light and dark"></button>
     <div class="eyebrow" id="eyebrow">SessionCost</div>
     <h1 id="title"></h1>
     <p class="sub" id="subtitle"></p>
@@ -302,9 +321,9 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
 
   <section class="panel" aria-labelledby="h-turns" id="turns-panel">
     <div class="panel-head"><h2 id="h-turns">Turn by turn</h2>
-      <span class="legend"><span><span class="sw s-write"></span>written by the model</span><span><span class="sw s-new"></span>new text read</span><span><span class="sw s-reread"></span>re-read from cache</span></span></div>
+      <span class="legend"><span><span class="sw s-setup"></span>0 · fixed setup</span><span><span class="sw s-reread"></span>1 · earlier conversation</span><span><span class="sw s-new"></span>2 · new</span></span></div>
     <p class="lede">Each row is one thing you asked. Click a row to open its model calls, then click a call to see what it sent and what it wrote. The parts always add up to the number above them.</p>
-    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> one row per message you sent. The colored bar is its cost: longer means more expensive, and the colors show what the money paid for (purple: the AI writing, green: new text read, amber: re-reading the conversation). Click a row to see the model calls behind it.</span></div>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> one row per message you sent. The bar is the tokens it sent, in three parts: grey, the agent's fixed setup (step 0, sent with every call); amber, the earlier conversation sent again; green, what was new. Longer means more tokens. Click a row to see the model calls behind it.</span></div>
     <div class="turns" id="turns"></div>
   </section>
 
@@ -345,6 +364,17 @@ details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
     <div class="panel-head"><h2 id="h-fix">What to fix</h2><span class="eyebrow">tokens cut, measured from this session</span></div>
     <p class="lede">Each saving is what those tokens or calls cost in this session, priced like the rest of this page. Fixes can overlap.</p>
     <div class="fixes" id="fixes"></div>
+    <div class="deeper" id="deeper">
+      <div class="deeper-head">
+        <div><h3>Deeper fixes</h3>
+          <p class="lede">These are the three basic checks. Our catalog of measured waste patterns has dozens more: an agent
+            polling instead of waiting, files re-read, tool results far bigger than the work, research in the main chat,
+            and others. To check them, SessionCost would share a <b>summary</b> of this session: numbers, tool names and
+            yes/no flags. Never your messages, code, file names or project.</p></div>
+        <button type="button" class="btn primary" id="deeper-btn" aria-expanded="false" aria-controls="deeper-box">Find deeper fixes</button>
+      </div>
+      <div id="deeper-box" hidden></div>
+    </div>
   </section>
 
   <section class="panel" aria-labelledby="h-setup">
@@ -383,6 +413,18 @@ const tin = cs => cs.reduce((a, c) => a + c.context, 0), tout = cs => cs.reduce(
 const io_ = cs => `${K(tin(cs))} in · ${K(tout(cs))} out`;
 const who = c => c.agent === 'main' ? 'Call ' + c.n : 'Helper ' + c.agent.split(':').pop().slice(0,6) + ', call ' + c.n;
 
+/* ---------- light / dark switch: follows the system until clicked, then remembers the choice ---------- */
+(function theme(){
+  const btn = $('theme'), root = document.documentElement;
+  const sun = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3"/></svg>';
+  const moon = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/></svg>';
+  const isDark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const paint = () => { const d = isDark(); btn.innerHTML = (d ? sun : moon) + (d ? 'Light mode' : 'Dark mode'); btn.setAttribute('aria-pressed', String(d)); };
+  btn.onclick = () => { const next = isDark() ? 'light' : 'dark'; root.dataset.theme = next;
+    try { localStorage.setItem('sessioncost-theme', next); } catch (e) {} paint(); };
+  paint();
+})();
+
 /* ---------- header ---------- */
 $('eyebrow').textContent = 'SessionCost · ' + M.agent_label + (M.date ? ' · ' + M.date : '');
 $('title').textContent = M.title;
@@ -402,7 +444,10 @@ const GLOSS = {
   apieq: ['API-equivalent', 'You pay a fixed plan, not per token. This is what the same work would cost at the public pay-per-use prices.'],
   working: ['Agent working', 'Time from each of your messages to the AI\'s last step on it, added up. Model time is the AI reading and writing; tool time is commands, searches and file reads running.'],
   waiting: ['Waiting for you', 'Time the AI sat stopped until you answered. It costs nothing, but the work stood still.'],
-  savings: ['Tokens you could cut', 'How many fewer tokens this session would have sent with each fix, measured from its own calls, not guessed. Fewer tokens sent is what lowers the cost.'],
+  savings: ['Tokens to cut', 'How many fewer tokens this session would have sent with each fix, measured from its own calls, not guessed. Fewer tokens sent is what lowers the cost.'],
+  step0: ['Step 0 · fixed setup', 'What the agent sends before you type a word, again with every call: its instructions, the list of its tools and skills, your project rules. Measured from the first call of the session. Turning off tools and skills you do not use makes it smaller.'],
+  history: ['Step 1 · earlier conversation', 'Everything said and read earlier in the chat, sent again with every call. It grows with every step, which is why long chats get expensive.'],
+  fresh: ['Step 2 · new', 'What is sent for the first time in a call: your message, a file just read, a command\'s output.'],
   sent: ['Tokens sent', 'Everything the agent sent to the model, added up over all its calls: its setup, the whole conversation so far, and whatever it read. Each call re-sends all of it, so this grows fast. It is what you can cut.'],
 };
 const q = k => `<span class="q" role="button" tabindex="0" data-help="${k}" aria-label="What is ${esc(GLOSS[k][0])}?">?</span>`;
@@ -428,19 +473,22 @@ const q = k => `<span class="q" role="button" tabindex="0" data-help="${k}" aria
   }, true);
   addEventListener('scroll', close, {passive: true});
 })();
+const SB = T.sent_by || {setup: 0, history: 0, new: T.sent};
+const RR_T = (T.by_class.find(c => c.key === 'cache_read') || {tokens: 0}).tokens;
+const STEPS = [['setup', '0 · fixed setup', 'var(--c-setup)', 'step0'], ['history', '1 · earlier conversation', 'var(--c-reread)', 'history'], ['new', '2 · new', 'var(--c-new)', 'fresh']];
 const SAVE = D.fixes.reduce((a, f) => a + f.saving_usd, 0), SAVE_T = D.fixes.reduce((a, f) => a + f.saving_tokens, 0);
 const ENGINE = (D.fix_engines || []).some(n => n !== 'built-in');
 const kp = [
-  ['Tokens sent', K(T.sent), `${K(T.output)} written by the model`,
-   (() => { const rr = T.by_class.find(c => c.key === 'cache_read'); return rr && T.sent ? `<span class="chip">${pct(rr.tokens, T.sent)} re-sent history</span>` : ''; })(), '', 'tokens'],
+  ['Tokens sent', K(T.sent), `${K(SB.setup)} setup · ${K(SB.history)} conversation · ${K(SB.new)} new`,
+   T.sent ? `<span class="chip">${K(RR_T)} from the cache</span>` : '', '', 'tokens'],
   ['Turns', T.turns, `message${T.turns === 1 ? '' : 's'} you sent`, T.turns ? `<span class="chip">${K(T.sent / T.turns)} sent per message</span>` : '', '', 'turns'],
   ['Model calls', T.calls + T.helper_calls, T.helper_calls ? `${T.calls} main · ${T.helper_calls} by helpers` : 'all in the main chat',
    T.turns ? `<span class="chip">${((T.calls + T.helper_calls) / T.turns).toFixed(1).replace(/\.0$/, '')} per message</span>` : '', '', 'calls'],
-  ['Tokens you could cut', K(SAVE_T), `${D.fixes.length} fix${D.fixes.length === 1 ? '' : 'es'} · ${pct(SAVE_T, T.sent)} of tokens sent`,
-   ENGINE ? '' : '<span class="chip warn">basic fixes only</span>', `<div class="why">saves ${$$(SAVE)} · measured from this session</div>`, 'savings'],
   ['Cost', $$(T.usd), 'the result of the tokens', `<span class="chip ${MO.exact || MO.subscription ? '' : 'warn'}">${esc(MO.short)}</span>`, '', 'total'],
   ['Agent working', mins(T.working_min), 'summed over turns', '', '', 'working'],
   ['Waiting for you', mins(T.waiting_min), 'until you replied', '', '', 'waiting'],
+  ['Tokens to cut', K(SAVE_T), `${D.fixes.length} fix${D.fixes.length === 1 ? '' : 'es'} · ${pct(SAVE_T, T.sent)} of tokens sent`,
+   ENGINE ? '' : '<span class="chip warn">basic fixes only</span>', `<div class="why">saves ${$$(SAVE)} · measured from this session</div>`, 'savings'],
 ];
 const TQ = {total: MO.subscription ? 'apieq' : MO.exact ? 'exact' : 'estimate', turns: 'turn', tokens: 'sent', calls: 'call', working: 'working', waiting: 'waiting', savings: 'savings'};
 $('kpis').innerHTML = kp.map(([l, v, s, chip, extra, key]) => `<button type="button" class="kpi" data-drill="${key}" aria-expanded="false" aria-controls="drill">` +
@@ -469,17 +517,18 @@ function openTurn(n){
   const short = s => s.length > 70 ? s.slice(0, 69) + '…' : s;
   const label = MO.subscription ? 'would have cost' : 'cost';
   $('story').innerHTML = `<p class="headline">This ${esc(M.agent_label)} session sent <b>${K(T.sent)} tokens</b>${q('sent')} to the model
-      for <b>${T.turns} message${T.turns === 1 ? '' : 's'}</b> from you${big[1] ? `, and <b>${pct(big[1], all)}</b> of the traffic was <b>${big[0]}</b>${q(big[3])}` : ''}.
+      for <b>${T.turns} message${T.turns === 1 ? '' : 's'}</b> from you: <b>${K(SB.setup)}</b> fixed setup${q('step0')}, <b>${K(SB.history)}</b> earlier conversation${q('history')} and <b>${K(SB.new)}</b> new${q('fresh')}.
       That ${label} <b>${$$(T.usd)}</b>${MO.subscription ? ' at pay-per-use prices' : ''}${MO.exact ? '' : ' (an estimate)'}.</p>
     <div class="cards">
       ${top ? `<div class="card warm"><div class="eyebrow">Heaviest message</div>
         <div class="say">“${esc(short(top.t.text))}” sent <b>${K(top.s)} tokens</b>, ${pct(top.s, T.sent)} of the session (${$$(top.u)}).</div>
         <button type="button" class="act" data-turn-go="${top.t.n}">Show me this message →</button></div>` : ''}
-      <div class="card"><div class="eyebrow">Where the tokens went</div>
-        <div class="split">${parts.filter(x => x[1] > 0).map(x => `<i style="flex:${x[1]};background:${x[2]}" title="${x[0]}: ${K(x[1])} tokens"></i>`).join('')}</div>
-        <div class="split-key">${parts.filter(x => x[1] > 0).map(x => `<span><b style="background:${x[2]}"></b>${pct(x[1], all)} ${x[0]}${q(x[3])}</span>`).join('')}</div></div>
+      <div class="card"><div class="eyebrow">What was sent</div>
+        <div class="split">${STEPS.filter(x => SB[x[0]] > 0).map(x => `<i style="flex:${SB[x[0]]};background:${x[2]}" title="${x[1]}: ${K(SB[x[0]])} tokens"></i>`).join('')}</div>
+        <div class="split-key">${STEPS.map(x => `<span><b style="background:${x[2]}"></b><b class="num" style="background:none;width:auto;height:auto">${K(SB[x[0]])}</b>&nbsp;${x[1]}${q(x[3])}</span>`).join('')}
+          <span class="muted">${K(RR_T)} of it re-read from the cache · ${K(T.output)} written back</span></div></div>
       <div class="card work"><div class="eyebrow">How hard it worked</div>
-        <div class="say">It made <b>${C.length} model calls</b>${q('call')}, about <b>${per.toFixed(per >= 10 ? 0 : 1)} per message</b>${T.helper_calls ? `, ${T.helper_calls} of them by helpers${q('helper')}` : ''}. Each call re-sends the conversation so far.</div>
+        <div class="say">It made <b>${C.length} model call${C.length === 1 ? '' : 's'}</b>${q('call')}, about <b>${per.toFixed(per >= 10 ? 0 : 1)} per message</b>${T.helper_calls ? `, ${T.helper_calls} of them by helpers${q('helper')}` : ''}. Each call re-sends the conversation so far.</div>
         <button type="button" class="act" data-drill-go="calls">See every call →</button></div>
       <div class="card good"><div class="eyebrow">Biggest cut</div>
         ${fix ? `<div class="say"><b>${esc(fix.title)}</b>: <b>${K(fix.saving_tokens)} fewer tokens</b> sent (${pct(fix.saving_tokens, T.sent)}), saving ${$$(fix.saving_usd)} on a session like this.</div>
@@ -530,7 +579,7 @@ function chart(rows, opts = {}){
   }).join('') + `</div>`;
 }
 const nums = html => `<details class="nums"><summary>Show the numbers</summary>${html}</details>`;
-const HOW = {"total": "the top bar is the whole cost, split by kind of token; the bars below show each kind and each of your messages. Longer means more money.", "tokens": "each row is one of your messages; its bar is the tokens it sent, split into new text read (green) and the conversation re-sent (amber). Longer means more tokens: that is what to cut.", "calls": "each row is one of your messages; the bar counts its model calls, blue in the main chat and orange by helpers. On the right, the costliest single calls.", "working": "each row is one of your messages; the bar is its working time, blue while the AI read and wrote, grey while tools (commands, searches) ran.", "waiting": "each row is a message where the AI stopped and waited: blue before you wrote, orange while a question card was open. Longer means a longer wait.", "savings": "each bar is one fix; its length is how many fewer tokens this session would have sent with it. The last row is the total."};
+const HOW = {"total": "the top bar is the whole cost, split by kind of token; the bars below show each kind and each of your messages. Longer means more money.", "tokens": "each row is one of your messages; its bar is the tokens it sent: grey the fixed setup (step 0), amber the earlier conversation (step 1), green what was new (step 2). Longer means more tokens: that is what to cut.", "calls": "each row is one of your messages; the bar counts its model calls, blue in the main chat and orange by helpers. On the right, the costliest single calls.", "working": "each row is one of your messages; the bar is its working time, blue while the AI read and wrote, grey while tools (commands, searches) ran.", "waiting": "each row is a message where the AI stopped and waited: blue before you wrote, orange while a question card was open. Longer means a longer wait.", "savings": "each bar is one fix; its length is how many fewer tokens this session would have sent with it. The last row is the total."};
 const howto = k => `<div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> ${HOW[k]}</span></div>`;
 const tname = n => n ? `#${n} ${(D.turns.find(t => t.n === n) || {text: ''}).text}` : 'before your first message';
 const DRILL = {
@@ -550,22 +599,21 @@ const DRILL = {
           ['Total', C.length, $$(T.usd), '100%']))}</div></div>`;
   },
   tokens(){
-    const I = tin(C), RR = C.reduce((a, c) => a + c.usage.cache_read, 0), O = tout(C);
-    const setupRe = C.reduce((a, c) => { const p = c.sent.parts.find(x => x.what.startsWith('fixed setup')); return a + (p ? Math.min(p.tokens, c.usage.cache_read) : 0); }, 0);
-    const rows = turnNs.map(n => { const cs = ofTurn(n), i = tin(cs), r = cs.reduce((a, c) => a + c.usage.cache_read, 0), o = tout(cs); return {n, i, r, o}; });
-    return `<p class="lede"><b>${K(I)}</b> tokens sent to the model, <b>${K(RR)}</b> of them (${pct(RR, I)}) the conversation re-sent from the cache; <b>${K(O)}</b> written back.
-      Every call re-sends the whole conversation so far, so a long chat or a big file read early is paid for again on every later call. Cutting what is sent is what lowers the cost.</p><div class="grid2">
-      <div><h3>Sent per turn</h3>${key([['new in', COL.new], ['re-read', COL.reread]])}
+    const I = tin(C), RR = RR_T, O = tout(C);
+    const rows = turnNs.map(n => ({n, ...tmix(n)}));
+    const sum = k => rows.reduce((a, x) => a + x[k], 0);
+    return `<p class="lede"><b>${K(I)}</b> tokens sent to the model: <b>${K(SB.setup)}</b> fixed setup (step 0), <b>${K(SB.history)}</b> earlier conversation (step 1) and <b>${K(SB.new)}</b> new (step 2). <b>${K(RR)}</b> of them were re-read from the cache, cheaply; <b>${K(O)}</b> were written back.
+      Steps 0 and 1 go out again with every call, so they are what grows the bill and what you can cut.</p><div class="grid2">
+      <div><h3>Sent per turn</h3>${key(STEPS.map(x => [x[1], x[2]]))}
         ${chart([...rows.map(x => ({label: tname(x.n), segs: [
-            {v: x.i - x.r, col: COL.new, tip: `new in: ${K(x.i - x.r)}`}, {v: x.r, col: COL.reread, tip: `re-sent from cache: ${K(x.r)}`}],
-            value: K(x.i), sub: pct(x.i, I)})), {label: 'Total', sum: true, segs: [], value: K(I), sub: '100%'}])}
-        ${nums(tbl(['Turn', 'New in', 'Re-read', 'Sent', 'Written'], rows.map(x => [esc(tname(x.n).slice(0, 60)), K(x.i - x.r), K(x.r), K(x.i), K(x.o)]),
-          ['Total', K(I - RR), K(RR), K(I), K(O)]))}</div>
-      <div><h3>What the ${pct(RR, I)} re-sent is</h3>${key([['fixed setup', COL.setup], ['earlier conversation', COL.reread]])}
-        ${chart([{label: 'Re-sent in all', segs: [{v: setupRe, col: COL.setup, tip: `fixed setup: ${K(setupRe)} (${pct(setupRe, RR)})`}, {v: RR - setupRe, col: COL.reread, tip: `earlier conversation: ${K(RR - setupRe)} (${pct(RR - setupRe, RR)})`}], value: K(RR)},
-          {label: D.setup.known ? 'Fixed setup' : 'Fixed setup (not logged)', segs: [{v: setupRe, col: COL.setup, tip: 'system prompt, tool definitions, lists: sent with every call'}], value: K(setupRe), sub: pct(setupRe, RR)},
-          {label: 'Earlier conversation', segs: [{v: RR - setupRe, col: COL.reread, tip: 'everything said and read earlier in the chat'}], value: K(RR - setupRe), sub: pct(RR - setupRe, RR)}])}
-        <p class="muted" style="font-size:12px">Fixed setup: the agent's system prompt, tool definitions and lists, sent with every call. Earlier conversation: everything said and read before this call. ${D.setup.known ? 'The setup size is estimated from its text (characters ÷ 4); the rest is exact.' : 'This agent does not log its setup, so all of it shows as earlier conversation.'}</p></div></div>`;
+            {v: x.setup, col: COL.setup, tip: `fixed setup: ${K(x.setup)}`}, {v: x.history, col: COL.reread, tip: `earlier conversation: ${K(x.history)}`}, {v: x.new, col: COL.new, tip: `new: ${K(x.new)}`}],
+            value: K(x.setup + x.history + x.new), sub: pct(x.setup + x.history + x.new, I)})), {label: 'Total', sum: true, segs: [], value: K(I), sub: '100%'}])}
+        ${nums(tbl(['Turn', '0 · Setup', '1 · Conversation', '2 · New', 'Sent', 'Written'], rows.map(x => [esc(tname(x.n).slice(0, 60)), K(x.setup), K(x.history), K(x.new), K(x.setup + x.history + x.new), K(x.written)]),
+          ['Total', K(sum('setup')), K(sum('history')), K(sum('new')), K(I), K(O)]))}</div>
+      <div><h3>What was sent, in three steps</h3>${key(STEPS.map(x => [x[1], x[2]]))}
+        ${chart([{label: 'Sent in all', segs: STEPS.map(x => ({v: SB[x[0]], col: x[2], tip: `${x[1]}: ${K(SB[x[0]])} (${pct(SB[x[0]], I)})`})), value: K(I)},
+          ...STEPS.map(x => ({label: x[1], segs: [{v: SB[x[0]], col: x[2], tip: GLOSS[x[3]][1]}], value: K(SB[x[0]]), sub: pct(SB[x[0]], I)}))])}
+        <p class="muted" style="font-size:12px">Step 0 is measured: the first call has no conversation yet, so everything it sent except your message is the agent's setup${D.setup.known ? '' : ' (this agent does not log its setup, so it is known only from that size)'}. "Sent with every call" below shows what the setup is made of.</p></div></div>`;
   },
   calls(){
     const main = C.filter(c => c.agent === 'main'), helpers = D.helpers.filter(h => h.calls);
@@ -617,7 +665,7 @@ const DRILL = {
         nums(tbl(['Fix', 'Where', 'Tokens cut', 'Share of sent', 'Saves'], fx.map(f => [`<b>${esc(f.title)}</b><br><span class="muted">${esc(f.why)}</span>`, esc(f.where), K(f.saving_tokens), pct(f.saving_tokens, T.sent), $$(f.saving_usd)]),
           ['Total', '', K(SAVE_T), pct(SAVE_T, T.sent), $$(SAVE)])) :
         '<p class="muted">None of the checks fired for this session.</p>'}
-      <div><button type="button" class="btn" data-go="fix-panel">See the fixes in detail ↓</button></div>`;
+      <div class="row" style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" data-go="fix-panel">See the fixes in detail ↓</button>${D.summary ? '<button type="button" class="btn" data-go="deeper">Find deeper fixes ↓</button>' : ''}</div>`;
   },
 };
 let openDrill = null;
@@ -660,13 +708,13 @@ if (!reduce && 'IntersectionObserver' in window){
 /* ---------- turns + drill-down ---------- */
 const maxTurn = Math.max(...D.turns.map(t => t.sent + t.helper_sent), 1);
 /* a turn's tokens by kind: new text read, conversation re-sent, written */
-const tmix = n => { const cs = ofTurn(n), rr = cs.reduce((a, c) => a + c.usage.cache_read, 0);
-  return {new: tin(cs) - rr, reread: rr, written: tout(cs)}; };
+const tmix = n => { const cs = ofTurn(n), s = k => cs.reduce((a, c) => a + (c.sent[k] || 0), 0);
+  return {setup: s('setup'), history: s('history'), new: s('new'), written: tout(cs)}; };
 const FIXBY = {}; D.fixes.forEach(f => FIXBY[f.id] = f);
 function stack(mix, scale){
-  const tot = mix.new + mix.reread; if (!tot) return '<div class="stack" style="width:2%"></div>';
-  return `<div class="stack" style="width:${Math.max(2, scale * 100)}%" title="sent ${K(tot)}: new text read ${K(mix.new)} · conversation re-sent ${K(mix.reread)} · then written ${K(mix.written)}">` +
-    [['s-new', mix.new], ['s-reread', mix.reread]].map(([c, v]) => v > 0 ? `<span class="${c}" style="width:${v / tot * 100}%"></span>` : '').join('') + '</div>';
+  const tot = mix.setup + mix.history + mix.new; if (!tot) return '<div class="stack" style="width:2%"></div>';
+  return `<div class="stack" style="width:${Math.max(2, scale * 100)}%" title="sent ${K(tot)}: fixed setup ${K(mix.setup)} · earlier conversation ${K(mix.history)} · new ${K(mix.new)}">` +
+    [['s-setup', mix.setup], ['s-reread', mix.history], ['s-new', mix.new]].map(([c, v]) => v > 0 ? `<span class="${c}" style="width:${v / tot * 100}%"></span>` : '').join('') + '</div>';
 }
 function turnRow(t, i){
   const cost = t.usd + t.helper_usd, sent = t.sent + t.helper_sent;
@@ -675,7 +723,7 @@ function turnRow(t, i){
   return `<div class="turn"><button type="button" aria-expanded="false" data-turn="${i}">
     <span class="no">${t.n ? '#' + t.n : '·'}</span>
     <span><span class="ask"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${esc(t.text)}</span>
-      <span class="meta"><span>${t.calls.length} call${t.calls.length === 1 ? '' : 's'}</span><span>${K(t.written)} written</span><span>${$$(cost)}</span><span>${mins(t.minutes)} working</span>${kind ? `<span>${kind}</span>` : ''}${t.waited_min >= 0.1 ? `<span>you replied after ${mins(t.waited_min)}</span>` : ''}</span>
+      <span class="meta"><span>${t.calls.length} call${t.calls.length === 1 ? '' : 's'}</span>${(m => `<span>${K(m.setup)} setup · ${K(m.history)} conversation · ${K(m.new)} new</span>`)(tmix(t.n))}<span>${K(t.written)} written</span><span>${$$(cost)}</span><span>${mins(t.minutes)} working</span>${kind ? `<span>${kind}</span>` : ''}${t.waited_min >= 0.1 ? `<span>you replied after ${mins(t.waited_min)}</span>` : ''}</span>
       ${chips ? `<span class="events" style="margin-top:4px">${chips}</span>` : ''}</span>
     <span class="mini">${stack(tmix(t.n), sent / maxTurn)}</span>
     <span class="cost num">${K(sent)}<small>sent · ${pct(sent, T.sent)} of all</small></span>
@@ -876,12 +924,38 @@ $('fixes').innerHTML = D.fixes.length ? D.fixes.map(f => `<div class="fix"><div 
   ${f.items.length ? `<details><summary>Details (${f.items.length})</summary><ul>${f.items.map(x => `<li>${md(x)}</li>`).join('')}</ul></details>` : ''}</div>`).join('')
   : '<p class="lede">None of the built-in checks fired: no unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</p>';
 
+/* ---------- deeper fixes: preview what would be shared; nothing is sent yet ---------- */
+(function deeper(){
+  const SUM = D.summary, btn = $('deeper-btn'), box = $('deeper-box');
+  if (!SUM){ $('deeper').hidden = true; return; }
+  const json = JSON.stringify(SUM, null, 2), kb = Math.max(1, Math.round(json.length / 1024));
+  const steps = SUM.calls.reduce((a, c) => a + c.steps.length, 0);
+  const codes = new Set(SUM.calls.flatMap(c => c.steps.map(s => s.target).filter(Boolean)));
+  box.innerHTML = `<div class="soon">Coming soon: deeper fixes from our catalog of measured patterns. Nothing has been sent: this is a preview of what would be shared.</div>
+    <b>What the summary holds</b>
+    <ul><li>For each of the ${SUM.calls.length} model calls: when it ran (seconds from the start), its model, and the tokens it sent (setup, earlier conversation, new) and wrote.</li>
+      <li>For each of the ${steps} tool steps: the tool's name, its size in tokens, whether it failed, and how long it took. Commands only by their program (like <code>git</code> or <code>python</code>) and yes/no flags (chained, waits, rewrites a file).</li>
+      <li>Files and commands only as codes (${codes.size} codes like <code>f1</code>, <code>c2</code>), new for every summary, so a file read twice shows as the same code without its name.</li>
+      <li>The size of the agent's setup, how many tools it defines and uses, your ${SUM.turns.length} turns' sizes and waits, and the basic fixes found.</li></ul>
+    <b>What it never holds</b>
+    <ul><li>Your messages or the agent's replies, code or file contents, command text, file or folder names, the project name, the session id, or clock times.</li></ul>
+    <details><summary>See the exact summary (${kb} KB)</summary><pre id="deeper-json"></pre>
+      <div class="row"><button type="button" class="btn" id="deeper-copy">Copy</button><span class="muted" id="deeper-copied" style="font-size:12px"></span></div></details>`;
+  $('deeper-json').textContent = json;
+  $('deeper-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(json); $('deeper-copied').textContent = 'Copied.'; }
+    catch (e) { $('deeper-copied').textContent = 'Could not copy here: select the text above instead.'; }
+  };
+  btn.onclick = () => { const open = box.hidden; box.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    btn.textContent = open ? 'Hide' : 'Find deeper fixes'; if (open) box.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'nearest'}); };
+})();
+
 /* ---------- setup ---------- */
 const S = D.setup;
-if (S.known){
-  $('setup-total').textContent = '~' + K(S.tokens) + ' tokens';
-  $('setup-lede').innerHTML = `Before you say a word, every call carries about <b>${K(S.tokens)}</b> tokens of the agent's own setup. After the first call it is mostly re-read from the cache: cheap per call, but never free.` +
-    (S.tools.length ? ` <b>${S.unused.length} of ${S.tools.length}</b> tool definitions (~${K(S.unused_tokens)} tokens) were never used in this session.` : '') + ' Sizes are estimates (characters ÷ 4).';
+if (S.measured && S.tokens){
+  $('setup-total').textContent = K(S.tokens) + ' tokens';
+  $('setup-lede').innerHTML = `Step 0: before you say a word, every call carries <b>${K(S.tokens)}</b> tokens of the agent's own setup, measured from the first call of this session. After the first call it is mostly re-read from the cache: cheap per call, but never free.` +
+    (S.tools.length ? ` <b>${S.unused.length} of ${S.tools.length}</b> tool definitions (~${K(S.unused_tokens)} tokens) were never used in this session.` : '') + (S.parts.length > 1 ? ' The split into parts is estimated from their text (characters ÷ 4).' : '');
   barList('setup-parts', [...S.parts].sort((a, b) => b.tokens - a.tokens).map(p => ({l: esc(p.what), v: p.tokens, s: '~' + K(p.tokens)})), '--c-setup');
   $('tools-sum').textContent = `Each tool definition (${S.tools.length}) and whether this session used it`;
   $('tools').innerHTML = S.tools.map(t => `<div class="${t.used ? '' : 'unused'}"><span>${esc(t.name)}${t.used ? '' : ' · never used'}</span><span class="num">~${K(t.tokens)}</span></div>`).join('');

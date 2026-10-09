@@ -11,9 +11,11 @@ import re
 
 from datetime import datetime
 
-from . import fixes as fixmod
+from . import fixes as fixmod, summary as summarymod
 from . import prices as pricemod
 from .model import Call, Session
+
+SAID = ("typed", "command", "queued", "answer")    # what you said, as opposed to what the agent added
 
 CATEGORIES = [
     ("start", "Start (first call)"),
@@ -128,10 +130,10 @@ def sent_parts(c: Call, r: dict, setup_tokens: int) -> list[dict]:
     new = u.new_input - s_new
     parts = []
     if setup_tokens and c.agent == "main":
-        parts.append({"what": "fixed setup (system prompt, tool definitions, lists)", "tokens": setup,
-                      "usd": (s_cr * cr_rate + s_new * new_rate) / 1e6, "estimated": True})
-    parts.append({"what": "carried history (re-read from cache)", "tokens": carried, "usd": carried * cr_rate / 1e6,
-                  "estimated": bool(setup_tokens and c.agent == "main")})
+        parts.append({"what": "fixed setup (instructions, tools, skills: step 0)", "tokens": setup,
+                      "usd": (s_cr * cr_rate + s_new * new_rate) / 1e6, "estimated": False})
+    parts.append({"what": "earlier conversation (re-read from cache)", "tokens": carried, "usd": carried * cr_rate / 1e6,
+                  "estimated": False})
     parts.append({"what": "new input (read for the first time)", "tokens": new, "usd": new * new_rate / 1e6,
                   "estimated": bool(s_new)})
     return parts
@@ -178,8 +180,18 @@ def money_label(exact: bool, as_of: str, subscription: bool, tokens_exact: bool 
 def analyse(s: Session, prices: dict, subscription: bool = False, engines: list | None = None) -> dict:
     P = Pricer(prices)
     subscription = subscription or not s.billed_per_token
-    setup_tokens = tok(s.setup.chars) if s.setup.known else 0
     main_calls = s.calls
+    # Step 0, the fixed setup: the first call has no history yet, so everything it sent except what you said is the
+    # agent's own setup (instructions, tools, skills, project rules). Measured this way it includes the parts the log
+    # does not spell out (Claude Code's built-in instructions), and it works for agents that log no setup at all.
+    setup_logged = tok(s.setup.chars) if s.setup.known else 0
+    setup_tokens = setup_logged
+    first = main_calls[0] if main_calls else None
+    if first is not None:
+        t0 = next((t for t in s.turns if first in t.calls), None)
+        said = sum(tok(e.chars) for e in (t0.events if t0 else [])
+                   if e.kind in SAID and (e.ts is None or first.ts_first is None or e.ts <= first.ts_first))
+        setup_tokens = max(first.usage.context - said, 0)     # measured; the text estimate only splits it
     first_id = main_calls[0].msg_id if main_calls else None
     last_id = main_calls[-1].msg_id if main_calls else None
 
@@ -191,6 +203,9 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         cc = pricemod.cost(c.usage, r)
         total = sum(cc.values())
         sp = sent_parts(c, r, setup_tokens)
+        sp_by = {"setup": sum(x["tokens"] for x in sp if x["what"].startswith("fixed setup")),
+                 "history": sum(x["tokens"] for x in sp if x["what"].startswith("earlier conversation")),
+                 "new": sum(x["tokens"] for x in sp if x["what"].startswith("new input"))}
         wp = written_parts(c, r)
         d = {
             "agent": c.agent, "n": c.n, "turn": c.turn, "model": c.model,
@@ -207,7 +222,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "context": c.usage.context,
             "cost_by_class": cc,
             "usd": total,
-            "sent": {"tokens": c.usage.context, "usd": sum(p["usd"] for p in sp), "parts": sp},
+            "sent": {"tokens": c.usage.context, "usd": sum(p["usd"] for p in sp), "parts": sp, **sp_by},
             "written": {"tokens": c.usage.output, "usd": sum(p["usd"] for p in wp), "parts": wp},
             "mix": {"written": cc["output"], "new": cc["input"] + cc["cache_write_5m"] + cc["cache_write_1h"],
                     "reread": cc["cache_read"]},
@@ -231,7 +246,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
                     keep = bool(e.ts and prev is not None and prev.ts_last and c.ts_first
                                 and prev.ts_last < e.ts <= c.ts_first)
                 if keep:
-                    said = e.kind in ("typed", "command", "queued", "answer")
+                    said = e.kind in SAID
                     items.append({"what": e.label + (f": “{e.text}”" if said else ""),
                                   "tokens": tok(e.chars)})
             by_obj[id(c)]["new_items"] = [x for x in items if x["tokens"]]
@@ -259,6 +274,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "usd": sum(d["usd"] for d in tc),
             "helper_usd": sum(by_obj[id(c)]["usd"] for c in s.helper_calls if c.turn == t.n),
             "sent": sum(d["sent"]["tokens"] for d in tc), "written": sum(d["written"]["tokens"] for d in tc),
+            "sent_by": {k: sum(d["sent"][k] for d in tc) for k in ("setup", "history", "new")},
             "helper_sent": sum(by_obj[id(c)]["sent"]["tokens"] for c in s.helper_calls if c.turn == t.n),
             "calls": [calls.index(d) for d in tc],
             "mix": {k: sum(d["mix"][k] for d in tc) for k in ("written", "new", "reread")},
@@ -282,8 +298,14 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
 
     # ---- setup
     used = {a.tool for a in s.actions()}
-    setup = {"known": s.setup.known, "tokens": setup_tokens,
-             "parts": [{"what": p.what, "tokens": tok(p.chars)} for p in s.setup.parts],
+    parts = [{"what": p.what, "tokens": tok(p.chars)} for p in s.setup.parts]
+    if setup_logged > setup_tokens and setup_logged:    # the text estimate ran over the measured size: scale it to fit
+        parts = [dict(x, tokens=round(x["tokens"] * setup_tokens / setup_logged)) for x in parts]
+    elif setup_tokens > setup_logged:
+        parts.append({"what": "the agent's built-in instructions and other start-up text (not spelled out in the log)",
+                      "tokens": setup_tokens - setup_logged})
+    setup = {"known": s.setup.known, "measured": first is not None, "tokens": setup_tokens, "logged": setup_logged,
+             "parts": parts,
              "tools": [{"name": p.what, "tokens": tok(p.chars),
                         "used": p.what in used} for p in s.setup.tools]}
     setup["unused"] = [t["name"] for t in setup["tools"] if not t["used"]]
@@ -340,6 +362,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "working_min": round(working, 1), "waiting_min": round(waiting / 60, 1),
             "context_max": max((d["context"] for d in calls if d["agent"] == "main"), default=0),
             "sent": sum(d["sent"]["tokens"] for d in calls),
+            "sent_by": {k: sum(d["sent"][k] for d in calls) for k in ("setup", "history", "new")},
             "output": sum(d["usage"]["output"] for d in calls), "thinking": thinking,
             "thinking_known": thinking_known,
             "by_class": by_class,
@@ -366,6 +389,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         for tr in turn_rows:
             if tr["n"] in f.turns:
                 tr["fixes"].append(f.id)
+    out["summary"] = summarymod.build(s, out)      # what a deeper-fix check would receive: no content (summary.py)
     return out
 
 

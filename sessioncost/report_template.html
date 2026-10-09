@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ · SessionCost</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* One column of panels: headline, turns (with drill-down), replay, where the cost went, fixes, fixed setup.
+   Every bar is HTML (label | track | value), so a value can never be clipped at the edge of its bar. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --raise:#f9fafb; --line:#e3e6eb; --grid:#eceef2;
+  --ink:#14171c; --ink-2:#454b56; --ink-3:#5d636e;
+  --c-write:#4a3aa7; --c-new:#1baf7a; --c-reread:#d99400; --c-setup:#8a93a3;
+  --accent:#2a78d6; --helper:#eb6834;
+  --chip-bg:#e3f1ff; --chip:#1c5cab; --warn-bg:#fdf0e3; --warn:#9a4d0b;
+  --focus:#2a78d6;
+  --f-body:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101216; --surface:#181b20; --raise:#1d2026; --line:#2a2e35; --grid:#22262c;
+  --ink:#f2f3f5; --ink-2:#cdd1d8; --ink-3:#a6acb7;
+  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381;
+  --accent:#5b9be8; --helper:#e2723f;
+  --chip-bg:#16273d; --chip:#9ec5f4; --warn-bg:#3a2a16; --warn:#f2bf86;
+  --focus:#86b6ef; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101216; --surface:#181b20; --raise:#1d2026; --line:#2a2e35; --grid:#22262c;
+  --ink:#f2f3f5; --ink-2:#cdd1d8; --ink-3:#a6acb7;
+  --c-write:#9085e9; --c-new:#1c9e70; --c-reread:#bf8610; --c-setup:#6b7381;
+  --accent:#5b9be8; --helper:#e2723f;
+  --chip-bg:#16273d; --chip:#9ec5f4; --warn-bg:#3a2a16; --warn:#f2bf86;
+  --focus:#86b6ef; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1600px;margin:0 auto;padding:24px clamp(16px,3vw,40px) 56px;display:grid;gap:20px}
+h1{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0;text-wrap:balance;overflow-wrap:anywhere}
+h2{font-size:18px;font-weight:600;letter-spacing:-.01em;margin:0}
+h3{font-size:14px;font-weight:600;margin:0}
+p{margin:0}
+code{font-family:var(--f-mono);font-size:.92em;overflow-wrap:anywhere}
+.sub{color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-3)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:grid;gap:14px;min-width:0}
+.panel-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px}
+.lede{color:var(--ink-2);max-width:none}
+.lede b{color:var(--ink)}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;background:var(--chip-bg);color:var(--chip);white-space:nowrap}
+.chip.warn{background:var(--warn-bg);color:var(--warn);white-space:normal}
+.kpis{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+@media (max-width:1200px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:520px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0;display:flex;flex-direction:column;gap:4px}
+.kpi .v{font-size:26px;white-space:nowrap;font-weight:700;line-height:1.15;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.kpi .s{color:var(--ink-2);font-size:13px}
+.kpi .eyebrow{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button.kpi{font:inherit;color:inherit;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+button.kpi:hover{border-color:var(--ink-3)}
+button.kpi:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+button.kpi[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+.kpi .more{font-size:12px;color:var(--accent);margin-top:auto;padding-top:6px;font-weight:600}
+.kpi .why{font-size:11.5px;color:var(--ink-3);line-height:1.35}
+.drill{display:grid;gap:14px}
+.drill h3{font-size:14px;margin:0 0 4px}
+.drill .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}
+.drill table.t{font-size:13px}
+.drill table.t td,.drill table.t th{padding:5px 0}
+.drill .btn{font-size:12px;padding:1px 8px}
+.drill{position:relative}
+.howto{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--ink-2);background:var(--raise);border:1px dashed var(--line);
+  border-radius:8px;padding:7px 10px;margin:2px 0 6px}
+.howto svg{flex:none;width:16px;height:16px;margin-top:2px;color:var(--accent)}
+.howto b{color:var(--ink);font-weight:600}
+/* the verdict: four plain-English cards above the numbers */
+.story{display:grid;gap:12px}
+.story .headline{font-size:20px;line-height:1.4;font-weight:500;max-width:none;margin:0;text-wrap:pretty}
+.story .headline b{font-weight:700}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.cards{grid-template-columns:1fr}}
+.card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:12px 14px;display:grid;gap:6px;align-content:start;min-width:0}
+.card.good{border-left-color:var(--c-new)} .card.warm{border-left-color:var(--c-reread)} .card.work{border-left-color:var(--c-write)}
+.card .say{font-size:15px;line-height:1.45;overflow-wrap:anywhere}
+.card .say b{font-weight:700}
+.card .act{justify-self:start;font-size:12.5px;color:var(--accent);background:none;border:0;padding:0;cursor:pointer;font-weight:600}
+.card .act:hover{text-decoration:underline}
+.split{display:flex;gap:2px;height:12px;border-radius:4px;overflow:hidden}
+.split i{display:block}
+.split-key{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;color:var(--ink-2)}
+.split-key span{display:inline-flex;align-items:center;gap:5px}
+.split-key b{width:9px;height:9px;border-radius:3px;display:inline-block}
+.turn.hit{border:2px solid var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+/* (?) next to a technical word: a small popup in plain words */
+.q{display:inline-grid;place-items:center;width:16px;height:16px;margin-left:5px;border-radius:50%;border:1.5px solid var(--ink-3);color:var(--ink-2);
+  font-size:10.5px;font-weight:700;line-height:1;cursor:help;vertical-align:1px;text-transform:none;letter-spacing:0;user-select:none;flex:none}
+.q:hover,.q:focus-visible,.q[aria-expanded="true"]{border-color:var(--accent);background:var(--accent);color:#fff;outline:none}
+.pop{position:fixed;z-index:50;max-width:min(340px,calc(100vw - 24px));background:var(--ink);color:var(--surface);border-radius:10px;padding:10px 12px;
+  font-size:13px;line-height:1.5;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+.pop b{display:block;margin-bottom:2px;font-size:13.5px}
+/* motion with a purpose; none of it when the computer asks for reduced motion */
+@media (prefers-reduced-motion:no-preference){
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}}
+  @keyframes grow{from{transform:scaleX(0)}}
+  @keyframes open{from{opacity:0;transform:translateY(-6px)}}
+  .story,.kpi,.card{animation:rise .5s cubic-bezier(.2,.7,.2,1) both}
+  .kpi:nth-child(2),.card:nth-child(2){animation-delay:.05s} .kpi:nth-child(3),.card:nth-child(3){animation-delay:.1s}
+  .kpi:nth-child(4),.card:nth-child(4){animation-delay:.15s} .kpi:nth-child(5){animation-delay:.2s} .kpi:nth-child(6){animation-delay:.25s} .kpi:nth-child(7){animation-delay:.3s}
+  .panel.reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s cubic-bezier(.2,.7,.2,1)}
+  .panel.reveal.in{opacity:1;transform:none}
+  .split i,.ch-t i,.wf-bar,.stack{transform-origin:left center;animation:grow .7s cubic-bezier(.2,.7,.2,1) both}
+  .panel.reveal:not(.in) .wf-bar,.panel.reveal:not(.in) .stack{animation-play-state:paused}
+  .drill:not([hidden]){animation:open .3s ease both}
+  .pop{animation:open .15s ease both}
+}
+.ch{display:grid;gap:4px}
+.ch-row{display:grid;grid-template-columns:minmax(0,15rem) minmax(80px,1fr) 7rem;gap:10px;align-items:center;font-size:13px;
+  background:none;border:0;padding:3px 4px;margin:0 -4px;border-radius:6px;text-align:left;color:inherit;font:inherit;width:calc(100% + 8px)}
+button.ch-row{cursor:pointer}
+button.ch-row:hover{background:var(--raise)}
+.ch-row.sum{border-top:1.5px solid var(--line);margin-top:4px;padding-top:7px;font-weight:600}
+.ch-l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
+.ch-row.sum .ch-l{color:var(--ink)}
+.ch-t{display:flex;gap:2px;height:16px;align-items:stretch}
+.ch-t i{display:block;min-width:2px;border-radius:2px}
+.ch-t i:last-child{border-radius:2px 4px 4px 2px}
+.ch-v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ch-v small{color:var(--ink-3);font-size:11.5px;margin-left:4px}
+.ch-key{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--ink-2);margin:2px 0 6px}
+.ch-key span{display:inline-flex;align-items:center;gap:6px}
+.ch-key b{display:inline-block;width:10px;height:10px;border-radius:3px}
+.ch-tip{position:absolute;z-index:6;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12px;line-height:1.45;
+  padding:7px 10px;border-radius:8px;max-width:260px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.nums summary{font-size:12px;color:var(--ink-2);margin-top:6px}
+@media (max-width:560px){.ch-row{grid-template-columns:minmax(0,1fr) 6rem}.ch-t{grid-column:1 / -1;grid-row:2}}
+.kpi .kfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink-2)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* stacked mini bar */
+.stack{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--grid);min-width:0}
+.stack span{display:block;height:100%}
+.s-write{background:var(--c-write)} .s-new{background:var(--c-new)} .s-reread{background:var(--c-reread)} .s-setup{background:var(--c-setup)}
+
+/* bar lists: label | track | value (the value has its own column, so it is never clipped) */
+.bars{display:grid;gap:7px}
+.bar{display:grid;grid-template-columns:minmax(0,15rem) minmax(40px,1fr) auto;gap:10px;align-items:center;font-size:13px}
+.bar .t{height:12px;border-radius:0 3px 3px 0;background:var(--grid);overflow:hidden}
+.bar .t span{display:block;height:100%;background:var(--accent);border-radius:0 3px 3px 0}
+.bar .v{text-align:right;white-space:nowrap}
+.bar .l{overflow-wrap:anywhere}
+@media (max-width:560px){.bar{grid-template-columns:minmax(0,1fr) auto;row-gap:3px}.bar .t{grid-column:1 / -1;grid-row:2}}
+
+/* turns */
+.turns{display:grid;gap:8px}
+.turn{border:1px solid var(--line);border-radius:8px;background:var(--surface);min-width:0}
+.turn > button{all:unset;box-sizing:border-box;cursor:pointer;width:100%;display:grid;grid-template-columns:2.4rem minmax(0,1fr) minmax(90px,30%) 5.8rem;gap:12px;align-items:center;padding:10px 12px;border-radius:8px}
+.turn > button:hover{background:var(--raise)}
+.turn > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.turn .no{color:var(--ink-3);font-size:13px;font-variant-numeric:tabular-nums}
+.turn .ask{font-weight:500;overflow-wrap:anywhere}
+.turn .meta{font-size:13px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:2px}
+.turn .cost{text-align:right;font-weight:600}
+.turn .cost small{display:block;font-weight:400;color:var(--ink-3);font-size:11px}
+.turn[data-open="1"]{border-color:var(--accent)}
+/* the open/close control on each turn and call: a visible button, chevron turns down when open */
+.caret{display:inline-grid;place-items:center;width:22px;height:22px;margin-right:9px;vertical-align:-5px;border:1.5px solid var(--ink-3);
+  border-radius:6px;background:var(--surface);color:var(--ink)}
+.caret svg{width:12px;height:12px;display:block}
+button:hover .caret{border-color:var(--accent);color:var(--accent)}
+[aria-expanded="true"] > span > .ask > .caret,[aria-expanded="true"] .what > .caret{background:var(--accent);border-color:var(--accent);color:#fff}
+[aria-expanded="true"] > span > .ask > .caret svg,[aria-expanded="true"] .what > .caret svg{transform:rotate(90deg)}
+@media (max-width:640px){.turn > button{grid-template-columns:1.8rem minmax(0,1fr) 5rem}.turn .mini{grid-column:2 / -1;grid-row:2}}
+.drill{padding:0 12px 12px;display:grid;gap:10px}
+.sumline{font-size:12px;color:var(--ink-2);background:var(--raise);border-radius:6px;padding:7px 10px;overflow-wrap:anywhere}
+.calls{display:grid;gap:4px}
+.call{border:1px solid var(--grid);border-radius:6px;min-width:0}
+.call > button{all:unset;box-sizing:border-box;cursor:pointer;width:100%;display:grid;grid-template-columns:minmax(0,1fr) 5.4rem;gap:10px;padding:7px 10px;align-items:center}
+.call > button:hover{background:var(--raise)}
+.call > button:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+/* the call you jumped to: a clear box that stays until you jump to another one */
+.call.hit{border:2px solid var(--accent);background:var(--chip-bg);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent);position:relative}
+.call.hit::before{content:"You jumped here";position:absolute;top:-10px;right:10px;background:var(--accent);color:#fff;font-size:11px;font-weight:600;
+  padding:1px 8px;border-radius:999px;letter-spacing:.02em}
+@media (prefers-reduced-motion:no-preference){.call.hit{animation:hit 1.2s ease 2}}
+@keyframes hit{50%{box-shadow:0 0 0 9px color-mix(in srgb,var(--accent) 10%,transparent)}}
+.call .what{font-size:13px;overflow-wrap:anywhere}
+.call .tag{font-size:11px;color:var(--ink-3)}
+.call .c{text-align:right;font-size:13px}
+.parts{padding:4px 10px 12px;display:grid;gap:10px}
+.parts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+table.t{width:100%;border-collapse:collapse;font-size:12px}
+table.t td,table.t th{padding:4px 0;border-bottom:1px solid var(--grid);vertical-align:top;text-align:left;overflow-wrap:anywhere}
+table.t th{font-weight:600;color:var(--ink-2)}
+table.t td.n,table.t th.n{text-align:right;white-space:nowrap;padding-left:10px}
+table.t tr.sum td{border-bottom:0;border-top:1.5px solid var(--ink-3);font-weight:600}
+.est{color:var(--ink-3);font-size:11px}
+.events{display:flex;flex-wrap:wrap;gap:4px 6px}
+.ev{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2);overflow-wrap:anywhere}
+.ev.you{border-color:var(--accent);color:var(--ink)}
+
+/* replay */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--raise);border-radius:7px;padding:5px 11px;cursor:pointer;font-size:13px;min-width:38px}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--ink);color:var(--surface);border-color:var(--ink);min-width:76px}
+input[type=range]{flex:1 1 160px;accent-color:var(--accent);min-width:120px}
+.timeline{display:flex;align-items:flex-end;gap:2px;height:96px;padding-top:6px;border-bottom:1px solid var(--line)}
+.timeline span{flex:1 1 0;min-width:2px;background:var(--c-setup);border-radius:2px 2px 0 0;opacity:.4;cursor:pointer}
+.timeline span.done{opacity:1;background:var(--accent)}
+.timeline span.helper.done{background:var(--helper)}
+.timeline span.cur{outline:2px solid var(--ink);outline-offset:1px;opacity:1}
+.turnstrip{display:flex;gap:2px;margin-top:4px}
+.turnstrip button{flex:1 1 0;min-width:0;border:0;border-top:3px solid var(--line);background:none;padding:4px 2px 0;font:inherit;font-size:12px;
+  color:var(--ink-3);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.turnstrip button:hover{color:var(--ink);border-top-color:var(--ink-3)}
+.turnstrip button.on{color:var(--ink);font-weight:600;border-top-color:var(--accent)}
+.turnstrip button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.wf-calls{margin-top:10px;border:1px solid var(--line);border-radius:8px;background:var(--raise);padding:10px 12px;overflow-x:auto}
+.wf-calls .head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.wf-calls table{width:100%;border-collapse:collapse;font-size:13px}
+.wf-calls th,.wf-calls td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--grid);vertical-align:top}
+.wf-calls th{font-weight:600;color:var(--ink-2);font-size:12px}
+.wf-calls td.r,.wf-calls th.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.wf-calls .btn{font-size:12px;padding:2px 8px}
+@media (max-width:560px){.wf-calls .hide-s{display:none}}
+.timeline.picked span:not(.pick){opacity:.12}
+.timeline.picked span.pick{opacity:1;background:var(--ink)}
+/* waterfall: each kind of step starts where the one before it ended; the last bar is the whole session */
+.wf{position:relative;display:grid;gap:2px}
+.wf-row{display:grid;grid-template-columns:minmax(0,11rem) minmax(60px,1fr) 9rem;gap:10px;align-items:center;font-size:13px;
+  background:none;border:0;padding:3px 0;margin:0;color:inherit;font:inherit;text-align:left;cursor:pointer;border-radius:6px}
+.wf-row:hover .wf-bar,.wf-row:focus-visible .wf-bar{filter:brightness(1.12)}
+.wf-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wf-row[aria-pressed="true"] .wf-l{font-weight:600}
+.wf-row.total{cursor:default}
+.wf-l{text-align:right;color:var(--ink-2);overflow-wrap:anywhere}
+.wf-row.total .wf-l{color:var(--ink);font-weight:600}
+.wf-track{position:relative;height:18px;background:linear-gradient(to right,var(--grid) 1px,transparent 1px) 0 0/25% 100%}
+.wf-bar{position:absolute;top:0;bottom:0;background:var(--accent);border-radius:4px;min-width:2px}
+.wf-row.total .wf-bar{background:var(--ink-2)}
+.wf-v{font-size:13px;color:var(--ink);white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.25}
+.wf-v small{display:block;color:var(--ink-3);font-size:11.5px}
+.wf-axis{display:grid;grid-template-columns:minmax(0,11rem) minmax(60px,1fr) 9rem;gap:10px;font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.wf-axis .ticks{position:relative;height:14px}
+.wf-axis .ticks span{position:absolute;transform:translateX(-50%)}
+.wf-axis .ticks span:first-child{transform:none}
+.wf-axis .ticks span:last-child{transform:translateX(-100%)}
+.wf-tip{position:absolute;z-index:5;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12px;line-height:1.45;
+  padding:7px 10px;border-radius:8px;max-width:240px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.wf-tip b{display:block}
+.wf-tip i{opacity:.75}
+@media (max-width:560px){.wf-row,.wf-axis{grid-template-columns:minmax(0,1fr) 8rem}.wf-l{text-align:left;grid-column:1}.wf-v{grid-column:2;grid-row:1;text-align:right}
+  .wf-track{grid-column:1 / -1;grid-row:2}.wf-axis>span:first-child,.wf-axis>span:last-child{display:none}.wf-axis .ticks{grid-column:1 / -1}}
+.meters{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.meter{display:grid;gap:5px}
+.meter .big{font-size:24px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.track{height:12px;border-radius:3px;background:var(--grid);overflow:hidden}
+.track span{display:block;height:100%;background:var(--accent);width:0}
+.track.ctx span{background:var(--c-reread)}
+.now{background:var(--raise);border-radius:8px;padding:10px 12px;min-height:64px;overflow-wrap:anywhere}
+@media (prefers-reduced-motion:no-preference){.track span{transition:width .35s ease}.timeline span{transition:opacity .2s}.caret svg{transition:transform .15s}}
+
+/* fixes, setup, footer */
+.fixes{display:grid;gap:10px}
+.fix{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:6px;background:var(--raise)}
+.fix .top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:baseline}
+.fix ul{margin:4px 0 0;padding-left:18px;color:var(--ink-2);font-size:12px}
+details summary{cursor:pointer;color:var(--ink-2);font-size:12px}
+.foot{color:var(--ink-2);font-size:13px;display:grid;gap:10px;max-width:none}
+.foot h2{font-size:15px;color:var(--ink)}
+.foot .about{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
+.foot .about div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.foot .about b{display:block;color:var(--ink);margin-bottom:3px}
+.foot .about p{margin:0 0 4px}
+.foot b{color:var(--ink-2)}
+.tools{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px;font-size:12px}
+.tools div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--grid);padding:3px 0}
+.tools .unused{color:var(--ink-3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="eyebrow">SessionCost</div>
+    <h1 id="title"></h1>
+    <p class="sub" id="subtitle"></p>
+  </header>
+
+  <section class="story" id="story" aria-label="The short version"></section>
+  <div class="pop" id="pop" role="tooltip" hidden></div>
+  <section class="kpis" id="kpis" aria-label="Headline numbers: click one to see what it is made of"></section>
+  <section class="panel drill" id="drill" aria-live="polite" hidden></section>
+
+  <section class="panel" aria-labelledby="h-turns" id="turns-panel">
+    <div class="panel-head"><h2 id="h-turns">Turn by turn</h2>
+      <span class="legend"><span><span class="sw s-write"></span>written by the model</span><span><span class="sw s-new"></span>new text read</span><span><span class="sw s-reread"></span>re-read from cache</span></span></div>
+    <p class="lede">Each row is one thing you asked. Click a row to open its model calls, then click a call to see what it sent and what it wrote. The parts always add up to the number above them.</p>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> one row per message you sent. The colored bar is its cost: longer means more expensive, and the colors show what the money paid for (purple: the AI writing, green: new text read, amber: re-reading the conversation). Click a row to see the model calls behind it.</span></div>
+    <div class="turns" id="turns"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-replay" id="replay-panel">
+    <div class="panel-head"><h2 id="h-replay">Replay</h2><span class="eyebrow" id="replay-count"></span></div>
+    <p class="lede">Walk the session call by call. The cost meter climbs; the second bar shows how much text was sent with each call (the agent's memory at that moment).</p>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> press <b>Play</b> or drag the slider. Each bar is one model call, in time order; taller means it cost more, and blue bars have already happened. The strip under the bars shows which of your messages each call belongs to; click a turn to jump there. The two meters show the money spent so far and how much text this call sent and wrote.</span></div>
+    <div class="controls">
+      <button class="btn" id="r-first" type="button" aria-label="Back to the start">&#x23EE;</button>
+      <button class="btn" id="r-prev" type="button" aria-label="One call back">&#x25C0;</button>
+      <button class="btn primary" id="r-play" type="button">Play</button>
+      <button class="btn" id="r-next" type="button" aria-label="One call forward">&#x25B6;</button>
+      <button class="btn" id="r-last" type="button" aria-label="To the end">&#x23ED;</button>
+      <input type="range" id="r-pos" min="0" value="0" aria-label="Position in the session">
+    </div>
+    <div class="timeline" id="timeline" aria-hidden="true"></div>
+    <div class="turnstrip" id="turnstrip" role="group" aria-label="Jump to a turn"></div>
+    <div class="meters">
+      <div class="meter"><span class="eyebrow">Cost so far</span><span class="big num" id="m-cost"></span><div class="track"><span id="m-cost-bar"></span></div></div>
+      <div class="meter"><span class="eyebrow">Tokens in / out for this call</span><span class="big num" id="m-ctx"></span><div class="track ctx"><span id="m-ctx-bar"></span></div></div>
+    </div>
+    <div class="now" id="now" aria-live="polite"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-where">
+    <div class="panel-head"><h2 id="h-where">Where the cost went</h2></div>
+    <p class="lede" id="where-lede"></p>
+    <div class="eyebrow">By kind of step, adding up to the whole session</div>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> each bar is one kind of work the AI did, biggest first. Every bar starts where the one above it ended, so they step to the right and finish at the dark bar, the whole session. A longer bar means more money; the numbers on the right are its cost and tokens. Hover a bar for details, click it to list its calls.</span></div>
+    <div class="wf" id="by-step" role="group" aria-label="Cost by kind of step, as a waterfall"></div>
+    <div class="wf-calls" id="wf-calls" hidden></div>
+    <div class="eyebrow">By kind of token</div>
+    <div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> each bar is one kind of token (text) the AI paid for. A longer bar means more of the cost; the right side shows how much and its share.</span></div>
+    <div class="bars" id="by-class"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-fix" id="fix-panel">
+    <div class="panel-head"><h2 id="h-fix">What to fix</h2><span class="eyebrow">savings measured from this session</span></div>
+    <p class="lede">Each saving is what those tokens or calls cost in this session, priced like the rest of this page. Fixes can overlap.</p>
+    <div class="fixes" id="fixes"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-setup">
+    <div class="panel-head"><h2 id="h-setup">Sent with every call</h2><span class="eyebrow num" id="setup-total"></span></div>
+    <p class="lede" id="setup-lede"></p>
+    <div class="bars" id="setup-parts"></div>
+    <details id="tools-box"><summary id="tools-sum"></summary><div class="tools" id="tools" style="margin-top:8px"></div></details>
+  </section>
+
+  <section class="panel" aria-labelledby="h-helpers" id="helpers-panel" hidden>
+    <div class="panel-head"><h2 id="h-helpers">Helpers</h2><span class="eyebrow num" id="helpers-total"></span></div>
+    <p class="lede">Helpers (subagents) work in their own chat with their own memory. Their cost is included in the total.</p>
+    <div class="bars" id="helpers"></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function(){
+const D = JSON.parse(document.getElementById('data').textContent);
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+const K = n => { n = +n || 0; const a = Math.abs(n); return a >= 1e6 ? (n/1e6).toFixed(2)+'M' : a >= 1e4 ? (n/1e3).toFixed(0)+'K' : a >= 1e3 ? (n/1e3).toFixed(1)+'K' : Math.round(n)+''; };
+const N = n => Math.round(+n || 0).toLocaleString('en-US');
+const $$ = (x, d) => { x = +x || 0; if (d != null) return '$' + x.toFixed(d); if (x === 0) return '$0'; if (x >= 100) return '$' + x.toFixed(0); if (x >= 1) return '$' + x.toFixed(2); if (x >= 0.01) return '$' + x.toFixed(3); return '$' + x.toFixed(4); };
+const pct = (a, b) => { if (!b || !a) return '0%'; const v = a / b * 100; return v > 0 && v < .5 ? '<1%' : Math.round(v) + '%'; };
+const mins = m => { m = +m || 0; if (m >= 60) return Math.floor(m/60) + 'h ' + String(Math.round(m%60)).padStart(2,'0') + 'm'; return (m >= 10 ? m.toFixed(0) : m.toFixed(1)) + ' min'; };
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const T = D.totals, M = D.meta, MO = D.money, C = D.calls;
+const CATS = {start:'Start (first call)',questions:'Asking you questions',talk:'Talking to you',reading:'Reading and searching',commands:'Running commands',writing:'Writing files',research:'Research and helpers',other:'Other steps',closing:'Closing message'};
+const catLabel = k => CATS[k] || k;
+const tin = cs => cs.reduce((a, c) => a + c.context, 0), tout = cs => cs.reduce((a, c) => a + c.usage.output, 0);
+const io_ = cs => `${K(tin(cs))} in · ${K(tout(cs))} out`;
+const who = c => c.agent === 'main' ? 'Call ' + c.n : 'Helper ' + c.agent.split(':').pop().slice(0,6) + ', call ' + c.n;
+
+/* ---------- header ---------- */
+$('eyebrow').textContent = 'SessionCost · ' + M.agent_label + (M.date ? ' · ' + M.date : '');
+$('title').textContent = M.title;
+$('subtitle').textContent = [M.project && ('project ' + M.project), M.models.join(', '), M.agent_label + (M.agent_version ? ' ' + M.agent_version : ''), 'session ' + M.session_id.slice(0, 8)].filter(Boolean).join(' · ');
+/* plain-words explanations behind each (?) */
+const GLOSS = {
+  tokens: ['Tokens', 'The pieces of text the AI reads and writes: about three quarters of a word each. AI is priced per token.'],
+  turn: ['Turn', 'One message you sent, and everything the AI did to answer it.'],
+  call: ['Model call', 'The AI asked once and answering once. To finish one of your messages it often makes many calls: read a file, run a command, think, reply.'],
+  reread: ['Re-read from cache', 'Every call sends the whole conversation again. What was sent a moment ago is re-read from a cache: about ten times cheaper per token, but it repeats on every call, so it adds up.'],
+  new: ['New text read', 'Text the AI reads for the first time in a call: your message, file contents, command output. Full price.'],
+  out: ['Written by the model', 'Everything the AI wrote: replies to you, code and files, and its hidden thinking. The most expensive kind per token.'],
+  helper: ['Helper', 'A second AI the agent starts for part of the job, like a reviewer or a researcher. Its calls cost money too.'],
+  setup: ['Fixed setup', 'Instructions the agent sends with every call before you say a word: its rules, the list of its tools, its skills.'],
+  estimate: ['Estimate', 'Something here could not be confirmed (a price, or the token counts), so the total is our best estimate. The line under the cost says what.'],
+  exact: ['Exact', 'Every token is counted in the log and every price is confirmed: this is what these tokens cost at the public prices on that date.'],
+  apieq: ['API-equivalent', 'You pay a fixed plan, not per token. This is what the same work would cost at the public pay-per-use prices.'],
+  working: ['Agent working', 'Time from each of your messages to the AI\'s last step on it, added up. Model time is the AI reading and writing; tool time is commands, searches and file reads running.'],
+  waiting: ['Waiting for you', 'Time the AI sat stopped until you answered. It costs nothing, but the work stood still.'],
+  savings: ['Potential savings', 'What this session would have cost less with each fix, measured from its own calls, not guessed.'],
+};
+const q = k => `<span class="q" role="button" tabindex="0" data-help="${k}" aria-label="What is ${esc(GLOSS[k][0])}?">?</span>`;
+(function popups(){
+  const pop = $('pop');
+  let at = null;
+  const close = () => { pop.hidden = true; if (at) at.setAttribute('aria-expanded', 'false'); at = null; };
+  const open = el => {
+    if (at === el) return close();
+    close();
+    const [title, text] = GLOSS[el.dataset.help] || ['', ''];
+    pop.innerHTML = `<b>${esc(title)}</b>${esc(text)}`;
+    pop.hidden = false; at = el; el.setAttribute('aria-expanded', 'true');
+    const r = el.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = Math.max(12, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 12)) + 'px';
+    pop.style.top = (r.bottom + 8 + h > innerHeight ? r.top - h - 8 : r.bottom + 8) + 'px';
+  };
+  document.addEventListener('click', e => { const el = e.target.closest('.q'); if (el){ e.preventDefault(); e.stopPropagation(); open(el); } else if (!e.target.closest('#pop')) close(); }, true);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') return close();
+    const el = e.target.closest && e.target.closest('.q');
+    if (el && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); e.stopPropagation(); open(el); }
+  }, true);
+  addEventListener('scroll', close, {passive: true});
+})();
+const SAVE = D.fixes.reduce((a, f) => a + f.saving_usd, 0);
+const ENGINE = (D.fix_engines || []).some(n => n !== 'built-in');
+const kp = [
+  ['Total cost', $$(T.usd), `<span class="chip ${MO.exact || MO.subscription ? '' : 'warn'}">${esc(MO.short)}</span>`, '',
+   '', 'total'],
+  ['Turns', T.turns, `message${T.turns === 1 ? '' : 's'} you sent`, '', '', 'turns'],
+  ['Tokens', K(tin(C) + tout(C)), `${K(tin(C))} in · ${K(tout(C))} out`,
+   (() => { const rr = T.by_class.find(c => c.key === 'cache_read'); return rr && tin(C) ? `<span class="chip">${pct(rr.tokens, tin(C))} re-read</span>` : ''; })(), '', 'tokens'],
+  ['Model calls', T.calls + T.helper_calls, T.helper_calls ? `${T.calls} main · ${T.helper_calls} by helpers` : 'all in the main chat',
+   T.turns ? `<span class="chip">${((T.calls + T.helper_calls) / T.turns).toFixed(1).replace(/\.0$/, '')} per message</span>` : '', '', 'calls'],
+  ['Agent working', mins(T.working_min), 'summed over turns', '', '', 'working'],
+  ['Waiting for you', mins(T.waiting_min), 'until you replied', '', '', 'waiting'],
+  ['Potential savings', $$(SAVE), `${D.fixes.length} fix${D.fixes.length === 1 ? '' : 'es'} · ${pct(SAVE, T.usd)} of cost`,
+   ENGINE ? '' : '<span class="chip warn">basic fixes only</span>', '<div class="why">measured from this session</div>', 'savings'],
+];
+const TQ = {total: MO.subscription ? 'apieq' : MO.exact ? 'exact' : 'estimate', turns: 'turn', tokens: 'tokens', calls: 'call', working: 'working', waiting: 'waiting', savings: 'savings'};
+$('kpis').innerHTML = kp.map(([l, v, s, chip, extra, key]) => `<button type="button" class="kpi" data-drill="${key}" aria-expanded="false" aria-controls="drill">` +
+  `<div class="eyebrow">${l}${q(TQ[key])}</div><div class="v num">${v}</div><div class="kfoot"><span class="s">${s}</span>${chip || ''}</div>${extra || ''}` +
+  `<div class="more">${key === 'turns' ? 'Go to the turns ↓' : 'What is in it ▾'}</div></button>`).join('');
+
+/* ---------- the verdict: what happened, in plain words ---------- */
+function openTurn(n){
+  const ti = D.turns.findIndex(t => t.n === n);
+  const tb = document.querySelector(`button[data-turn="${ti}"]`);
+  if (!tb) return;
+  if (tb.getAttribute('aria-expanded') !== 'true') tb.click();
+  document.querySelectorAll('.turn.hit,.call.hit').forEach(x => x.classList.remove('hit'));
+  const box = tb.closest('.turn'); void box.offsetWidth; box.classList.add('hit');
+  tb.scrollIntoView({block: 'center', behavior: reduce ? 'auto' : 'smooth'});
+}
+(function story(){
+  const tc = n => C.filter(c => c.turn === n).reduce((a, c) => a + c.usd, 0);
+  const real = D.turns.filter(t => t.n);
+  const top = real.map(t => ({t, u: tc(t.n)})).sort((a, b) => b.u - a.u)[0];
+  const cls = k => (T.by_class.filter(c => (k === 'new' ? ['input', 'cache_write_5m', 'cache_write_1h'] : [k]).includes(c.key)).reduce((a, c) => a + c.usd, 0));
+  const parts = [['new text read', cls('new'), 'var(--c-new)', 'new'], ['re-reading the conversation', cls('cache_read'), 'var(--c-reread)', 'reread'], ['writing', cls('output'), 'var(--c-write)', 'out']];
+  const big = [...parts].sort((a, b) => b[1] - a[1])[0];
+  const per = T.turns ? (C.length / T.turns) : C.length;
+  const fix = D.fixes[0];
+  const short = s => s.length > 70 ? s.slice(0, 69) + '…' : s;
+  const label = MO.subscription ? 'would have cost' : 'cost';
+  $('story').innerHTML = `<p class="headline">This ${esc(M.agent_label)} session ${label} <b>${$$(T.usd)}</b>${MO.subscription ? ' at pay-per-use prices' : ''}${MO.exact ? '' : ' (an estimate)'}
+      for <b>${T.turns} message${T.turns === 1 ? '' : 's'}</b> from you and <b>${mins(T.working_min)}</b> of work.
+      ${big[1] ? `Most of the money went to <b>${big[0]}</b>${q(big[3])}.` : ''}</p>
+    <div class="cards">
+      ${top ? `<div class="card warm"><div class="eyebrow">Most expensive message</div>
+        <div class="say">“${esc(short(top.t.text))}” cost <b>${$$(top.u)}</b>, ${pct(top.u, T.usd)} of the session.</div>
+        <button type="button" class="act" data-turn-go="${top.t.n}">Show me this message →</button></div>` : ''}
+      <div class="card"><div class="eyebrow">Where the money went</div>
+        <div class="split">${parts.filter(x => x[1] > 0).map(x => `<i style="flex:${x[1]};background:${x[2]}" title="${x[0]}: ${$$(x[1])}"></i>`).join('')}</div>
+        <div class="split-key">${parts.filter(x => x[1] > 0).map(x => `<span><b style="background:${x[2]}"></b>${pct(x[1], T.usd)} ${x[0]}${q(x[3])}</span>`).join('')}</div></div>
+      <div class="card work"><div class="eyebrow">How hard it worked</div>
+        <div class="say">It made <b>${C.length} model calls</b>${q('call')}, about <b>${per.toFixed(per >= 10 ? 0 : 1)} per message</b>${T.helper_calls ? `, ${T.helper_calls} of them by helpers${q('helper')}` : ''}, over ${mins(T.working_min)}.</div>
+        <button type="button" class="act" data-drill-go="calls">See every call →</button></div>
+      <div class="card good"><div class="eyebrow">Easiest saving</div>
+        ${fix ? `<div class="say"><b>${esc(fix.title)}</b>: saves <b>${$$(fix.saving_usd)}</b> (${pct(fix.saving_usd, T.usd)}) on a session like this.</div>
+        <button type="button" class="act" data-go="fix-panel">How to fix it →</button>` : '<div class="say">Nothing obvious to cut: none of the checks fired.</div>'}</div>
+    </div>`;
+  $('story').onclick = e => {
+    const a = e.target.closest('[data-turn-go]'); if (a) return openTurn(+a.dataset.turnGo);
+    const d = e.target.closest('[data-drill-go]'); if (d) return document.querySelector(`button.kpi[data-drill="${d.dataset.drillGo}"]`).click();
+    const g = e.target.closest('[data-go]'); if (g) $(g.dataset.go).scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+  };
+})();
+
+/* numbers count up once, so the eye lands on them; plain text when motion is reduced */
+if (!reduce) document.querySelectorAll('.kpi .v').forEach(el => {
+  const m = el.textContent.match(/^([^\d]*)([\d.,]+)(.*)$/);
+  if (!m) return;
+  const end = parseFloat(m[2].replace(/,/g, '')), dec = (m[2].split('.')[1] || '').length, t0 = performance.now();
+  const step = now => { const k = Math.min(1, (now - t0) / 800), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = m[1] + (end * e).toFixed(dec) + m[3]; if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+});
+
+/* ---------- tile drill-downs: each one explains its number, and its parts add up to it ---------- */
+const turnName = n => n ? `#${n} ${esc((D.turns.find(t => t.n === n) || {text: ''}).text.slice(0, 48))}${((D.turns.find(t => t.n === n) || {text: ''}).text.length > 48) ? '…' : ''}` : 'before your first message';
+function tbl(head, rows, sum){
+  const cell = (v, i) => `<td${i ? ' class="n"' : ''}>${v}</td>`;
+  return `<table class="t"><thead><tr>${head.map((h, i) => `<th${i ? ' class="n"' : ''}>${h}</th>`).join('')}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${r.map(cell).join('')}</tr>`).join('') +
+    (sum ? `<tr class="sum">${sum.map(cell).join('')}</tr>` : '') + '</tbody></table>';
+}
+const ofTurn = n => C.filter(c => c.turn === n);
+const turnNs = [...new Set([...D.turns.map(t => t.n), ...C.map(c => c.turn)])].sort((a, b) => a - b).filter(n => ofTurn(n).length || n);
+/* charts for the drill-downs: HTML bars (label | bar | value), one hover tip per panel, numbers one click away */
+const COL = {new: 'var(--c-new)', reread: 'var(--c-reread)', out: 'var(--c-write)', setup: 'var(--c-setup)', main: 'var(--accent)', helper: 'var(--helper)'};
+const KQ = {'new input': 'new', 'new in': 'new', 're-read from cache': 'reread', 're-read': 'reread', 'written by the model': 'out', 'out': 'out',
+  'fixed setup': 'setup', 'helpers': 'helper', 'main chat': 'call'};
+const key = items => `<div class="ch-key">${items.map(([name, col]) => `<span><b style="background:${col}"></b>${name}${KQ[name] ? q(KQ[name]) : ''}</span>`).join('')}</div>`;
+/* rows: {label, segs: [{v, col, tip}], value, sub, open} — bars share one scale (the largest row) */
+function chart(rows, opts = {}){
+  const max = Math.max(...rows.map(r => r.segs.reduce((a, s) => a + s.v, 0)), 1e-9);
+  return `<div class="ch">` + rows.map(r => {
+    const tot = r.segs.reduce((a, s) => a + s.v, 0);
+    const segs = r.segs.filter(s => s.v > 0).map(s => `<i style="flex:0 0 ${s.v / max * 100}%;background:${s.col}" data-tip="${esc(s.tip || '')}"></i>`).join('');
+    const tag = r.open != null ? 'button' : 'div';
+    return `<${tag} ${tag === 'button' ? `type="button" data-open-call="${r.open}" ` : ''}class="ch-row${r.sum ? ' sum' : ''}" title="${esc(r.title || r.label)}">` +
+      `<span class="ch-l">${r.html || esc(r.label)}</span><span class="ch-t" ${tot ? '' : 'aria-hidden="true"'}>${segs}</span>` +
+      `<span class="ch-v">${r.value}${r.sub ? `<small>${r.sub}</small>` : ''}</span></${tag}>`;
+  }).join('') + `</div>`;
+}
+const nums = html => `<details class="nums"><summary>Show the numbers</summary>${html}</details>`;
+const HOW = {"total": "the top bar is the whole cost, split by kind of token; the bars below show each kind and each of your messages. Longer means more money.", "tokens": "each row is one of your messages; its bar is split into new text read (green), re-read (amber) and written (purple). Longer means more text.", "calls": "each row is one of your messages; the bar counts its model calls, blue in the main chat and orange by helpers. On the right, the costliest single calls.", "working": "each row is one of your messages; the bar is its working time, blue while the AI read and wrote, grey while tools (commands, searches) ran.", "waiting": "each row is a message where the AI stopped and waited: blue before you wrote, orange while a question card was open. Longer means a longer wait.", "savings": "each bar is one fix; its length is what it would have saved on this session. The last row is the total."};
+const howto = k => `<div class="howto"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg><span><b>How to read:</b> ${HOW[k]}</span></div>`;
+const tname = n => n ? `#${n} ${(D.turns.find(t => t.n === n) || {text: ''}).text}` : 'before your first message';
+const DRILL = {
+  total(){
+    const cls = T.by_class.filter(c => c.tokens);
+    const ccol = k => k === 'cache_read' ? COL.reread : k === 'output' ? COL.out : COL.new;
+    const turns = turnNs.map(n => { const cs = ofTurn(n); return {n, cs, u: cs.reduce((a, c) => a + c.usd, 0)}; });
+    return `<p class="lede"><b>${$$(T.usd)}</b> · ${esc(MO.short)}. ${esc(MO.why)}</p><div class="grid2">
+      <div><h3>By kind of token</h3>${key([['new input', COL.new], ['re-read from cache', COL.reread], ['written by the model', COL.out]])}
+        ${chart([{label: 'Whole session', segs: cls.map(c => ({v: c.usd, col: ccol(c.key), tip: `${c.label}: ${$$(c.usd)} (${pct(c.usd, T.usd)}) · ${K(c.tokens)} tokens`})), value: $$(T.usd)}])}
+        ${chart(cls.map(c => ({label: c.label, segs: [{v: c.usd, col: ccol(c.key), tip: `${c.label}: ${$$(c.usd)} · ${K(c.tokens)} tokens`}], value: $$(c.usd), sub: pct(c.usd, T.usd)})))}
+        ${nums(tbl(['Kind', 'Tokens', 'Cost', 'Share'], cls.map(c => [esc(c.label), K(c.tokens), $$(c.usd), pct(c.usd, T.usd)]),
+          ['Total', K(cls.reduce((a, c) => a + c.tokens, 0)), $$(cls.reduce((a, c) => a + c.usd, 0)), '100%']))}</div>
+      <div><h3>By turn</h3>${chart([...turns.map(x => ({label: tname(x.n), segs: [{v: x.u, col: COL.main, tip: `${tname(x.n).slice(0, 60)}: ${$$(x.u)} · ${x.cs.length} calls`}], value: $$(x.u), sub: pct(x.u, T.usd)})),
+          {label: 'Total', sum: true, segs: [], value: $$(T.usd), sub: '100%'}])}
+        ${nums(tbl(['Turn', 'Calls', 'Cost', 'Share'], turns.map(x => [esc(tname(x.n).slice(0, 60)), x.cs.length, $$(x.u), pct(x.u, T.usd)]),
+          ['Total', C.length, $$(T.usd), '100%']))}</div></div>`;
+  },
+  tokens(){
+    const I = tin(C), RR = C.reduce((a, c) => a + c.usage.cache_read, 0), O = tout(C);
+    const setupRe = C.reduce((a, c) => { const p = c.sent.parts.find(x => x.what.startsWith('fixed setup')); return a + (p ? Math.min(p.tokens, c.usage.cache_read) : 0); }, 0);
+    const rows = turnNs.map(n => { const cs = ofTurn(n), i = tin(cs), r = cs.reduce((a, c) => a + c.usage.cache_read, 0), o = tout(cs); return {n, i, r, o}; });
+    return `<p class="lede"><b>${K(I + O)}</b> tokens: <b>${K(I)}</b> sent in (${K(RR)} of it re-read from the cache, ${pct(RR, I)}) and <b>${K(O)}</b> written out.
+      Every call re-sends the whole conversation so far; the cache makes that cheap per token, but it is most of the volume.</p><div class="grid2">
+      <div><h3>Per turn</h3>${key([['new in', COL.new], ['re-read', COL.reread], ['out', COL.out]])}
+        ${chart([...rows.map(x => ({label: tname(x.n), segs: [
+            {v: x.i - x.r, col: COL.new, tip: `new in: ${K(x.i - x.r)}`}, {v: x.r, col: COL.reread, tip: `re-read: ${K(x.r)}`}, {v: x.o, col: COL.out, tip: `out: ${K(x.o)}`}],
+            value: K(x.i + x.o)})), {label: 'Total', sum: true, segs: [], value: K(I + O)}])}
+        ${nums(tbl(['Turn', 'New in', 'Re-read', 'Out', 'Total'], rows.map(x => [esc(tname(x.n).slice(0, 60)), K(x.i - x.r), K(x.r), K(x.o), K(x.i + x.o)]),
+          ['Total', K(I - RR), K(RR), K(O), K(I + O)]))}</div>
+      <div><h3>What the ${pct(RR, I)} re-read is</h3>${key([['fixed setup', COL.setup], ['earlier conversation', COL.reread]])}
+        ${chart([{label: 'Re-read in all', segs: [{v: setupRe, col: COL.setup, tip: `fixed setup: ${K(setupRe)} (${pct(setupRe, RR)})`}, {v: RR - setupRe, col: COL.reread, tip: `earlier conversation: ${K(RR - setupRe)} (${pct(RR - setupRe, RR)})`}], value: K(RR)},
+          {label: D.setup.known ? 'Fixed setup' : 'Fixed setup (not logged)', segs: [{v: setupRe, col: COL.setup, tip: 'system prompt, tool definitions, lists: sent with every call'}], value: K(setupRe), sub: pct(setupRe, RR)},
+          {label: 'Earlier conversation', segs: [{v: RR - setupRe, col: COL.reread, tip: 'everything said and read earlier in the chat'}], value: K(RR - setupRe), sub: pct(RR - setupRe, RR)}])}
+        <p class="muted" style="font-size:12px">Fixed setup: the agent's system prompt, tool definitions and lists, sent with every call. Earlier conversation: everything said and read before this call. ${D.setup.known ? 'The setup size is estimated from its text (characters ÷ 4); the rest is exact.' : 'This agent does not log its setup, so all of it shows as earlier conversation.'}</p></div></div>`;
+  },
+  calls(){
+    const main = C.filter(c => c.agent === 'main'), helpers = D.helpers.filter(h => h.calls);
+    const top = C.map((c, i) => ({c, i})).sort((a, b) => b.c.usd - a.c.usd).slice(0, 10);
+    const per = turnNs.map(n => { const cs = ofTurn(n), m = cs.filter(c => c.agent === 'main').length; return {n, m, h: cs.length - m}; });
+    return `<p class="lede"><b>${C.length}</b> model calls: ${main.length} in the main chat${helpers.length ? `, ${C.length - main.length} by ${helpers.length} helper${helpers.length === 1 ? '' : 's'}` : ''}. Each call re-sends the conversation, so fewer, fuller calls cost less.</p><div class="grid2">
+      <div><h3>Calls per turn</h3>${key([['main chat', COL.main], ['helpers', COL.helper]])}
+        ${chart([...per.map(x => ({label: tname(x.n), segs: [{v: x.m, col: COL.main, tip: `main chat: ${x.m} calls`}, {v: x.h, col: COL.helper, tip: `helpers: ${x.h} calls`}], value: x.m + x.h})),
+          {label: 'Total', sum: true, segs: [], value: C.length}])}
+        ${nums(tbl(['Who', 'Calls', 'Cost'], [['Main chat', main.length, $$(main.reduce((a, c) => a + c.usd, 0))], ...helpers.map(h => [esc(h.description || h.type), h.calls, $$(h.usd)])],
+          ['Total', C.length, $$(T.usd)]) + tbl(['Turn', 'Main', 'Helpers', 'All'], per.map(x => [esc(tname(x.n).slice(0, 60)), x.m, x.h, x.m + x.h]), ['Total', main.length, C.length - main.length, C.length]))}</div>
+      <div><h3>The 10 costliest calls</h3><p class="muted" style="font-size:12px;margin:0 0 4px">Click a main-chat call to open it.</p>
+        ${chart(top.map(({c, i}) => ({label: `${who(c)} · turn ${c.turn || '·'} · ${c.label.replace(/`/g, '')}`, html: `${esc(who(c))} <span class="muted">· ${md(c.label)}</span>`,
+          segs: [{v: c.usd, col: c.agent === 'main' ? COL.main : COL.helper, tip: `${who(c)}: ${$$(c.usd)} · ${K(c.context)} in · ${K(c.usage.output)} out`}],
+          value: $$(c.usd), open: c.agent === 'main' ? i : null})))}</div></div>`;
+  },
+  working(){
+    const rows = D.turns.filter(t => t.n || t.calls.length).map(t => {
+      const tool = Math.min(t.minutes, ofTurn(t.n).reduce((a, c) => a + c.actions.reduce((b, x) => b + (x.secs || 0), 0), 0) / 60);
+      return {t, tool, model: Math.max(0, t.minutes - tool)}; });
+    const acts = C.flatMap(c => c.actions.filter(a => a.secs != null).map(a => ({a, c}))).sort((x, y) => y.a.secs - x.a.secs).slice(0, 10);
+    const sum = k => rows.reduce((a, r) => a + r[k], 0);
+    const dur = s => s >= 60 ? mins(s / 60) : s.toFixed(1) + ' s';
+    return `<p class="lede"><b>${mins(T.working_min)}</b> of the agent working: from each message of yours to its last step, summed over turns. Tool time runs from a tool starting to its result; the rest is the model reading and writing.</p><div class="grid2">
+      <div><h3>Per turn</h3>${key([['model and other', COL.main], ['tools', COL.setup]])}
+        ${chart([...rows.map(r => ({label: tname(r.t.n), segs: [{v: r.model, col: COL.main, tip: `model and other: ${mins(r.model)}`}, {v: r.tool, col: COL.setup, tip: `tools: ${mins(r.tool)}`}], value: mins(r.t.minutes)})),
+          {label: 'Total', sum: true, segs: [], value: mins(T.working_min)}])}
+        ${nums(tbl(['Turn', 'Working', 'Model and other', 'Tools'], rows.map(r => [esc(tname(r.t.n).slice(0, 60)), mins(r.t.minutes), mins(r.model), mins(r.tool)]),
+          ['Total', mins(T.working_min), mins(sum('model')), mins(sum('tool'))]))}</div>
+      <div><h3>Slowest tool steps</h3>${acts.length ? chart(acts.map(({a, c}) => ({label: a.label.replace(/`/g, ''), html: md(a.label),
+          segs: [{v: a.secs, col: COL.setup, tip: `turn ${c.turn || '·'}: ${dur(a.secs)}`}], value: dur(a.secs), sub: 'turn ' + (c.turn || '·')}))) :
+        '<p class="muted">This log does not time tool steps.</p>'}</div></div>`;
+  },
+  waiting(){
+    const rows = D.turns.filter(t => t.waited_min >= 0.05 || t.question_wait_min >= 0.05);
+    const w = rows.reduce((a, t) => a + t.waited_min, 0), q = rows.reduce((a, t) => a + t.question_wait_min, 0);
+    return `<p class="lede"><b>${mins(T.waiting_min)}</b> with the agent stopped, waiting for you: before each new message, and while a question card was open. It costs no tokens, but the work stood still.</p>
+      ${rows.length ? key([['before your message', COL.main], ['on a question card', COL.helper]]) +
+        chart([...rows.map(t => ({label: tname(t.n), segs: [{v: t.waited_min, col: COL.main, tip: `before your message: ${mins(t.waited_min)}`}, {v: t.question_wait_min, col: COL.helper, tip: `on a question card: ${mins(t.question_wait_min)}`}], value: mins(t.waited_min + t.question_wait_min)})),
+          {label: 'Total', sum: true, segs: [], value: mins(w + q)}]) +
+        nums(tbl(['Turn', 'Before your message', 'On a question card', 'Waited'], rows.map(t => [esc(tname(t.n).slice(0, 60)), mins(t.waited_min), mins(t.question_wait_min), mins(t.waited_min + t.question_wait_min)]),
+          ['Total', mins(w), mins(q), mins(w + q)])) : '<p class="muted">The agent never waited for you.</p>'}`;
+  },
+  savings(){
+    const fx = [...D.fixes].sort((a, b) => b.saving_usd - a.saving_usd);
+    return `<p class="lede"><b>${$$(SAVE)}</b> (${pct(SAVE, T.usd)} of the cost) from ${fx.length} fix${fx.length === 1 ? '' : 'es'}, each measured from this session's own calls. ${ENGINE ? 'Found by the built-in checks and the connected fix engine.' : 'Basic fixes only: the three built-in checks. More checks come from the optional fix engine.'} Fixes can overlap, so the total is an upper bound.</p>
+      ${fx.length ? chart([...fx.map(f => ({label: f.title, segs: [{v: f.saving_usd, col: COL.new, tip: `${f.title}: saves ${$$(f.saving_usd)} · ${K(f.saving_tokens)} tokens · ${f.where}`}], value: $$(f.saving_usd), sub: pct(f.saving_usd, T.usd)})),
+          {label: 'Total', sum: true, segs: [], value: $$(SAVE), sub: pct(SAVE, T.usd)}]) +
+        nums(tbl(['Fix', 'Where', 'Tokens', 'Saves', 'Share'], fx.map(f => [`<b>${esc(f.title)}</b><br><span class="muted">${esc(f.why)}</span>`, esc(f.where), K(f.saving_tokens), $$(f.saving_usd), pct(f.saving_usd, T.usd)]),
+          ['Total', '', K(fx.reduce((a, f) => a + f.saving_tokens, 0)), $$(SAVE), pct(SAVE, T.usd)])) :
+        '<p class="muted">None of the checks fired for this session.</p>'}
+      <div><button type="button" class="btn" data-go="fix-panel">See the fixes in detail ↓</button></div>`;
+  },
+};
+let openDrill = null;
+$('kpis').onclick = e => {
+  if (e.target.closest('.q')) return;
+  const b = e.target.closest('button[data-drill]');
+  if (!b) return;
+  const key = b.dataset.drill, box = $('drill');
+  document.querySelectorAll('button.kpi').forEach(x => x.setAttribute('aria-expanded', 'false'));
+  if (key === 'turns'){ box.hidden = true; openDrill = null; $('turns-panel').scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'}); return; }
+  if (openDrill === key){ box.hidden = true; openDrill = null; return; }
+  openDrill = key;
+  b.setAttribute('aria-expanded', 'true');
+  box.innerHTML = `<div class="panel-head"><h2>${esc(b.querySelector('.eyebrow').textContent.replace(/\?$/, ''))}: what is in it</h2><button type="button" class="btn" data-close>Close</button></div>` + howto(key) + DRILL[key]();
+  box.hidden = false;
+  box.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'nearest'});
+};
+$('drill').addEventListener('pointermove', e => {
+  const s = e.target.closest('[data-tip]'), box = $('drill');
+  let tip = box.querySelector('.ch-tip');
+  if (!s || !s.dataset.tip){ if (tip) tip.hidden = true; return; }
+  if (!tip){ tip = document.createElement('div'); tip.className = 'ch-tip'; box.appendChild(tip); }
+  tip.textContent = s.dataset.tip; tip.hidden = false;
+  const b = box.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(0, e.clientX - b.left + 12), b.width - tip.offsetWidth - 4) + 'px';
+  tip.style.top = (e.clientY - b.top + 14) + 'px';
+});
+$('drill').addEventListener('pointerleave', () => { const tip = $('drill').querySelector('.ch-tip'); if (tip) tip.hidden = true; });
+$('drill').onclick = e => {
+  if (e.target.closest('[data-close]')){ $('drill').hidden = true; openDrill = null; document.querySelectorAll('button.kpi').forEach(x => x.setAttribute('aria-expanded', 'false')); return; }
+  const g = e.target.closest('[data-go]'); if (g){ $(g.dataset.go).scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'}); return; }
+  const o = e.target.closest('[data-open-call]'); if (o) openCall(+o.dataset.openCall);
+};
+
+if (!reduce && 'IntersectionObserver' in window){
+  const seen = new IntersectionObserver(es => es.forEach(x => { if (x.isIntersecting){ x.target.classList.add('in'); seen.unobserve(x.target); } }), {threshold: .08});
+  document.querySelectorAll('section.panel:not(.drill)').forEach(s => { s.classList.add('reveal'); seen.observe(s); });
+}
+
+/* ---------- turns + drill-down ---------- */
+const maxTurn = Math.max(...D.turns.map(t => t.usd + t.helper_usd), 1e-9);
+const FIXBY = {}; D.fixes.forEach(f => FIXBY[f.id] = f);
+function stack(mix, scale){
+  const tot = mix.written + mix.new + mix.reread; if (!tot) return '<div class="stack" style="width:2%"></div>';
+  return `<div class="stack" style="width:${Math.max(2, scale * 100)}%" title="written ${$$(mix.written)} · new text read ${$$(mix.new)} · re-read ${$$(mix.reread)}">` +
+    [['s-write', mix.written], ['s-new', mix.new], ['s-reread', mix.reread]].map(([c, v]) => v > 0 ? `<span class="${c}" style="width:${v / tot * 100}%"></span>` : '').join('') + '</div>';
+}
+function turnRow(t, i){
+  const cost = t.usd + t.helper_usd;
+  const chips = t.fixes.filter(id => FIXBY[id]).map(id => `<span class="chip warn">fixable: ${esc(FIXBY[id].title.toLowerCase())}</span>`).join(' ');
+  const kind = {command:'a command', queued:'typed while it worked', start:'before your first message'}[t.kind] || '';
+  return `<div class="turn"><button type="button" aria-expanded="false" data-turn="${i}">
+    <span class="no">${t.n ? '#' + t.n : '·'}</span>
+    <span><span class="ask"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${esc(t.text)}</span>
+      <span class="meta"><span>${t.calls.length} call${t.calls.length === 1 ? '' : 's'}</span><span>${io_(C.filter(c => c.turn === t.n))} tokens</span><span>${mins(t.minutes)} working</span>${kind ? `<span>${kind}</span>` : ''}${t.waited_min >= 0.1 ? `<span>you replied after ${mins(t.waited_min)}</span>` : ''}</span>
+      ${chips ? `<span class="events" style="margin-top:4px">${chips}</span>` : ''}</span>
+    <span class="mini">${stack(t.mix, cost / maxTurn)}</span>
+    <span class="cost num">${$$(cost)}<small>${pct(cost, T.usd)} of total</small></span>
+  </button><div class="drill" hidden></div></div>`;
+}
+$('turns').innerHTML = D.turns.map(turnRow).join('');
+function turnDrill(t){
+  const cs = t.calls.map(i => C[i]);
+  const evs = t.events.map(e => `<span class="ev ${['typed','command','queued','answer'].includes(e.kind) ? 'you' : ''}" title="${esc(e.text)}">${esc(e.label)}${e.kind === 'answer' && e.text ? ': “' + esc(e.text.slice(0, 60)) + '”' : ''}${e.tokens ? ' · ~' + K(e.tokens) : ''}</span>`).join('');
+  let sum = cs.length <= 6 ? cs.map(c => $$(c.usd, 4)).join(' + ') + ' = <b>' + $$(t.usd, 4) + '</b>'
+                           : `${cs.length} calls (each listed below) add up to <b>${$$(t.usd, 4)}</b>`;
+  if (t.helper_usd) sum += ` · plus helpers started in this turn ${$$(t.helper_usd, 4)} = <b>${$$(t.usd + t.helper_usd, 4)}</b>`;
+  return `${evs ? `<div><div class="eyebrow" style="margin-bottom:4px">What came in this turn (~ tokens)</div><div class="events">${evs}</div></div>` : ''}
+    <div class="sumline num">${sum}</div>
+    <div class="calls">${t.calls.map(i => { const c = C[i]; return `<div class="call"><button type="button" aria-expanded="false" data-call="${i}">
+      <span><span class="what"><span class="caret" aria-hidden="true"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></span>${md(c.label)}</span><br><span class="tag">${who(c)} · ${c.time} · ${esc(catLabel(c.category))} · sent ${K(c.context)}, wrote ${K(c.usage.output)} tokens</span></span>
+      <span class="c num">${$$(c.usd, 4)}</span></button><div class="parts" hidden></div></div>`; }).join('')}</div>`;
+}
+function partsTable(title, block, unit){
+  const rows = block.parts.map(p => `<tr><td>${esc(p.what)}${p.estimated ? ' <span class="est">~ estimated split</span>' : ''}</td><td class="n num">${N(p.tokens)}</td><td class="n num">${$$(p.usd, 4)}</td></tr>`).join('');
+  return `<table class="t"><thead><tr><th>${title}</th><th class="n">tokens</th><th class="n">cost</th></tr></thead><tbody>${rows}
+    <tr class="sum"><td>= ${unit}</td><td class="n num">${N(block.tokens)}</td><td class="n num">${$$(block.usd, 4)}</td></tr></tbody></table>`;
+}
+function callDrill(c){
+  const u = c.usage, cc = c.cost_by_class;
+  const items = c.new_items.length ? `<details><summary>Where the new input came from (${c.new_items.length})</summary><table class="t">${c.new_items.map(x => `<tr><td>${md(x.what)}</td><td class="n num">~${N(x.tokens)}</td></tr>`).join('')}</table></details>` : '';
+  const acts = c.actions.length ? `<details><summary>Actions in this call (${c.actions.length})</summary><table class="t">${c.actions.map(a => `<tr><td>${md(a.label)}${a.error ? ' <span class="chip warn">error</span>' : ''}</td><td class="n num">${a.result_tokens ? '~' + N(a.result_tokens) + ' came back' : ''}</td></tr>`).join('')}</table></details>` : '';
+  const think = u.thinking == null ? '<p class="est">This log does not separate hidden thinking from the rest of the output, so it is estimated.</p>' : '';
+  return `<div class="parts-grid">${partsTable('What it sent', c.sent, 'sent this call')}${partsTable('What it wrote', c.written, 'written this call')}</div>
+    <div class="sumline num">sent ${$$(c.sent.usd, 4)} + written ${$$(c.written.usd, 4)} = <b>${$$(c.usd, 4)}</b> for this call · ${esc(c.model)}</div>
+    <details><summary>Exact token counts from the log</summary><table class="t">
+      <tr><td>new input, not cached</td><td class="n num">${N(u.input)}</td><td class="n num">${$$(cc.input, 4)}</td></tr>
+      <tr><td>new input, cached for 5 minutes</td><td class="n num">${N(u.cache_write_5m)}</td><td class="n num">${$$(cc.cache_write_5m, 4)}</td></tr>
+      <tr><td>new input, cached for 1 hour</td><td class="n num">${N(u.cache_write_1h)}</td><td class="n num">${$$(cc.cache_write_1h, 4)}</td></tr>
+      <tr><td>re-read from cache</td><td class="n num">${N(u.cache_read)}</td><td class="n num">${$$(cc.cache_read, 4)}</td></tr>
+      <tr><td>written${u.thinking != null ? ' (of which ' + N(u.thinking) + ' hidden thinking)' : ''}</td><td class="n num">${N(u.output)}</td><td class="n num">${$$(cc.output, 4)}</td></tr>
+      <tr class="sum"><td>= this call</td><td class="n num">${N(c.context + u.output)}</td><td class="n num">${$$(c.usd, 4)}</td></tr></table></details>
+    ${items}${acts}${think}`;
+}
+function toggle(btn, box, fill){
+  const open = btn.getAttribute('aria-expanded') !== 'true';
+  btn.setAttribute('aria-expanded', String(open));
+  if (open && !box.dataset.done){ box.innerHTML = fill(); box.dataset.done = '1'; }
+  box.hidden = !open;
+  return open;
+}
+$('turns').addEventListener('click', e => {
+  const cb = e.target.closest('button[data-call]');
+  if (cb){ toggle(cb, cb.nextElementSibling, () => callDrill(C[+cb.dataset.call])); return; }
+  const tb = e.target.closest('button[data-turn]');
+  if (tb){ const open = toggle(tb, tb.nextElementSibling, () => turnDrill(D.turns[+tb.dataset.turn])); tb.parentElement.dataset.open = open ? '1' : '0'; }
+});
+function openCall(i){
+  const ti = D.turns.findIndex(t => t.calls.includes(i));
+  if (ti < 0) return;
+  const tb = document.querySelector(`button[data-turn="${ti}"]`);
+  if (tb.getAttribute('aria-expanded') !== 'true') tb.click();
+  const cb = document.querySelector(`button[data-call="${i}"]`);
+  if (!cb) return;
+  if (cb.getAttribute('aria-expanded') !== 'true') cb.click();
+  document.querySelectorAll('.call.hit').forEach(x => x.classList.remove('hit'));
+  const box = cb.closest('.call');
+  void box.offsetWidth;            /* restart the pulse when the same call is opened again */
+  box.classList.add('hit');
+  cb.scrollIntoView({block: 'center', behavior: reduce ? 'auto' : 'smooth'});
+  cb.focus({preventScroll: true});
+}
+
+/* ---------- replay ---------- */
+const R = D.replay, maxCtx = Math.max(...C.map(c => c.context), 1), maxCall = Math.max(...C.map(c => c.usd), 1e-9);
+let pos = 0, timer = null;
+$('r-pos').max = Math.max(0, R.length - 1);
+$('timeline').innerHTML = R.map((r, i) => { const c = C[r.call]; return `<span data-i="${i}" class="${c.agent === 'main' ? '' : 'helper'}" style="height:${Math.max(3, c.usd / maxCall * 100)}%" title="${esc(who(c))}: ${$$(c.usd)}"></span>`; }).join('');
+const ticks = [...$('timeline').children];
+const TURNS = D.turns.filter(t => t.n).map(t => ({t, steps: R.map((r, i) => C[r.call].turn === t.n ? i : -1).filter(i => i >= 0)})).filter(x => x.steps.length);
+/* the strip follows the bars exactly: one segment per run of consecutive steps in the same turn */
+const RUNS = [];
+R.forEach((r, i) => { const n = C[r.call].turn, last = RUNS[RUNS.length - 1];
+  if (last && last.n === n) last.len++; else RUNS.push({n, start: i, len: 1}); });
+const seen = new Set();
+$('turnstrip').innerHTML = RUNS.map((x, k) => {
+  const t = D.turns.find(t => t.n === x.n), first = !seen.has(x.n); seen.add(x.n);
+  const name = x.n ? (first ? (x.len / R.length > .06 ? 'Turn ' : 'T') + x.n : '') : '';
+  const about = x.n ? `Turn ${x.n}: ${esc((t ? t.text : '').slice(0, 80))}` : 'Before your first message';
+  return `<button type="button" data-k="${k}" style="flex-grow:${x.len}" title="${about} (${x.len} call${x.len === 1 ? '' : 's'} here)" aria-label="${about}, ${x.len} calls">${name}</button>`;
+}).join('');
+const strip = [...$('turnstrip').children];
+$('turnstrip').onclick = e => { const b = e.target.closest('button[data-k]'); if (b){ stop(); show(RUNS[+b.dataset.k].start); } };
+function show(i){
+  if (!R.length){ $('now').textContent = 'No model calls in this log.'; return; }
+  pos = Math.max(0, Math.min(R.length - 1, i));
+  const r = R[pos], c = C[r.call];
+  ticks.forEach((b, j) => { b.classList.toggle('done', j <= pos); b.classList.toggle('cur', j === pos); });
+  $('r-pos').value = pos;
+  const k = TURNS.findIndex(x => x.steps.includes(pos));
+  const cur = C[R[pos].call].turn;
+  strip.forEach((b, j) => b.classList.toggle('on', RUNS[j].n === cur));
+  $('replay-count').textContent = `step ${pos + 1} of ${R.length}` + (k >= 0 ? ` · turn ${TURNS[k].t.n} of ${TURNS.length}` : '');
+  $('m-cost').textContent = $$(r.cum_usd) + ' of ' + $$(T.usd);
+  $('m-cost-bar').style.width = (T.usd ? r.cum_usd / T.usd * 100 : 0) + '%';
+  $('m-ctx').textContent = `${K(c.context)} in · ${K(c.usage.output)} out`;
+  $('m-ctx-bar').style.width = (c.context / maxCtx * 100) + '%';
+  const t = D.turns.find(t => t.n === c.turn);
+  $('now').innerHTML = `<div class="eyebrow">${who(c)} · ${c.time}${t && t.n ? ' · turn ' + t.n : ''} · ${esc(catLabel(c.category))} · this call ${$$(c.usd)}</div>
+    <div style="margin-top:4px">${c.agent === 'main' ? 'The agent' : 'A helper'} ${md(c.label)}.</div>
+    ${t && t.n ? `<div class="muted" style="font-size:12px;margin-top:2px">You had asked: “${esc(t.text.slice(0, 140))}${t.text.length > 140 ? '…' : ''}”</div>` : ''}
+    ${c.agent === 'main' ? `<button type="button" class="btn" style="margin-top:6px;font-size:12px" data-open-call="${r.call}">Open this call</button>` : ''}`;
+}
+function stop(){ if (timer){ clearInterval(timer); timer = null; } $('r-play').textContent = 'Play'; }
+function play(){
+  if (timer) return stop();
+  if (pos >= R.length - 1) show(0);
+  $('r-play').textContent = 'Pause';
+  timer = setInterval(() => { if (pos >= R.length - 1) stop(); else show(pos + 1); }, reduce ? 1200 : 650);
+}
+$('r-play').onclick = play;
+$('r-prev').onclick = () => { stop(); show(pos - 1); };
+$('r-next').onclick = () => { stop(); show(pos + 1); };
+$('r-first').onclick = () => { stop(); show(0); };
+$('r-last').onclick = () => { stop(); show(R.length - 1); };
+$('r-pos').oninput = e => { stop(); show(+e.target.value); };
+$('timeline').onclick = e => { const s = e.target.closest('span[data-i]'); if (s){ stop(); show(+s.dataset.i); } };
+$('now').onclick = e => { const b = e.target.closest('[data-open-call]'); if (b){ stop(); openCall(+b.dataset.openCall); } };
+show(0);
+if (!reduce && 'IntersectionObserver' in window && R.length > 1){   /* no autoplay when reduced motion is asked for */
+  const io = new IntersectionObserver(es => { if (es.some(x => x.isIntersecting)){ io.disconnect(); play(); } }, {threshold: .5});
+  io.observe($('replay-panel'));
+}
+
+/* ---------- where the cost went ---------- */
+function barList(host, rows, color){
+  const max = Math.max(...rows.map(r => r.v), 1e-9);
+  $(host).innerHTML = rows.map(r => `<div class="bar"><span class="l">${r.l}</span><span class="t"><span style="width:${Math.max(.5, r.v / max * 100)}%;${r.c || color ? 'background:var(' + (r.c || color) + ')' : ''}"></span></span><span class="v num">${r.s}</span></div>`).join('');
+}
+const steps = [...T.by_step].sort((a, b) => b.usd - a.usd);
+(function waterfall(){
+  const host = $('by-step'), total = Math.max(T.usd, 1e-9);
+  let at = 0;
+  const rows = steps.map(s => { const r = {...s, from: at}; at += s.usd; return r; });
+  const bar = (from, v) => `<span class="wf-track"><span class="wf-bar" style="left:${from / total * 100}%;width:${Math.max(v / total * 100, .4)}%"></span></span>`;
+  host.innerHTML = rows.map((r, i) => `<button type="button" class="wf-row" data-i="${i}" aria-pressed="false"
+      aria-label="${esc(r.label)}: ${$$(r.usd)}, ${pct(r.usd, total)} of the session, ${r.calls} call${r.calls === 1 ? '' : 's'}. Press to highlight these calls in the replay.">
+      <span class="wf-l">${esc(r.label)}</span>${bar(r.from, r.usd)}<span class="wf-v">${$$(r.usd)}<small>${io_(C.filter(c => c.category === r.key))}</small></span></button>`).join('') +
+    `<div class="wf-row total"><span class="wf-l">Whole session</span>${bar(0, T.usd)}<span class="wf-v">${$$(T.usd)}<small>${io_(C)}</small></span></div>` +
+    `<div class="wf-axis" aria-hidden="true"><span></span><span class="ticks">${[0, .25, .5, .75, 1].map(f => `<span style="left:${f * 100}%">${$$(total * f)}</span>`).join('')}</span><span></span></div>` +
+    `<div class="wf-tip" hidden></div>`;
+  const tip = host.querySelector('.wf-tip');
+  const box = $('wf-calls');
+  function listCalls(r){
+    if (!r){ box.hidden = true; box.innerHTML = ''; return; }
+    const cs = C.map((c, i) => ({c, i})).filter(x => x.c.category === r.key).sort((a, b) => b.c.usd - a.c.usd);
+    const top = cs.slice(0, 40);
+    box.innerHTML = `<div class="head"><b>${esc(r.label)}: ${cs.length} call${cs.length === 1 ? '' : 's'} · ${$$(r.usd)} · ${io_(cs.map(x => x.c))} tokens</b>
+        <span class="muted" style="font-size:12px">costliest first · also marked in the replay</span></div>
+      <table><thead><tr><th>Call</th><th class="hide-s">Turn</th><th>What it did</th><th class="r">In</th><th class="r">Out</th><th class="r">Cost</th><th></th></tr></thead><tbody>` +
+      top.map(({c, i}) => `<tr><td style="white-space:nowrap">${esc(who(c))}</td><td class="hide-s">${c.turn || '·'}</td><td>${md(c.label)}</td>
+        <td class="r">${K(c.context)}</td><td class="r">${K(c.usage.output)}</td><td class="r">${$$(c.usd)}</td>
+        <td>${c.agent === 'main' ? `<button type="button" class="btn" data-open-call="${i}">Open</button>` : ''}</td></tr>`).join('') +
+      `</tbody></table>${cs.length > top.length ? `<div class="muted" style="font-size:12px;margin-top:6px">and ${cs.length - top.length} smaller calls</div>` : ''}`;
+    box.hidden = false;
+  }
+  box.onclick = e => { const b = e.target.closest('[data-open-call]'); if (b) openCall(+b.dataset.openCall); };
+  const show = (btn, x, y) => {
+    const r = rows[+btn.dataset.i];
+    tip.innerHTML = `<b>${esc(r.label)}</b>${$$(r.usd)} · ${pct(r.usd, total)} of the session<br>${r.calls} call${r.calls === 1 ? '' : 's'} · ${io_(C.filter(c => c.category === r.key))} tokens<br><i>click to see these calls</i>`;
+    tip.hidden = false;
+    const hb = host.getBoundingClientRect(), w = tip.offsetWidth;
+    tip.style.left = Math.min(Math.max(0, x - hb.left + 12), hb.width - w) + 'px';
+    tip.style.top = (y - hb.top + 14) + 'px';
+  };
+  host.querySelectorAll('button.wf-row').forEach(btn => {
+    btn.addEventListener('pointermove', e => show(btn, e.clientX, e.clientY));
+    btn.addEventListener('pointerleave', () => tip.hidden = true);
+    btn.addEventListener('focus', () => { const b = btn.querySelector('.wf-bar').getBoundingClientRect(); show(btn, b.left + b.width / 2, b.bottom); });
+    btn.addEventListener('blur', () => tip.hidden = true);
+    btn.addEventListener('click', () => {
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      host.querySelectorAll('button.wf-row').forEach(b => b.setAttribute('aria-pressed', 'false'));
+      btn.setAttribute('aria-pressed', String(on));
+      const key = rows[+btn.dataset.i].key, tl = $('timeline');
+      if (!tl) return;
+      tl.classList.toggle('picked', on);
+      tl.querySelectorAll('span[data-i]').forEach(sp => sp.classList.toggle('pick', on && C[R[+sp.dataset.i].call].category === key));
+      listCalls(on ? rows[+btn.dataset.i] : null);
+    });
+  });
+})();
+const CC = {input:'--c-new', cache_write_5m:'--c-new', cache_write_1h:'--c-new', cache_read:'--c-reread', output:'--c-write'};
+barList('by-class', T.by_class.filter(c => c.tokens).map(c => ({l: esc(c.label) + ` <span class="muted">${K(c.tokens)} tokens</span>`, v: c.usd, c: CC[c.key], s: `${$$(c.usd)} · ${pct(c.usd, T.usd)}`})));
+const outC = T.by_class.find(c => c.key === 'output'), rr = T.by_class.find(c => c.key === 'cache_read');
+$('where-lede').innerHTML = steps.length ? `<b>${esc(steps[0].label)}</b> cost the most (${pct(steps[0].usd, T.usd)}). Text the model wrote is ${pct(outC.usd, T.usd)} of the cost${T.thinking ? `, and ${pct(T.thinking, T.output)} of what it wrote was hidden thinking${T.thinking_known ? '' : ' (estimated)'}` : ''}. Re-reading from the cache is cheap per token but adds up, because every call re-sends everything before it: ${K(rr.tokens)} tokens re-read in all, ${pct(rr.usd, T.usd)} of the cost.` : 'No model calls in this log.';
+
+/* ---------- fixes ---------- */
+$('fixes').innerHTML = D.fixes.length ? D.fixes.map(f => `<div class="fix"><div class="top"><h3>${esc(f.title)}</h3><span class="chip num">saves ${$$(f.saving_usd)} · ${pct(f.saving_usd, T.usd)}</span></div>
+  <p class="lede">${esc(f.why)}</p><div class="muted" style="font-size:12px">Where: ${esc(f.where)} · measured from this session${f.source !== 'built-in' ? ' · found by ' + esc(f.source) : ''}</div>
+  ${f.items.length ? `<details><summary>Details (${f.items.length})</summary><ul>${f.items.map(x => `<li>${md(x)}</li>`).join('')}</ul></details>` : ''}</div>`).join('')
+  : '<p class="lede">None of the built-in checks fired: no unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</p>';
+
+/* ---------- setup ---------- */
+const S = D.setup;
+if (S.known){
+  $('setup-total').textContent = '~' + K(S.tokens) + ' tokens';
+  $('setup-lede').innerHTML = `Before you say a word, every call carries about <b>${K(S.tokens)}</b> tokens of the agent's own setup. After the first call it is mostly re-read from the cache: cheap per call, but never free.` +
+    (S.tools.length ? ` <b>${S.unused.length} of ${S.tools.length}</b> tool definitions (~${K(S.unused_tokens)} tokens) were never used in this session.` : '') + ' Sizes are estimates (characters ÷ 4).';
+  barList('setup-parts', [...S.parts].sort((a, b) => b.tokens - a.tokens).map(p => ({l: esc(p.what), v: p.tokens, s: '~' + K(p.tokens)})), '--c-setup');
+  $('tools-sum').textContent = `Each tool definition (${S.tools.length}) and whether this session used it`;
+  $('tools').innerHTML = S.tools.map(t => `<div class="${t.used ? '' : 'unused'}"><span>${esc(t.name)}${t.used ? '' : ' · never used'}</span><span class="num">~${K(t.tokens)}</span></div>`).join('');
+  if (!S.tools.length) $('tools-box').hidden = true;
+} else {
+  $('setup-lede').textContent = 'Not in this log: this version of the agent does not record its system prompt and tool definitions, so the fixed setup cannot be measured.';
+  $('tools-box').hidden = true;
+}
+
+/* ---------- helpers ---------- */
+if (D.helpers.length){
+  $('helpers-panel').hidden = false;
+  $('helpers-total').textContent = $$(T.helpers_usd) + ' · ' + pct(T.helpers_usd, T.usd);
+  barList('helpers', D.helpers.map(h => ({l: esc(h.description || h.id) + ` <span class="muted">(turn ${h.turn}, ${h.calls} calls)</span>`, v: h.usd, s: $$(h.usd)})), '--helper');
+}
+
+/* ---------- footer ---------- */
+const own = MO.own_cost_usd != null ? `<div><b>Cross-check</b><p>The agent's own running total in this log is ${$$(MO.own_cost_usd)}. It can differ a little, because it also counts small background calls the log does not list.</p></div>` : '';
+$('foot').innerHTML = `<h2>About these numbers</h2><div class="about">
+  <div><b>How the money is counted</b><p>Each kind of text the AI handled is priced on its own: new text read, text kept in the cache (5 minutes or 1 hour), text re-read from the cache, and everything it wrote, hidden thinking included. Prices as of ${esc(MO.as_of)}.</p></div>
+  <div><b>Why it says “${esc(MO.short)}”</b><p>${esc(MO.why)}</p>${MO.subscription ? '' : '<p>On a plan with a fixed monthly price (Claude Pro or Max, a ChatGPT plan), nothing is billed per token: read these figures as API-equivalent.</p>'}</div>
+  ${own}
+  <div><b>What is estimated (marked ~)</b><p>How much of a call's input was the fixed setup, and how much of its output was a file or a message, are sized from the text (characters ÷ 4) and scaled so the parts add up exactly to the token counts in the log.</p></div>
+  ${D.notes.length ? `<div><b>About this log</b>${D.notes.map(n => `<p>${esc(n)}</p>`).join('')}</div>` : ''}
+  <div><b>Private</b><p>Made by SessionCost from a log file on this computer. Nothing was sent anywhere and no AI model was used.</p></div>
+</div>`;
+})();
+</script>
+</body>
+</html>

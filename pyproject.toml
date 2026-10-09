@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sessioncost"
+version = "0.1.0"
+description = "See where every token of your agent session went, turn by turn, and what to fix."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+authors = [{ name = "kish21" }]
+keywords = ["claude-code", "codex", "cursor", "antigravity", "tokens", "cost"]
+classifiers = ["Programming Language :: Python :: 3", "Environment :: Console"]
+
+[project.urls]
+Homepage = "https://github.com/kish21/sessioncost"
+
+[project.scripts]
+sessioncost = "sessioncost.cli:main"
+
+[tool.setuptools]
+packages = ["sessioncost", "sessioncost.readers"]
+
+[tool.setuptools.package-data]
+sessioncost = ["prices.json", "report_template.html", "skill/SKILL.md"]

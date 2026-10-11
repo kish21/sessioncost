@@ -49,8 +49,8 @@ Plugins need Python 3.10 or newer on the computer (way 1 does not).
 |---|---|
 | **Claude Code** | In a chat: `/plugin marketplace add kish21/sessioncost`, then `/plugin install sessioncost@sessioncost`. Or type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, and install **sessioncost** from the **Plugins** tab. (Needs Git.) |
 | **Codex** | First, in a terminal: `codex plugin marketplace add kish21/sessioncost`. Then **Codex app:** open **Customize → Plugins**, choose **sessioncost**, click **Install plugin**. **Codex CLI:** type `/plugins`, pick **sessioncost**, install it. Start a new chat afterwards. |
-| **Cursor** | Not in Cursor's marketplace yet: use way 1. |
-| **Antigravity** | No plugin list yet: use way 1. |
+| **Cursor** | Open **Customize → Plugins**, choose **From GitHub Repository** (or **Add Marketplace**), paste `https://github.com/kish21/sessioncost`, then install **sessioncost** and restart Cursor. If no plugin shows up (some Cursor versions import a repo without listing its plugins), use way 1. |
+| **Antigravity** | With the Antigravity command line: `agy plugin install https://github.com/kish21/sessioncost`, then start a new chat. In the Antigravity app, use way 1 (it adds `/sessioncost` to Antigravity directly). |
 
 Use one way per agent: with the plugin installed, you don't need the copy from way 1 or 2 in that agent.
 

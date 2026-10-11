@@ -1,5 +1,12 @@
 # What's new
 
+## 0.5.7
+
+- **README: Cursor plugin steps** (Customize → Plugins → From GitHub Repository), with the one-line install as the
+  fallback when Cursor imports the repo without listing the plugin.
+- **Antigravity plugin:** `agy plugin install https://github.com/kish21/sessioncost`. The repo's root `plugin.json` now
+  holds only the name and description, as Antigravity requires.
+
 ## 0.5.6
 
 - **README: Codex app steps** for the plugin (Customize → Plugins → sessioncost → Install plugin), next to the

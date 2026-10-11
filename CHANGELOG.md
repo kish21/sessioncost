@@ -1,5 +1,10 @@
 # What's new
 
+## 0.5.4
+
+- **A short README**: a moving picture of the path of turns and the calls inside a turn at the top, one line per
+  picture, the details folded away. No change to how SessionCost works.
+
 ## 0.5.3
 
 - **A clearer README** with pictures of every part of the report and a one-minute video tour (made with a demo

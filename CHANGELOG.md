@@ -1,5 +1,17 @@
 # What's new
 
+## 0.4.2
+
+- **New basic fix: "Start a new chat after a long break."** A long chat that goes on after a break of half an hour or
+  more re-sends the whole old conversation with every later call. The report measures, call by call, what a new
+  (or compacted) chat at that break would have saved, often a third or more of a long session, and says how:
+  /compact or /clear in Claude Code. The board marks those moments with an orange ↻.
+- **Points you to more savings:** the fix list and the top of the report say "to cut more tokens, check the deeper
+  fixes".
+- **A small saving is said plainly:** when the fixes would cut less than 5%, the top of the report says "28M tokens
+  sent, 97% cheap re-reads. Little to cut: −331k (1%)" instead of "28M, with the fixes 28M", which read as if the
+  fixes did nothing.
+
 ## 0.4.1
 
 - **"Turn off unused tools" now counts only what you can turn off:** connected MCP servers, claude.ai connectors

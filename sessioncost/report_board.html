@@ -485,6 +485,7 @@ table.t tr.sum td{border-bottom:0;border-top:1.5px solid var(--ink-2);font-weigh
       <span><i class="pipe-sw"><i></i><i></i></i> pipe: conversation so far / Step 0, carried into the next turn</span>
       <span><i class="mk">⏸</i> a break: the cache expired</span>
       <span><i class="mk">✂</i> conversation compacted</span>
+      <span><i class="mk" style="border-color:var(--cut);color:var(--cut);font-weight:700">↻</i> a good place for a new chat</span>
     </div>
     <div class="tilekey" id="tileKey"></div>
     </details>
@@ -564,7 +565,7 @@ const freshOf = c => Math.max(0, c.context - c.usage.cache_read);
 const inUsd = c => c.cost_by_class.input + c.cost_by_class.cache_write_5m + c.cost_by_class.cache_write_1h + c.cost_by_class.cache_read;
 /* fixes: Step 0 fixes apply to every call (no turns); the others name their turns and calls */
 const FIXES = D.fixes.map(f => ({...f, step0: !f.turns.length && !Object.keys(f.per_turn || {}).length,
-  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'repeated-reads': 're-read files', 'confirm-turn': 'confirm stops'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
+  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'repeated-reads': 're-read files', 'confirm-turn': 'confirm stops', 'long-chat': 'new chat'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
   .sort((a, b) => b.saving_usd - a.saving_usd || b.saving_tokens - a.saving_tokens);     // money first: a cut of cheap cache re-reads must not look like the biggest win
 const FIX = Object.fromEntries(FIXES.map(f => [f.id, f]));
 const CALLFIX = {}; FIXES.forEach(f => (f.calls || []).forEach(i => { if (!f.step0) CALLFIX[i] = CALLFIX[i] || f.id; }));
@@ -617,6 +618,7 @@ const S0_COLD = S0_CALLS.filter(c => c.usage.cache_read < (c.sent.setup || 0) * 
 const S0_TOTAL = SB.setup, S0_USD = sum(S0_CALLS, c => part(c, 'fixed setup').usd);
 const S0_COLD_USD = sum(S0_COLD, c => part(c, 'fixed setup').usd), S0_WARM_USD = S0_USD - S0_COLD_USD;
 const S0_CACHE = sum(S0_CALLS, c => Math.min(c.sent.setup || 0, c.usage.cache_read));
+const NEWCHAT = new Set((FIX['long-chat'] || {turns: []}).turns);
 const fixWhere = f => f.step0 ? `every call (Step 0)` : plural(f.turns.length, 'turn');
 function paidAs(f){
   if (f.step0){ const per = CALLS ? f.saving_tokens / CALLS : 0;
@@ -648,8 +650,11 @@ $('ansEyebrow').textContent = '“' + (M.title.length > 90 ? M.title.slice(0, 89
 
 /* ======================= A: the answer ======================= */
 const moneyWord = MO.subscription ? 'API-equivalent' : MO.exact ? '' : 'estimated';
-$('ansH').innerHTML = ALL_CUT ? `<span class="num">${K(SENT)}</span> tokens sent. With the fixes: <span class="after num">${K(SENT - ALL_CUT)}</span>.`
-  : `<span class="num">${K(SENT)}</span> tokens sent.`;
+/* a small saving is said plainly: "28M, with the fixes 28M" would read as if the fixes did nothing */
+const SMALL = ALL_CUT && ALL_CUT / SENT < 0.05;
+$('ansH').innerHTML = !ALL_CUT ? `<span class="num">${K(SENT)}</span> tokens sent.`
+  : SMALL ? `<span class="num">${K(SENT)}</span> tokens sent, ${pct(CACHE, SENT)} cheap re-reads. Little to cut: <span class="after num">−${K(ALL_CUT)}</span> (${pct(ALL_CUT, SENT)}).`
+  : `<span class="num">${K(SENT)}</span> tokens sent. With the fixes: <span class="after num">${K(SENT - ALL_CUT)}</span>.`;
 $('ansSub').innerHTML = `${ALL_CUT ? pct(ALL_CUT, SENT) + ' less' : 'Nothing obvious to cut'} over <b>${plural(NT, 'turn')}</b> and <b>${plural(CALLS, 'model call')}</b>${HCALLS ? ` (+${HCALLS} by helpers)` : ''}${ALL_USD ? `, saving about <b class="num">${usd(ALL_USD)}</b> of <b class="num">${usd(USD)}</b>${moneyWord ? ' ' + moneyWord : ''}` : `; it cost <b class="num">${usd(USD)}</b>${moneyWord ? ' ' + moneyWord : ''}`}. Every message you send makes the agent re-send the whole conversation, so most of this is old conversation and Step 0 carried again.`;
 (function(){
   const need = SENT - ALL_CUT, w = v => SENT ? v / SENT * 100 : 0;
@@ -677,9 +682,9 @@ $('top3').innerHTML = (FIXES.length ? FIXES.slice(0, 3).map(f => `<article class
   </article>`).join('') : `<article class="fixcard"><span class="amt" style="color:var(--keep)">✓</span><span class="t">None of the basic checks fired</span><span class="w">No unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</span></article>`)
   + (ENGINE ? '' : `<article class="fixcard" style="border-style:dashed">
     <span class="amt" style="color:var(--new)">+${ENGINE_PATTERNS.length}<small>more checks</small></span>
-    <span class="t">Deeper fixes: not checked yet</span>
-    <span class="w">The fix engine checks more patterns, like re-runs, long outputs and research in the main chat. Only a summary would be shared, never your chat or code.</span>
-    <span class="acts"><a class="link" href="#deeper">About deeper fixes ↓</a></span></article>`);
+    <span class="t">Want to cut more tokens? Check the deeper fixes</span>
+    <span class="w">These are the basic checks. The fix engine looks for ${ENGINE_PATTERNS.length} more patterns, like re-runs, long outputs and research in the main chat. Only a summary would be shared, never your chat or code.</span>
+    <span class="acts"><a class="link" href="#deeper">See the deeper fixes ↓</a></span></article>`);
 
 /* ======================= B: four tiles ======================= */
 const spark = (vals, color, ops) => { const w = 200, h = 28, bw = w / Math.max(1, vals.length), mx = Math.max(1, ...vals);
@@ -968,7 +973,7 @@ function drawBoard(){
     const layers = [[cr.setup / tot * TT, 'var(--keep)'], [cr.hist / tot * TT, 'var(--keep-2)']];
     const [x1, y1] = POS[k], [x2, y2] = POS[k+1];
     const horiz = Math.abs(y1 - y2) < 1, brk = nx.expired, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-    const segs = (brk || nx.compacted) ? (horiz ? [[x1, mx - 11], [mx + 11, x2]] : [[y1, my - 11], [my + 11, y2]]) : (horiz ? [[x1, x2]] : [[y1, y2]]);
+    const segs = (brk || nx.compacted || (!zoom && NEWCHAT.has(nx.n))) ? (horiz ? [[x1, mx - 11], [mx + 11, x2]] : [[y1, my - 11], [my + 11, y2]]) : (horiz ? [[x1, x2]] : [[y1, y2]]);
     for (const [a, b] of segs){
       const lo = Math.min(a, b), len = Math.abs(b - a);
       let off = TT / 2;
@@ -979,8 +984,9 @@ function drawBoard(){
         off -= th;
       }
     }
-    const marker = (sym, tip) => `<g><title>${tip}</title><circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="10" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="1.5"/><text x="${mx.toFixed(1)}" y="${(my + 4).toFixed(1)}" text-anchor="middle" font-size="11" fill="var(--ink)">${sym}</text></g>`;
-    if (brk) marks += marker('⏸', `A ${mins(nx.row.waited_min || 0)} break before turn ${nx.n}: the cache expired, so the conversation was sent again at full price`);
+    const marker = (sym, tip, col) => `<g><title>${tip}</title><circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="${col ? 12 : 10}" fill="var(--surface)" stroke="${col || 'var(--ink-2)'}" stroke-width="${col ? 2.5 : 1.5}"/><text x="${mx.toFixed(1)}" y="${(my + 4).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="${col || 'var(--ink)'}">${sym}</text></g>`;
+    if (!zoom && NEWCHAT.has(nx.n)) marks += marker('↻', `A good place for a new chat: a ${mins(nx.row.waited_min || 0)} break before turn ${nx.n}, with the whole conversation still carried. See "Start a new chat after a long break".`, 'var(--cut)');
+    else if (brk) marks += marker('⏸', `A ${mins(nx.row.waited_min || 0)} break before turn ${nx.n}: the cache expired, so the conversation was sent again at full price`);
     else if (nx.compacted) marks += marker('✂', `The conversation was compacted before turn ${nx.n}`);
   }
   NODES.slice(0, shown).forEach((nd, k) => {
@@ -1215,7 +1221,8 @@ $('shade').onclick = () => closeTurn();
 document.addEventListener('keydown', e => { if (e.key === 'Escape'){ if (!$('panel').hidden) closeTurn(); else if (zoom) unzoom(); else closePops(); } });
 
 /* ======================= D: what to fix ======================= */
-$('fixHead').textContent = FIXES.length ? `${plural(FIXES.length, 'fix', 'fixes')}, biggest saving first. Each is measured from this session's own calls; fixes can overlap.` : 'None of the checks fired.';
+$('fixHead').innerHTML = (FIXES.length ? `${plural(FIXES.length, 'fix', 'fixes')}, biggest saving first. Each is measured from this session's own calls; fixes can overlap.` : 'None of the basic checks fired.')
+  + (ENGINE ? '' : ' <a class="link" href="#deeper">To cut more tokens, check the deeper fixes ↓</a>');
 $('fixlist').innerHTML = FIXES.length ? FIXES.map(f => {
   const chips = f.step0 ? `<span class="muted" style="font-size:12.5px">Step 0, on every one of the ${CALLS} calls</span>`
     : f.turns.slice(0, 14).map(n => `<button type="button" data-open="${n}" aria-label="Open turn ${n}">T${n}</button>`).join('') + (f.turns.length > 14 ? `<span class="muted" style="font-size:12px;align-self:center">+${f.turns.length - 14} more</span>` : '');

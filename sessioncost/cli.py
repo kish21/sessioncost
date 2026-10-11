@@ -43,7 +43,7 @@ def summary(a: dict, path: Path | None) -> str:
     t, mo = a["totals"], a["money"]
     title = a["meta"]["title"]
     title = title if len(title) <= 70 else title[:69] + "…"
-    lines = [f"SessionCost: {title}"]
+    lines = [f"SessionCost {__version__}: {title}"]
     helpers = f" (+{plural(t['helper_calls'], 'helper call')})" if t["helper_calls"] else ""
     lines.append(f"{tokens(t['sent'])} tokens sent, {tokens(t['output'])} written · {plural(t['turns'], 'turn')} · "
                  f"{plural(t['calls'], 'call')}{helpers} · "
@@ -147,7 +147,7 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
     # The skill names this exact Python, so it runs even when no 'python' or 'sessioncost' is on the PATH.
     exe = Path(sys.executable).as_posix()
     run = f'"{exe}" -m sessioncost' if " " in exe else f"{exe} -m sessioncost"
-    text = SKILL.read_text(encoding="utf-8").replace("{{RUN}}", run)
+    text = SKILL.read_text(encoding="utf-8").replace("{{RUN}}", run).replace("{{VERSION}}", __version__)
     if " " in exe:
         text = text.replace("   If that fails because", "   In PowerShell, put `& ` in front of the quoted path. If that fails because")
     done = []

@@ -276,10 +276,16 @@ class CursorReader:
             d = _value(con, f"composerData:{chat.id}")
             if not d:
                 raise ValueError(f"no Cursor chat {chat.id} in {chat.db}")
+            d, borrowed = _with_setup(con, d)
             s, b = self._chat(con, d, "main")
+            if borrowed:
+                s.notes.append("Cursor had not yet saved how big this chat's setup (Step 0) is, so Step 0 is taken "
+                               f"from your latest Cursor chat that has it (“{short(borrowed, 60)}”). "
+                               "Run SessionCost again after the chat to get its own.")
             for hid in d.get("subagentComposerIds") or []:
                 hd = _value(con, f"composerData:{hid}")
                 if hd:
+                    hd, _ = _with_setup(con, hd)
                     hs, hb = self._chat(con, hd, "helper:" + hid[:12])
                     if hb.calls:
                         s.helpers.append(Helper(id=hid, description=short(hd.get("name") or "helper", 90),
@@ -360,6 +366,27 @@ class CursorReader:
                        + (f" (scaled ×{scale:.1f} to match the context size Cursor recorded)" if scale > 1.05 else "")
                        + ". Add Cursor's usage export (--cursor-usage <file.csv>) for exact numbers.")
         return s, builder
+
+
+def _with_setup(con: sqlite3.Connection, d: dict) -> tuple[dict, str | None]:
+    """A chat read while it is still running may not have Cursor's setup breakdown yet (Step 0 would be ~0). Borrow
+    the setup parts of the newest chat that has them, from the same project if there is one, keeping
+    this chat's own conversation numbers. Returns (the chat, the name of the chat borrowed from, or None)."""
+    if any(c.get("id") in SETUP_IDS and c.get("estimatedTokens") for c in _categories(d)):
+        return d, None
+    best, here = None, workspace(d)
+    for o in chats(con):
+        if o.get("composerId") == d.get("composerId"):
+            continue
+        cats = [c for c in _categories(o) if c.get("id") in SETUP_IDS and c.get("estimatedTokens")]
+        rank = (workspace(o) == here, o.get("lastUpdatedAt") or 0)    # the same project first: its rules and skills
+        if cats and (best is None or rank > best[2]):
+            best = (o, cats, rank)
+    if best is None:
+        return d, None
+    b = dict(d.get("promptTokenBreakdown") or {})
+    b["categories"] = best[1] + [c for c in _categories(d) if c.get("id") not in SETUP_IDS]
+    return {**d, "promptTokenBreakdown": b}, str(best[0].get("name") or "a recent chat")
 
 
 def _categories(d: dict) -> list[dict]:

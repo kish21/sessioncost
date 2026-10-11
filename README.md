@@ -33,21 +33,26 @@ Cursor and Antigravity**.
 Needs Python 3.10 or newer.
 
 ```
-pip install sessioncost        # or: pipx install sessioncost  /  uv tool install sessioncost
-sessioncost setup              # adds /sessioncost to your agents
+python -m pip install -U sessioncost     # -U also updates an older copy
+python -m sessioncost setup              # adds /sessioncost to your agents
 ```
 
-### 3. Use Claude Code plugins? Add it as a plugin
+On Mac or Linux use `python3` if `python` is not found. `python -m` works even when Windows cannot find the
+`sessioncost` command (common with the Microsoft Store Python). Prefer isolated tools? `pipx install sessioncost` or
+`uv tool install sessioncost`, then `sessioncost setup`.
 
-Needs Git and Python 3.10 or newer. In a Claude Code chat:
+### 3. Prefer plugins? Add it from your agent's plugin list
 
-```
-/plugin marketplace add kish21/sessioncost
-/plugin install sessioncost@sessioncost
-```
+Plugins need Python 3.10 or newer on the computer (way 1 does not).
 
-Or use the menu: type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, then install **sessioncost** from
-the **Plugins** tab.
+| Agent | How |
+|---|---|
+| **Claude Code** | In a chat: `/plugin marketplace add kish21/sessioncost`, then `/plugin install sessioncost@sessioncost`. Or type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, and install **sessioncost** from the **Plugins** tab. (Needs Git.) |
+| **Codex** | In a terminal: `codex plugin marketplace add kish21/sessioncost`. Then in Codex type `/plugins`, pick **sessioncost**, install it, and start a new session. |
+| **Cursor** | Not in Cursor's marketplace yet: use way 1. |
+| **Antigravity** | No plugin list yet: use way 1. |
+
+Use one way per agent: with the plugin installed, you don't need the copy from way 1 or 2 in that agent.
 
 ### Then, in your agent
 
@@ -120,9 +125,10 @@ Options: `--no-open`, `--json`, `--subscription` (money as API-equivalent on Pro
 
 - **Update:** paste the install line again, then restart your agent.
 - **`/sessioncost` does nothing:** restart the agent after installing.
+- **"sessioncost is not recognized"** (Windows): use `python -m sessioncost` instead of `sessioncost`.
 - **Windows says scripts are disabled:** run
   `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.
-- **Updated with pip:** `pip install -U sessioncost`, then `sessioncost setup`. **Plugin:** `/plugin` →
+- **Updated with pip:** `python -m pip install -U sessioncost`, then `python -m sessioncost setup`. **Plugin:** `/plugin` →
   **Marketplaces** → sessioncost → **Update**, then restart Claude Code.
 - **"git not found" when adding the plugin:** use way 1 instead; it needs neither Git nor Python.
 - **The deeper fixes take a while:** the engine sleeps when idle; the first check can take up to a minute.

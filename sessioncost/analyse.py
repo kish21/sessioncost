@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 
 from . import fixes as fixmod, summary as summarymod
-from . import prices as pricemod
+from . import __version__, prices as pricemod
 from .model import Call, Session
 
 SAID = ("typed", "command", "queued", "answer")    # what you said, as opposed to what the agent added
@@ -361,7 +361,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     out = {
         "tool": "sessioncost",
         "meta": {
-            "title": plain(s.title), "agent": s.agent, "agent_label": {"claude-code": "Claude Code", "codex": "Codex", "antigravity": "Antigravity",
+            "version": __version__, "title": plain(s.title), "agent": s.agent, "agent_label": {"claude-code": "Claude Code", "codex": "Codex", "antigravity": "Antigravity",
                                                        "cursor": "Cursor"}.get(s.agent, s.agent),
             "agent_version": s.agent_version, "model": s.model,
             "models": sorted({c.model for c in s.all_calls if c.model}), "session_id": s.session_id,

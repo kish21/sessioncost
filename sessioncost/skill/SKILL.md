@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
+description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -25,9 +25,11 @@ nothing unless the user presses "Send the summary to the fix engine" in the repo
 
 2. Show the user the printed summary exactly as printed, in a code block. Do not reword or recompute it.
 
-3. The tool opens the report in the browser by itself. Add one line: "The full report is open in your browser"
-   and its path from the summary. Do not offer to open it. Only if the user says it did not open, open the file with
-   the system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
+3. The tool tries to open the report in the browser, but some agents (Cursor, for example) run commands where no
+   browser can open, so do not say it is open. Add one line: "The full report: <path>" with the path from the summary
+   as a clickable link (on its own, so the user can click it), then: "(if it did not open by itself, click the
+   path)". Do not offer to open it. Only if the user says it did not open, open the file with the system's default
+   opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
 
 ## Deleting old reports
 

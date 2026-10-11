@@ -1,0 +1,10 @@
+{
+  "name": "sessioncost",
+  "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
+  "version": "0.5.5",
+  "author": {
+    "name": "kish21"
+  },
+  "homepage": "https://github.com/kish21/sessioncost",
+  "license": "MIT"
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sessioncost",
+  "version": "0.5.5",
+  "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
+  "author": {
+    "name": "kish21"
+  },
+  "homepage": "https://github.com/kish21/sessioncost",
+  "license": "MIT"
+}

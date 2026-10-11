@@ -6,7 +6,20 @@
   again in a minute", "did not answer in time") instead of a technical error, and stops waiting after 100 seconds.
   The report and its basic fixes never depend on the engine.
 - **Install guide by kind of user** in the README: one line (nothing else needed), PyPI, or the Claude Code
-  plugin, then where `/sessioncost` lands in each agent.
+  plugin, then where `/sessioncost` lands in each agent. The PyPI way now uses `python -m pip install -U` and
+  `python -m sessioncost setup`, which also update an older copy and work when Windows cannot find the
+  `sessioncost` command.
+- **Cursor: Step 0 no longer shows ~0 for a chat that is still running.** Cursor saves the size of a chat's setup
+  only later; until then SessionCost takes it from your newest Cursor chat that has it (the same project first) and
+  says so on the page.
+- **Plugins for Codex too:** `codex plugin marketplace add kish21/sessioncost`, then install it from `/plugins`.
+  The repo also carries the manifest Cursor's plugin marketplace reads (`.cursor-plugin/plugin.json`) and the
+  portable `plugin.json`.
+- **The agent no longer says the report is open when it may not be.** Some agents (Cursor, for example) run
+  commands where no browser can open; the agent now gives the report as a link to click.
+- **"+30 more checks" no longer reads like 30 problems found.** The card invites you to run the deeper check.
+- **The version shows everywhere:** in the first line of the chat summary ("SessionCost 0.5.5: ..."), in the report's
+  header, and in the skill's description in each agent's `/` menu, so an old copy is easy to spot.
 
 ## 0.5.4
 

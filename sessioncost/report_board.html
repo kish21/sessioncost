@@ -658,7 +658,7 @@ const askForAll = rules => `Please add these rules to ${RULES_AT} (create the fi
 const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers', 'waking up to check a job', 'failed edit scripts', 'cd on every command', 'probing an empty project', 'flaky tests', 'a Python the agent cannot run', 'one edit per answer', 'oversized helpers', 'helpers one after another', 'chained starts in the background', 'output too large', 'cut output run again', 'blocked steps tried again', 'tool uses you turned down', 'digging in the tool\'s own files', 'the same text twice'];
 
 /* ======================= header ======================= */
-$('who').innerHTML = `<b>SessionCost</b> · ${esc(M.agent_label)}${M.agent_version ? ' ' + esc(M.agent_version) : ''} · ${esc(M.models.join(', '))}${M.project ? ' · project ' + esc(M.project) : ''}${M.date ? ' · ' + esc(M.date) : ''} · session ${esc(M.session_id.slice(0, 8))}`;
+$('who').innerHTML = `<b>SessionCost${M.version ? ' ' + esc(M.version) : ''}</b> · ${esc(M.agent_label)}${M.agent_version ? ' ' + esc(M.agent_version) : ''} · ${esc(M.models.join(', '))}${M.project ? ' · project ' + esc(M.project) : ''}${M.date ? ' · ' + esc(M.date) : ''} · session ${esc(M.session_id.slice(0, 8))}`;
 $('ansEyebrow').textContent = '“' + (M.title.length > 90 ? M.title.slice(0, 89) + '…' : M.title) + '”';
 
 /* ======================= A: the answer ======================= */
@@ -694,10 +694,10 @@ $('top3').innerHTML = (FIXES.length ? FIXES.slice(0, 3).map(f => `<article class
     <span class="acts">${f.step0 ? '<button type="button" class="link" data-s0="1">Show me Step 0</button>' : `<button type="button" class="link" data-show="${esc(f.id)}">Show me on the board</button>`}<button type="button" class="link" data-how="${esc(f.id)}">How to fix it ↓</button></span>
   </article>`).join('') : `<article class="fixcard"><span class="amt" style="color:var(--keep)">✓</span><span class="t">None of the basic checks fired</span><span class="w">No unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</span></article>`)
   + (ENGINE ? '' : `<article class="fixcard" style="border-style:dashed">
-    <span class="amt" style="color:var(--new)">+${ENGINE_PATTERNS.length}<small>more checks</small></span>
-    <span class="t">Want to cut more tokens? Check the deeper fixes</span>
-    <span class="w">These are the basic checks. The fix engine looks for ${ENGINE_PATTERNS.length} more patterns, like re-runs, long outputs and research in the main chat. Only a summary would be shared, never your chat or code.</span>
-    <span class="acts"><a class="link" href="#deeper">See the deeper fixes ↓</a></span></article>`);
+    <span class="amt" style="color:var(--new)">More?<small>deeper check</small></span>
+    <span class="t">${FIXES.length ? 'Find more to cut with the deeper check' : 'Nothing basic to cut. Look deeper?'}</span>
+    <span class="w">The checks above are the basic ones. The deeper check looks for other kinds of waste, like re-runs, long outputs and research in the main chat. It runs only when you press its button, and shares a summary of numbers, never your chat or code.</span>
+    <span class="acts"><a class="link" href="#deeper">Run the deeper check ↓</a></span></article>`);
 
 /* ======================= B: four tiles ======================= */
 const spark = (vals, color, ops) => { const w = 200, h = 28, bw = w / Math.max(1, vals.length), mx = Math.max(1, ...vals);

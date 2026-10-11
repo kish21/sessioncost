@@ -6,7 +6,7 @@ Every message you send makes the agent send the whole conversation again, plus i
 Type `/sessioncost` in a chat and see, for each of your messages, how many tokens went out and what they were, the
 heaviest turn, and the fixes that would have sent fewer, measured from that chat. Fewer tokens is what makes an agent
 cheaper and faster, so the cost is shown too, as the result. It works in **Claude Code, Codex, Cursor and Antigravity**,
-runs on your computer, and sends nothing anywhere.
+runs on your computer, and sends nothing unless you press one button (see [Privacy](#privacy)).
 
 ## Get it
 
@@ -136,11 +136,21 @@ message** is newest, not the newest file: reopening an old chat touches its file
 
 ## Privacy
 
-Local only. SessionCost reads log files on your disk and writes one HTML file to `~/.sessioncost/reports/`. It
-sends nothing anywhere, calls no AI model and needs no network. (The one exception is opt-in: if you point it at a
-fix engine with `--engine-url`, the report offers a button that sends a summary of the session, numbers and tool
-names only, never your messages, code or file names, and only when you press it.) The report page loads a web font from Google Fonts
-when you are online and falls back to system fonts when you are not.
+Local first. SessionCost reads log files on your disk and writes one HTML file to `~/.sessioncost/reports/`. It
+calls no AI model, and the report and its basic fixes are made entirely on your computer.
+
+**The one thing it can send, only when you press the button.** The report's "Deeper fixes" box has a button,
+**Send the summary to the fix engine**. Only when you press it, the report sends a *summary* of that one session to
+our fix engine (`https://sessioncost-engine.onrender.com`), which answers with more fixes. The summary is numbers,
+tool names and yes/no flags: tokens per call, tool sizes, whether a step failed. It **never** holds your messages,
+the agent's replies, code, file contents, command text, file or folder names, the project name or the session id;
+files and commands appear only as codes like `f3`, new for every summary. The report shows you the exact summary
+before you send it. The engine checks it in memory and keeps nothing: it is not stored or logged.
+
+To hide the button entirely: `sessioncost --engine-url off` (or set `SESSIONCOST_ENGINE_URL=off`).
+
+The report page loads a web font from Google Fonts when you are online and falls back to system fonts when you are
+not.
 
 ## How money is labelled
 

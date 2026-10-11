@@ -1,5 +1,16 @@
 # What's new
 
+## 0.5.0
+
+- **Deeper fixes are here.** The report's "Deeper fixes" box now has a button, **Send the summary to the fix
+  engine**. Press it and our fix engine checks the session for 24 more kinds of waste from our catalog of measured
+  patterns, among them: waking up again and again to check a background job, edit scripts that fail, `cd` in front
+  of every command, flaky tests run over and over, and helpers that read far too much. Its fixes join the list, the
+  board and the answer at the top, each with its measured saving and what to do.
+- **Nothing is sent unless you press the button.** What is sent is a summary: numbers, tool names and yes/no flags,
+  never your messages, code, file names or project. The report shows the exact summary first, and the engine keeps
+  nothing. `--engine-url off` hides the button. See Privacy in the README.
+
 ## 0.4.2
 
 - **New basic fix: "Start a new chat after a long break."** A long chat that goes on after a break of half an hour or

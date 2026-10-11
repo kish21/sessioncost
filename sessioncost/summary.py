@@ -5,7 +5,8 @@ the project name, the session id, or clock times. Files and commands appear only
 each summary ("f3", "c7"), so the same file read twice shows as the same code without saying which file it is.
 Times are seconds from the start of the session.
 
-Nothing is sent yet: the report shows this summary so you can see exactly what would be shared.
+Nothing is sent unless you press "Send the summary to the fix engine" in the report, which shows this summary
+first so you can see exactly what would be shared.
 """
 from __future__ import annotations
 

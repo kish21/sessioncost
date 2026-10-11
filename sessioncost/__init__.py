@@ -1,2 +1,2 @@
 """SessionCost: see where every token of your agent session went, turn by turn, and what to fix."""
-__version__ = "0.4.2"
+__version__ = "0.5.0"

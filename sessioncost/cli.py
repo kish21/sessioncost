@@ -12,6 +12,8 @@ from . import __version__, locate, prices as pricemod, readers, report
 from .analyse import analyse
 from .readers import cursor
 
+# Our hosted fix engine (the deeper fixes). Nothing goes there unless you press the button in the report.
+DEFAULT_ENGINE_URL = "https://sessioncost-engine.onrender.com"
 REPORTS = Path.home() / ".sessioncost" / "reports"
 
 
@@ -103,8 +105,9 @@ def build(path, args) -> tuple[dict, Path | None]:
             print(f"sessioncost: {used} requests from the usage export matched this chat" if used else
                   "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
     a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
-    # where "Find deeper fixes" may send the summary, only when you press it (none by default: nothing is sent)
-    a["meta"]["engine_url"] = (getattr(args, "engine_url", None) or os.environ.get("SESSIONCOST_ENGINE_URL") or "").strip()
+    # where "Find deeper fixes" may send the summary: only when you press the button in the report. "off" hides it.
+    url = (getattr(args, "engine_url", None) or os.environ.get("SESSIONCOST_ENGINE_URL") or DEFAULT_ENGINE_URL).strip()
+    a["meta"]["engine_url"] = "" if url.lower() in ("off", "none", "no", "0") else url
     out = None
     args.extra = []
     if not args.json:
@@ -219,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "
-                    "Local only: reads log files, sends nothing anywhere.")
+                    "Local: reads log files; sends nothing unless you press 'Send the summary to the fix engine' in the report.")
     ap.add_argument("target", nargs="?", default="last",
                     help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
@@ -234,8 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--design", choices=["new", "classic", "both"], default="new",
                     help="report design: new (the session board, the default), classic (the turn list), or both side by side")
     ap.add_argument("--engine-url", metavar="URL",
-                    help="a fix engine to offer under 'Find deeper fixes' (or set SESSIONCOST_ENGINE_URL); the summary "
-                         "is sent only when you press the button in the report")
+                    help="the fix engine offered under 'Find deeper fixes' (or set SESSIONCOST_ENGINE_URL; default: "
+                         f"{DEFAULT_ENGINE_URL}; 'off' hides the button). The summary is sent only when you "
+                         "press the button in the report")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     args = ap.parse_args(argv)
 

@@ -6,7 +6,7 @@ description: Show how many tokens each turn of THIS coding session sent, the hea
 # SessionCost: where did this session's tokens go?
 
 Run SessionCost, which came with this plugin, on the current session. It reads the session's log on this machine,
-writes an HTML report and prints a short summary. It sends nothing anywhere and uses no AI model.
+writes an HTML report and prints a short summary. It uses no AI model and sends nothing unless the user presses "Send the summary to the fix engine" in the report.
 
 ## Steps
 

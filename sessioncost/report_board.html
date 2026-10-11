@@ -642,7 +642,7 @@ const RULES = [
   ['Do not re-run a command when no file has changed since the last run. Read the first result.', ['re-run']],
 ];
 const askForAll = rules => `Please add these rules to ${RULES_AT} (create the file if it does not exist; keep anything already in it), then tell me it is done:\n\n` + rules.map(r => '- ' + r).join('\n');
-const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers'];
+const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers', 'waking up to check a job', 'failed edit scripts', 'cd on every command', 'probing an empty project', 'flaky tests', 'a Python the agent cannot run', 'one edit per answer', 'oversized helpers', 'helpers one after another', 'chained starts in the background'];
 
 /* ======================= header ======================= */
 $('who').innerHTML = `<b>SessionCost</b> · ${esc(M.agent_label)}${M.agent_version ? ' ' + esc(M.agent_version) : ''} · ${esc(M.models.join(', '))}${M.project ? ' · project ' + esc(M.project) : ''}${M.date ? ' · ' + esc(M.date) : ''} · session ${esc(M.session_id.slice(0, 8))}`;
@@ -1316,7 +1316,7 @@ $('fixlist').addEventListener('click', e => {
   if ($('dForget')) $('dForget').onclick = () => { try { sessionStorage.removeItem(ENGINE_KEY); } catch (e) {} again(); };
   if ($('dSend')) $('dSend').onclick = async () => {
     const btn = $('dSend'), st = $('dState');
-    btn.disabled = true; st.textContent = `Sending the summary (${kb} KB)…`;
+    btn.disabled = true; st.textContent = `Sending the summary (${kb} KB)…` + (local ? '' : ' The fix engine sleeps when no one has used it for a while: the first check can take up to a minute.');
     try {
       const r = await fetch(URL_ + '/v1/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(SUM)});
       const ans = await r.json();

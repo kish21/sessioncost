@@ -1,14 +1,23 @@
 """Finding Claude Code, Codex, Antigravity and Cursor sessions on this machine.
 
 Codex keeps every thread under $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl (CODEX_HOME defaults to
-~/.codex); the project is the `cwd` in each file's first row. Helper threads (they carry a parent thread id) are
-read with their main session, never listed on their own.
+~/.codex), and moves an archived one to $CODEX_HOME/archived_sessions; both are searched, at any depth, so a new
+folder layout does not hide them. The project is the `cwd` (or one of the `runtime_workspace_roots`) in the
+file's `session_meta` row. Helper threads (a parent thread id, or a `subagent` source) are read with their main
+session, never listed on their own.
 
 Antigravity keeps one SQLite file per conversation under ~/.gemini/antigravity-ide/conversations (or
 $ANTIGRAVITY_HOME/conversations); the project is the workspace stored inside it.
 
 Cursor keeps every chat in one SQLite file (see readers/cursor.py for where); a chat stands in for a session file
-as a `CursorChat`. Helper chats are read with the chat that started them, never listed on their own.
+as a `CursorChat`. Helper chats are read with the chat that started them, never listed on their own. Which folder
+a chat belongs to comes from any of three places, because Cursor has moved it before: the chat's own
+`workspaceIdentifier` (older builds), its transcript under ~/.cursor/projects/<folder key>/agent-transcripts
+(newer builds, which leave `workspaceIdentifier` out), or the per-folder store in workspaceStorage that lists the
+chats open in that folder.
+
+A session whose folder cannot be found at all is kept apart (`unlinked`); `sessioncost last` falls back to the
+newest of those, with a note, rather than finding nothing.
 
 Claude Code keeps one folder per project under ~/.claude/projects (or $CLAUDE_CONFIG_DIR/projects). The folder name
 is the project path with every character other than a letter or digit replaced by '-', e.g. c:\\Users\\x\\my_proj
@@ -88,22 +97,59 @@ def _same_dir(a: str | Path, b: str | Path) -> bool:
         return False
 
 
-def codex_sessions(project: str | Path | None = None, home: Path | None = None) -> list[Path]:
-    """Main Codex threads whose working folder is the project."""
-    root = (home or codex_home()) / "sessions"
-    if not root.is_dir():
-        return []
+def codex_meta(path: Path, rows: int = 5) -> dict:
+    """The `session_meta` payload of a Codex file (the first row today; a few rows are read in case that changes)."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for _ in range(rows):
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("type") == "session_meta" and isinstance(row.get("payload"), dict):
+                    return row["payload"]
+    except OSError:
+        pass
+    return {}
+
+
+def codex_is_helper(meta: dict) -> bool:
+    src = meta.get("source")
+    return bool(meta.get("parent_thread_id")) or (isinstance(src, dict) and "subagent" in src)
+
+
+def codex_folders(meta: dict) -> list[str]:
+    roots = meta.get("runtime_workspace_roots")
+    return [x for x in [meta.get("cwd")] + (roots if isinstance(roots, list) else []) if isinstance(x, str) and x]
+
+
+def codex_files(home: Path | None = None) -> list[Path]:
+    """Every Codex thread file, active and archived."""
+    root = home or codex_home()
+    out: list[Path] = []
+    for sub in ("sessions", "archived_sessions"):
+        if (root / sub).is_dir():
+            out += (root / sub).rglob("rollout-*.jsonl")
+    return out
+
+
+def codex_sessions(project: str | Path | None = None, home: Path | None = None,
+                   unlinked: list | None = None) -> list[Path]:
+    """Main Codex threads whose working folder is the project. Threads that name no folder go to `unlinked`."""
     want = project or os.getcwd()
     out = []
-    for p in root.glob("*/*/*/rollout-*.jsonl"):
-        try:
-            with p.open(encoding="utf-8", errors="replace") as f:
-                row = json.loads(f.readline())
-        except (OSError, ValueError):
+    for p in codex_files(home):
+        meta = codex_meta(p)
+        if not meta or codex_is_helper(meta):
             continue
-        meta = row.get("payload") if isinstance(row, dict) and row.get("type") == "session_meta" else None
-        if isinstance(meta, dict) and not meta.get("parent_thread_id") and meta.get("cwd") and                 _same_dir(meta["cwd"], want):
+        folders = codex_folders(meta)
+        if any(_same_dir(f, want) for f in folders):
             out.append(p)
+        elif not folders and unlinked is not None:
+            unlinked.append(p)
     return out
 
 
@@ -138,8 +184,67 @@ def antigravity_sessions(project: str | Path | None = None,
     return out
 
 
-def cursor_sessions(project: str | Path | None = None, db: Path | None = None) -> list[tuple[datetime | None, object]]:
-    """Cursor chats (not helper chats) whose workspace is the project, with their last update time."""
+def cursor_home() -> Path:
+    return Path.home() / ".cursor"
+
+
+def loose_key(path: str | Path) -> str:
+    """Cursor's folder key: every run of characters other than letters and digits becomes one '-'
+    (c:\\Users\\x\\my_proj -> c-Users-x-my-proj). Compared without case."""
+    try:
+        path = Path(path).expanduser().resolve()
+    except OSError:
+        pass
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(path)).strip("-").lower()
+
+
+def _file_uri_path(uri: str) -> str:
+    """file:///c%3A/Users/x -> c:/Users/x"""
+    from urllib.parse import unquote, urlparse
+    u = urlparse(uri)
+    if u.scheme != "file":
+        return ""
+    p = unquote(u.path)
+    return p[1:] if re.match(r"^/[A-Za-z]:", p) else p
+
+
+def cursor_links(db: Path, home: Path | None = None) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Where Cursor says each chat belongs, outside the chat itself: ({chat id: folder keys} from the transcript
+    folders, {chat id: folders} from the per-folder stores next to the shared database)."""
+    keys: dict[str, set[str]] = {}
+    root = (home or cursor_home()) / "projects"
+    if root.is_dir():
+        for t in root.glob("*/agent-transcripts/*"):
+            keys.setdefault(t.name.split(".")[0], set()).add(t.parent.parent.name.lower())
+    folders: dict[str, set[str]] = {}
+    store = Path(db).parent.parent / "workspaceStorage"
+    if store.is_dir():
+        import sqlite3
+        for d in store.iterdir():
+            try:
+                folder = _file_uri_path(json.loads((d / "workspace.json").read_text(encoding="utf-8")).get("folder") or "")
+                if not folder or not (d / "state.vscdb").is_file():
+                    continue
+                con = sqlite3.connect(f"file:{(d / 'state.vscdb').as_posix()}?mode=ro", uri=True)
+                try:
+                    row = con.execute("select value from ItemTable where key = 'composer.composerData'").fetchone()
+                finally:
+                    con.close()
+                v = json.loads(row[0]) if row and row[0] else {}
+            except Exception:   # a store Cursor holds open or wrote half of must not break the lookup
+                continue
+            ids = set(v.get("selectedComposerIds") or []) | set(v.get("lastFocusedComposerIds") or [])
+            ids |= {c.get("composerId") for c in v.get("allComposers") or [] if isinstance(c, dict)}
+            for cid in ids:
+                if isinstance(cid, str):
+                    folders.setdefault(cid, set()).add(folder)
+    return keys, folders
+
+
+def cursor_sessions(project: str | Path | None = None, db: Path | None = None, home: Path | None = None,
+                    unlinked: list | None = None) -> list[tuple[datetime | None, object]]:
+    """Cursor chats (not helper chats) whose folder is the project, with their last update time. Chats whose
+    folder cannot be found anywhere go to `unlinked`."""
     from .readers.cursor import CursorChat, chats, connect, helper_ids, state_db, workspace
     db = db or state_db()
     if not Path(db).is_file():
@@ -154,25 +259,44 @@ def cursor_sessions(project: str | Path | None = None, db: Path | None = None) -
     except Exception:   # Cursor may hold the file; the other agents must still be listed
         return []
     helpers = helper_ids(found)
+    keys, folders = cursor_links(Path(db), home)
+    want_key = loose_key(want)
     out = []
     for d in found:
-        ws = workspace(d)
-        if d["composerId"] in helpers or not ws or not _same_dir(ws, want) or                 not (d.get("fullConversationHeadersOnly") or d.get("conversation")):
+        cid = str(d["composerId"])
+        if cid in helpers or not (d.get("fullConversationHeadersOnly") or d.get("conversation")):
             continue
         ms = d.get("lastUpdatedAt") or d.get("createdAt")
         when = datetime.fromtimestamp(ms / 1000).astimezone() if isinstance(ms, (int, float)) else None
-        out.append((when, CursorChat(Path(db), str(d["composerId"]))))
+        chat = (when, CursorChat(Path(db), cid))
+        ws = workspace(d)
+        if ws:
+            linked = _same_dir(ws, want)
+        elif cid in keys or cid in folders:
+            linked = want_key in keys.get(cid, ()) or any(_same_dir(f, want) for f in folders.get(cid, ()))
+        else:
+            if unlinked is not None:
+                unlinked.append(chat)
+            continue
+        if linked:
+            out.append(chat)
     return out
 
 
 def sessions(project: str | Path | None = None, home: Path | None = None, codex: Path | None = None,
-             antigravity: Path | None = None, cursor: Path | None = None) -> list[tuple[datetime, Path]]:
-    """Main sessions of a project (Claude Code, Codex, Antigravity, Cursor), newest first."""
+             antigravity: Path | None = None, cursor: Path | None = None, cursor_dir: Path | None = None,
+             unlinked: list | None = None) -> list[tuple[datetime, Path]]:
+    """Main sessions of a project (Claude Code, Codex, Antigravity, Cursor), newest first. Sessions that name no
+    folder at all are added to `unlinked` (newest first), when a list is given."""
     d = project_dir(project, home)
     found = [(last_stamp(p), p) for p in d.glob("*.jsonl")] if d is not None else []
-    found += [(last_stamp(p, types=None), p) for p in codex_sessions(project, codex)]
+    codex_loose: list[Path] = []
+    found += [(last_stamp(p, types=None), p) for p in codex_sessions(project, codex, codex_loose)]
+    loose = [(last_stamp(p, types=None), p) for p in codex_loose]
     found += antigravity_sessions(project, antigravity)
-    found += cursor_sessions(project, cursor)
+    found += cursor_sessions(project, cursor, cursor_dir, loose)
     out = [(t, p) for t, p in found if t is not None]
     out.sort(key=lambda x: x[0], reverse=True)
+    if unlinked is not None:
+        unlinked += sorted([(t, p) for t, p in loose if t is not None], key=lambda x: x[0], reverse=True)
     return out

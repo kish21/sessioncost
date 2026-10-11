@@ -1,7 +1,7 @@
 """Codex session logs (CLI, IDE extension, desktop app): $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl
-(CODEX_HOME defaults to ~/.codex), one file per thread.
+(CODEX_HOME defaults to ~/.codex), one file per thread; archived threads move to $CODEX_HOME/archived_sessions.
 
-What the log holds (checked on Codex 0.125 to 0.160 logs):
+What the log holds (checked on Codex 0.125 to 0.162 logs):
 - `session_meta` first: thread id, session id, cwd, version, the base instructions (system prompt); a helper thread
   (the command reviewer "guardian", or an agent it spawned) has its own file with `parent_thread_id` and the main
   thread's session id. A forked helper starts with a copy of its parent's history, up to
@@ -204,6 +204,7 @@ class _Thread:
         self.pending: Call | None = None
         self.model = ""
         self.total = None
+        self.copied: set = set()        # running totals of the parent thread: a count with one of them is a copy
 
     def _call(self, rts) -> Call:
         if self.pending is None:
@@ -223,6 +224,8 @@ class _Thread:
             c.text_chars += len(txt)
             if txt.strip() and not c.first_text:
                 c.first_text = short(txt, 120)
+            if txt.strip():
+                c.last_text = txt.strip()[-300:]
         elif t in CALL_ITEMS:
             c = self._call(rts)
             tool, kind, label, target, written = describe(p)
@@ -251,6 +254,9 @@ class _Thread:
         total = (info.get("total_token_usage") or {}).get("total_tokens")
         if total is not None and total == self.total:
             return None
+        if total is not None and total in self.copied:    # the parent's call, copied into a forked helper
+            self.total, self.pending = total, None
+            return None
         self.total = total
         c = self._call(rts)
         c.usage = _usage(info["last_token_usage"])
@@ -262,13 +268,21 @@ class _Thread:
         return c
 
 
+def _totals_of(path: Path | None) -> set:
+    """Every running token total recorded in a thread file."""
+    out = set()
+    for r in _rows(path) if path is not None else []:
+        p = r.get("payload") or {}
+        if r.get("type") == "event_msg" and isinstance(p, dict) and p.get("type") == "token_count":
+            total = ((p.get("info") or {}).get("total_token_usage") or {}).get("total_tokens")
+            if total:
+                out.add(total)
+    return out
+
+
 def _meta(path: Path) -> dict:
-    with path.open(encoding="utf-8", errors="replace") as f:
-        try:
-            r = json.loads(f.readline())
-        except ValueError:
-            return {}
-    return r.get("payload") or {} if isinstance(r, dict) and r.get("type") == "session_meta" else {}
+    from ..locate import codex_meta
+    return codex_meta(path)
 
 
 def _label(text: str) -> str:
@@ -303,7 +317,8 @@ class CodexReader:
             models[c.model] = models.get(c.model, 0) + 1
         s.model = max(models, key=models.get) if models else ""
         s.setup = setup
-        if not meta.get("parent_thread_id"):
+        from ..locate import codex_is_helper
+        if not codex_is_helper(meta):
             s.helpers = self._helpers(path, s.session_id, s.session_id)
         for h in s.helpers:
             h.turn = _turn_at(s.turns, h.calls[0].ts_first if h.calls else None)
@@ -317,7 +332,12 @@ class CodexReader:
     def _read(self, path: Path, th: _Thread, s: Session | None, top: bool) -> tuple[list[Turn], Setup]:
         rows = _rows(path)
         meta = _meta(path)
+        # A forked helper starts with a copy of its parent's history. Codex marks where the copy ends, but on real
+        # logs the mark is often the file's length (it would skip the helper's own work), so it is used only when it
+        # falls inside the file; copied calls are also recognised by their running total (see _Thread.copied).
         skip_to = int(meta.get("subagent_history_start_ordinal") or 0)
+        if skip_to >= len(rows):
+            skip_to = 0
         turns: list[Turn] = []
         setup = Setup()
         base = (meta.get("base_instructions") or {}).get("text") if isinstance(meta.get("base_instructions"), dict) \
@@ -402,15 +422,17 @@ class CodexReader:
         return turns, setup
 
     def _helpers(self, path: Path, session_id: str, root_id: str) -> list[Helper]:
-        root = path
-        for _ in range(4):                  # sessions/YYYY/MM/DD/file -> sessions
-            root = root.parent
+        from ..locate import codex_files, codex_is_helper
+        # the Codex home: the folder above sessions/ or archived_sessions/, at whatever depth the file sits
+        home = next((p.parent for p in path.parents if p.name in ("sessions", "archived_sessions")), None)
         out = []
-        for f in sorted(root.glob("**/rollout-*.jsonl")) if root.name == "sessions" else []:
+        files = sorted(codex_files(home)) if home is not None else []
+        parents: dict[str, set] = {}
+        for f in files:
             if f == path:
                 continue
             m = _meta(f)
-            if m.get("session_id") != session_id or not m.get("parent_thread_id") or m.get("id") == root_id:
+            if m.get("session_id") != session_id or not codex_is_helper(m) or m.get("id") == root_id:
                 continue
             src = (m.get("source") or {}).get("subagent") if isinstance(m.get("source"), dict) else None
             if isinstance(src, dict) and src.get("other") == "guardian":
@@ -423,6 +445,8 @@ class CodexReader:
                 kind, desc = "helper", "helper thread"
             hid = str(m.get("id") or f.stem)
             th = _Thread("helper:" + hid[-12:])
+            th.copied = parents.setdefault(str(m.get("parent_thread_id") or ""), _totals_of(
+                next((x for x in files if (_meta(x).get("id") == m.get("parent_thread_id"))), None)))
             self._read(f, th, None, top=False)
             if th.order:
                 out.append(Helper(id=hid, description=short(desc, 90), agent_type=kind, calls=th.order))

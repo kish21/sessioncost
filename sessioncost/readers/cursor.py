@@ -210,6 +210,8 @@ class _Builder:
         c.text_chars += len(text)
         if text.strip() and not c.first_text:
             c.first_text = short(text, 120)
+        if text.strip():
+            c.last_text = text.strip()[-300:]
         out = len(text) + len(think_text)
         if t is not None:
             name = str(t.get("name") or "?")

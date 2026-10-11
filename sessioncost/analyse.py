@@ -267,6 +267,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             by_obj[id(c)]["new_items"] = [x for x in items if x["tokens"]]
             prev = c
 
+    # what the cache re-reads would have cost at the normal input price (the cache is why a session is cheap)
+    cache_full_usd = sum(c.usage.cache_read * P.rates(c)["input"] for c in s.all_calls) / 1e6
     total_usd = sum(d["usd"] for d in calls)
     main_usd = sum(by_obj[id(c)]["usd"] for c in main_calls)
     helper_usd = total_usd - main_usd
@@ -365,11 +367,18 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "models": sorted({c.model for c in s.all_calls if c.model}), "session_id": s.session_id,
             "project": _folder(s.cwd), "started": iso(s.started), "ended": iso(s.ended),
             "date": s.started.astimezone().strftime("%d %b %Y") if s.started else "",
+            # the file each agent reads at the start of every chat (Cursor: AGENTS.md in the project root; a plain
+            # file in .cursor/rules is ignored, those need Cursor's .mdc format)
+            "rules_file": {"claude-code": "CLAUDE.md", "codex": "AGENTS.md", "cursor": "AGENTS.md",
+                           "antigravity": "GEMINI.md"}.get(s.agent, "the agent's instruction file"),
         },
         "money": {"label": long_label, "short": short_label, "as_of": as_of, "exact": exact,
                   "subscription": subscription, "unchecked_models": sorted(P.unchecked), "why": why,
                   "tokens_exact": s.tokens_exact, "write_split_known": split_known,
-                  "own_cost_usd": s.own_cost_usd},
+                  "own_cost_usd": s.own_cost_usd,
+                  # the price per million of each kind of token, for each model of the session (the report explains them)
+                  "rates": {m: {k: P.rates(next(c for c in s.all_calls if c.model == m)).get(k, 0.0)
+                                for k in pricemod.CLASSES} for m in sorted({c.model for c in s.all_calls if c.model})}},
         "totals": {
             "usd": total_usd, "main_usd": main_usd, "helpers_usd": helper_usd,
             "calls": len(main_calls), "helper_calls": len(s.helper_calls),
@@ -379,6 +388,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "sent": sum(d["sent"]["tokens"] for d in calls),
             "sent_by": {k: sum(d["sent"][k] for d in calls) for k in ("setup", "history", "new")},
             "output": sum(d["usage"]["output"] for d in calls), "thinking": thinking,
+            "cache_read_full_usd": cache_full_usd,
             "thinking_known": thinking_known,
             "by_class": by_class,
             "by_step": [v for v in by_step.values() if v["calls"]],
@@ -397,9 +407,12 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     engines = engines if engines is not None else fixmod.load_engines()
     out["fix_engines"] = [getattr(e, "name", "built-in") for e in engines]
     s.fixes = fixmod.find(s, P, engines)
+    call_ix = {(d["agent"], d["n"]): i for i, d in enumerate(calls)}
     out["fixes"] = [{"id": f.id, "title": f.title, "why": f.why, "saving_usd": f.saving_usd,
                      "saving_tokens": f.saving_tokens, "where": f.where, "turns": f.turns, "items": f.items,
-                     "source": f.source} for f in s.fixes]
+                     "source": f.source, "per_turn": {str(k): v for k, v in f.per_turn.items()},
+                     "calls": [call_ix[k] for k in f.calls if k in call_ix], "how": f.how, "paste": f.paste}
+                    for f in s.fixes]
     for f in s.fixes:
         for tr in turn_rows:
             if tr["n"] in f.turns:

@@ -61,14 +61,16 @@ Report: ~/.sessioncost/reports/<session-id>.html
 
 (The numbers above are an example.) Say yes when it offers to open the report: a page in your browser with
 
-- **Turn by turn**: one row per thing you asked, with the tokens it sent and wrote, its calls and minutes, and its
-  cost. Click a turn to see its calls, and a call to see what it sent (fixed setup, carried history, new input) and
+- **The answer first**: the tokens sent now and after the fixes, and the biggest fixes, ranked by the money they save.
+- **The path**: Step 0 (the agent's setup, sent with every call), then every turn as a tile on one path. Tap a turn
+  to see its calls as tiles of their own, and a call to see what it sent (setup, earlier conversation, new) and
   what it wrote. Every set of parts adds up to the number above it.
-- **Replay**: step or play through the chat call by call and watch the context grow.
-- **Where the tokens went**: by kind of step (reading, running commands, writing files, helpers...) and by kind of
-  token.
-- **What to fix**: the fixes that apply to this chat, each with the tokens it would cut and the money that saves.
-- **Sent with every call**: the agent's fixed setup, and which tools were never used.
+- **Charts**: how each kind of token is priced, how the memory sent grows call by call and how much of it was cheap
+  re-reading from the cache, where each fix helps (tokens, money, time), and what the agent spent its tokens on.
+- **What to fix**: the fixes that apply to this chat, each with the tokens it would cut, the money that saves, and
+  a line to paste into your agent's instruction file.
+
+The earlier report design is still there: `sessioncost --design classic`.
 
 Asking costs almost nothing: the agent runs the tool and shows its summary, and never reads the log or the report
 into the chat.
@@ -135,7 +137,9 @@ message** is newest, not the newest file: reopening an old chat touches its file
 ## Privacy
 
 Local only. SessionCost reads log files on your disk and writes one HTML file to `~/.sessioncost/reports/`. It
-sends nothing anywhere, calls no AI model and needs no network. The report page loads a web font from Google Fonts
+sends nothing anywhere, calls no AI model and needs no network. (The one exception is opt-in: if you point it at a
+fix engine with `--engine-url`, the report offers a button that sends a summary of the session, numbers and tool
+names only, never your messages, code or file names, and only when you press it.) The report page loads a web font from Google Fonts
 when you are online and falls back to system fonts when you are not.
 
 ## How money is labelled

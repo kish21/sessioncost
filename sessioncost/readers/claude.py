@@ -18,7 +18,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
+from ..model import Action, Added, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
 
 # Text the harness puts into a `user` row. Never shown as something the user typed.
 TAGS = {
@@ -51,6 +51,71 @@ SETUP_ATTACHMENTS = {
     "instructions": "instruction files (CLAUDE.md and the like)",
     "session_context": "session context (git status and the like)",
 }
+# Attachments Claude Code sends to the model after the first call, in plain words. Others are its own records
+# (the prompt snapshot, the environment snapshot, tool records, hook bookkeeping) and are not counted.
+SENT_ATTACHMENTS = {
+    "skill_listing": "the skill list (sent again)",
+    "agent_listing_delta": "the list of helper agents",
+    "instructions": "instruction files (CLAUDE.md and the like)",
+    "session_context": "session context (git status and the like)",
+    "invoked_skills": "instructions of a skill it used",
+    "nested_memory": "an instruction file from a sub-folder",
+    "file": "a file you attached",
+    "selected_lines_in_ide": "your editor selection",
+    "edited_text_file": "a note that a file changed",
+    "hook_additional_context": "hook output (added by your hooks)",
+    "hook_success": "hook output (added by your hooks)",
+    "hook_system_message": "hook output (added by your hooks)",
+    "task_reminder": "the task list (a reminder)",
+    "read_truncation_notice": "a note that a read was cut short",
+    "total_tokens_reminder": "a note of how many tokens are left in its budget",
+    "budget_usd": "a budget reminder",
+    "date": "today's date",
+    "silent_turn_reminder": "a reminder (added by Claude Code)",
+    "batching_reminder_sent": "a reminder (added by Claude Code)",
+    "plan_mode": "a plan-mode reminder",
+    "model": "a note about the model",
+}
+
+
+def _server(tool: str) -> str:
+    """mcp__claude-in-chrome__computer -> claude-in-chrome"""
+    return tool.split("__")[1] if tool.startswith("mcp__") and tool.count("__") >= 2 else ""
+
+
+def _added(a: dict, after_call: int) -> Added | None:
+    k = a.get("type")
+    if k == "deferred_tools_delta":
+        names = [str(x) for x in a.get("addedNames") or []]
+        if not names:
+            return None
+        lines = a.get("addedLines")
+        chars = len("\n".join(map(str, lines))) if isinstance(lines, list) and lines else len(json.dumps(names))
+        servers = sorted({_server(x) for x in names} - {""})
+        what = ", ".join(servers) if servers else "loaded on demand"
+        return Added("tools", f"{len(names)} more tool{'s' if len(names) != 1 else ''} ({what})", chars,
+                     after_call, names, servers)
+    if k == "mcp_instructions_delta":
+        blocks = [str(x) for x in a.get("addedBlocks") or []]
+        names = [str(x) for x in a.get("addedNames") or []]
+        if not blocks:
+            return None
+        return Added("instructions", "instructions for connected services: " + (", ".join(names) or "MCP servers"),
+                     sum(len(x) for x in blocks), after_call, servers=names)
+    if k in SENT_ATTACHMENTS:
+        if k == "skill_listing":
+            chars = len(str(a.get("content") or ""))
+        elif k == "instructions":
+            chars = sum(len(str(f.get("content") or "")) for f in a.get("files") or [] if isinstance(f, dict))
+        else:
+            chars = len(json.dumps({x: v for x, v in a.items() if x != "type"}, ensure_ascii=False))
+        label = SENT_ATTACHMENTS[k]
+        if k in ("edited_text_file", "file", "nested_memory") and (a.get("filename") or a.get("path")):
+            label += ": " + re.split(r"[\\/]", str(a.get("filename") or a.get("path")))[-1]
+        return Added("other", label, chars, after_call) if chars else None
+    return None
+
+
 KINDS = {
     "Read": "read", "NotebookRead": "read",
     "Grep": "search", "Glob": "search", "LS": "search", "ToolSearch": "search",
@@ -247,6 +312,8 @@ class _Thread:
                 c.text_chars += len(txt)
                 if txt.strip() and not c.first_text:
                     c.first_text = short(txt, 120)
+                if txt.strip():
+                    c.last_text = txt.strip()[-300:]
             elif t in ("thinking", "redacted_thinking"):
                 c.thinking_chars += len(str(b.get("thinking") or ""))
             elif t == "tool_use":
@@ -349,6 +416,12 @@ class ClaudeCodeReader:
                 if k == "prompt_snapshot":
                     if snapshot is None or a.get("tools"):
                         snapshot = a
+                elif main.order and k != "queued_command":
+                    # after the first call: it enters the conversation like anything else, so it is named there
+                    ad = _added(a, len(main.order))
+                    if ad is not None:
+                        s.added.append(ad)
+                        current().events.append(Event("injected", "Claude Code added " + ad.label, "", ad.chars, rts))
                 elif k in SETUP_ATTACHMENTS and k not in setup_extra:
                     if k == "instructions":
                         setup_extra[k] = sum(len(str(f.get("content") or "")) for f in a.get("files") or []

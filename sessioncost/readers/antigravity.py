@@ -123,6 +123,7 @@ class _Thread:
             txt = _pb.text(reply, 1)
             c.text_chars = len(txt)
             c.first_text = short(txt, 120) if txt.strip() else ""
+            c.last_text = txt.strip()[-300:]
             c.thinking_chars = len(_pb.text(reply, 3))
             self.order.append(c)
             self.last_ts = done or created or self.last_ts

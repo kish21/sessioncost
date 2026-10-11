@@ -1,5 +1,41 @@
 # What's new
 
+## 0.4.0
+
+- **A new report, the session board** (now the default; `--design classic` opens the earlier one):
+  - **The answer first:** tokens sent now and after the fixes, and the biggest fixes, ranked by the money they save.
+  - **The path:** Step 0, then every turn as a tile on one path. Tap a turn to zoom into its calls; tap a call for
+    what it sent and wrote.
+  - **Charts:** how each kind of token is priced and why the tokens and the money split so differently; the memory
+    sent with each call, shown by how it was paid (mostly cheap cache re-reads, the new part on its own scale);
+    where each fix helps in tokens, money and time; and what the agent spent its tokens on.
+  - **Step 0 in full:** what the fixed setup is made of, and every tool, used or never used.
+- **Text Claude Code adds mid-session is named:** tools it announces later (like the Chrome browser tools),
+  connected-service instructions, reminders and file-change notes now show by name in "what came in", instead of
+  "not itemised". If those tools are never used, the "turn off unused tools" fix counts them too and names the
+  services to disconnect.
+- **Find deeper fixes, opt-in:** with `--engine-url` (or `SESSIONCOST_ENGINE_URL`) the report offers a button
+  that sends the session summary (numbers and tool names, never content) to that fix engine, and adds the fixes it
+  returns. Without it nothing is ever sent.
+- **"Skip the stop that only asks you to confirm" counts only real stops:** a "yes" or "ok" counts only when the
+  agent's last message asked you something, not when you said "ok" after a finished job.
+- **Recommended rules for your agent:** seven habits that keep an agent from wasting tokens, for everyone, at the
+  top of "What to fix". The ones this session needed are marked with what they would have cut; one button copies
+  them all as a request your agent carries out (it adds them to CLAUDE.md, AGENTS.md or GEMINI.md).
+- **Rules go where each agent reads them:** CLAUDE.md for Claude Code, AGENTS.md for Codex and Cursor, GEMINI.md
+  for Antigravity, and the report's "Copy as a request" names the right file.
+- **Times never read "25h 60m"** in the new design (minutes are rounded before they are split into hours).
+- **Newer Cursor works again:** newer Cursor builds stopped saving which folder a chat belongs to, so
+  `sessioncost` found no Cursor chats for your project. It now also finds the folder from Cursor's per-project
+  transcripts and its per-folder store, so old and new Cursor builds both work.
+- **Archived Codex chats are found:** a Codex chat you archive moves to another folder; it is now searched too, and
+  its helpers are read with it.
+- **Codex helper costs are counted in full:** a Codex helper (the command reviewer, or an agent it starts) was
+  sometimes read as empty, so its calls were left out of the total. Its own calls now count; the history it copied
+  from the main chat still does not count twice.
+- **Never "no session found" when one exists:** if no session names your folder, `sessioncost` shows the newest
+  one whose folder the agent did not record, and says so. `sessioncost list` lists those separately.
+
 ## 0.3.1
 
 - **A Step 0 row** at the top of "Turn by turn": the agent's setup, sent before your first message and again with

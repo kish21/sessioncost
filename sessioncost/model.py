@@ -70,6 +70,7 @@ class Call:
     turn: int = 0                # the turn it belongs to
     text_chars: int = 0          # visible text written to the user
     first_text: str = ""         # the first sentence it wrote (for plain-words labels)
+    last_text: str = ""          # the end of the last thing it wrote (did it ask the user something?)
     thinking_chars: int = 0      # visible thinking text (usually empty: thinking is hidden)
     actions: list[Action] = field(default_factory=list)
 
@@ -135,6 +136,22 @@ class Fix:
     turns: list[int] = field(default_factory=list)
     items: list[str] = field(default_factory=list)
     source: str = "built-in"     # which engine found it
+    per_turn: dict[int, int] = field(default_factory=dict)   # tokens cut in each turn (empty: every call, Step 0)
+    calls: list[tuple[str, int]] = field(default_factory=list)  # (thread, call number) of the calls it applies to
+    how: str = ""                # what to do, in one or two lines
+    paste: bool = False          # `how` is a line to paste into the agent's instruction file
+
+
+@dataclass
+class Added:
+    """Setup-like text the agent added to the conversation after the first call (tools announced later, MCP server
+    instructions, the skill list again). From then on it rides along with every call, like the conversation."""
+    kind: str                    # "tools" | "instructions" | "other"
+    label: str                   # plain words
+    chars: int
+    after_call: int              # how many main calls had been made when it arrived
+    tools: list[str] = field(default_factory=list)      # tool names it announced
+    servers: list[str] = field(default_factory=list)    # the MCP servers it belongs to
 
 
 @dataclass
@@ -156,6 +173,7 @@ class Session:
     tokens_exact: bool = True           # False: the log has no token counts; they are estimated from text size
     notes: list[str] = field(default_factory=list)
     fixes: list[Fix] = field(default_factory=list)   # filled by the fix engines (see fixes.py)
+    added: list[Added] = field(default_factory=list) # setup-like text added after the first call
 
     @property
     def calls(self) -> list[Call]:

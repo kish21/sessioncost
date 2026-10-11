@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -102,11 +103,19 @@ def build(path, args) -> tuple[dict, Path | None]:
             print(f"sessioncost: {used} requests from the usage export matched this chat" if used else
                   "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
     a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
+    # where "Find deeper fixes" may send the summary, only when you press it (none by default: nothing is sent)
+    a["meta"]["engine_url"] = (getattr(args, "engine_url", None) or os.environ.get("SESSIONCOST_ENGINE_URL") or "").strip()
     out = None
+    args.extra = []
     if not args.json:
         REPORTS.mkdir(parents=True, exist_ok=True)
+        design = getattr(args, "design", "new") or "new"
         out = REPORTS / f"{s.session_id}.html"
-        out.write_text(report.render(a), encoding="utf-8")
+        out.write_text(report.render(a, "board" if design == "new" else "classic"), encoding="utf-8")
+        if design == "both":            # the new design next to the old one, to compare them
+            new = REPORTS / f"{s.session_id}-new.html"
+            new.write_text(report.render(a, "board"), encoding="utf-8")
+            args.extra.append(new)
     return a, out
 
 
@@ -170,22 +179,33 @@ def cmd_setup() -> int:
 
 
 def cmd_list(args) -> int:
-    found = locate.sessions(args.project)
-    if not found:
+    loose: list = []
+    found = locate.sessions(args.project, unlinked=loose)
+    if not found and not loose:
         print(f"No Claude Code, Codex, Antigravity or Cursor sessions found for {args.project or Path.cwd()}")
         return 1
     P = pricemod.load(args.prices)
-    print(f"{'When':16}  {'Agent':11}  {'Session':8}  {'Cost':>8}  {'Turns':>5}  {'Calls':>5}  First message")
-    for when, p in found[: args.limit]:
-        try:
-            a = analyse(readers.read(p), P, engines=[])
-        except Exception as e:  # one broken log must not hide the others
-            print(f"{when.astimezone():%Y-%m-%d %H:%M}  {'':11}  {locate.short_id(p)}  {'?':>8}  {'':>5}  {'':>5}  (could not read: {e})")
-            continue
-        t = a["totals"]
-        title = a["meta"]["title"]
-        print(f"{when.astimezone():%Y-%m-%d %H:%M}  {a['meta']['agent_label']:11}  {locate.short_id(p)}  {money(t['usd']):>8}  {t['turns']:>5}  {t['calls']:>5}  "
-              f"{title[:60]}{'…' if len(title) > 60 else ''}")
+
+    def rows(items):
+        print(f"{'When':16}  {'Agent':11}  {'Session':8}  {'Cost':>8}  {'Turns':>5}  {'Calls':>5}  First message")
+        for when, p in items[: args.limit]:
+            try:
+                a = analyse(readers.read(p), P, engines=[])
+            except Exception as e:  # one broken log must not hide the others
+                print(f"{when.astimezone():%Y-%m-%d %H:%M}  {'':11}  {locate.short_id(p)}  {'?':>8}  {'':>5}  {'':>5}  (could not read: {e})")
+                continue
+            t = a["totals"]
+            title = a["meta"]["title"]
+            print(f"{when.astimezone():%Y-%m-%d %H:%M}  {a['meta']['agent_label']:11}  {locate.short_id(p)}  {money(t['usd']):>8}  {t['turns']:>5}  {t['calls']:>5}  "
+                  f"{title[:60]}{'…' if len(title) > 60 else ''}")
+
+    if found:
+        rows(found)
+    else:
+        print(f"No session is recorded for {args.project or Path.cwd()}.")
+    if loose:
+        print("\nThe agent did not record a folder for these, so they may belong to any project:")
+        rows(loose)
     print("\nOpen one: sessioncost <session>   (its first characters are enough)")
     return 0
 
@@ -211,6 +231,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cursor-usage", metavar="CSV",
                     help="Cursor only: your usage export from the Cursor dashboard, for exact token counts")
     ap.add_argument("--limit", type=int, default=10, help="list: how many sessions (default 10)")
+    ap.add_argument("--design", choices=["new", "classic", "both"], default="new",
+                    help="report design: new (the session board, the default), classic (the turn list), or both side by side")
+    ap.add_argument("--engine-url", metavar="URL",
+                    help="a fix engine to offer under 'Find deeper fixes' (or set SESSIONCOST_ENGINE_URL); the summary "
+                         "is sent only when you press the button in the report")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     args = ap.parse_args(argv)
 
@@ -221,17 +246,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.target == "list":
         return cmd_list(args)
     if args.target == "last":
-        found = locate.sessions(args.project)
+        loose: list = []
+        found = locate.sessions(args.project, unlinked=loose)
+        if not found and loose:
+            print(f"sessioncost: no session is recorded for {args.project or Path.cwd()}. Showing the newest session "
+                  "whose folder the agent did not record; it may belong to another project. "
+                  "`sessioncost list` shows the others.")
+            found = loose
         if not found:
             print(f"No Claude Code, Codex, Antigravity or Cursor sessions found for {args.project or Path.cwd()} "
                   f"(looked in {locate.claude_home() / 'projects'}, {locate.codex_home() / 'sessions'} and "
-                  f"{locate.antigravity_home() / 'conversations'}, and Cursor's chats)")
+                  f"{locate.codex_home() / 'archived_sessions'}, {locate.antigravity_home() / 'conversations'}, "
+                  "and Cursor's chats)")
             return 1
         path = found[0][1]
     else:
         path = Path(args.target).expanduser()
         if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
-            hits = [p for _, p in locate.sessions(args.project) if locate.session_id(p).startswith(args.target)]
+            loose = []
+            hits = [p for _, p in locate.sessions(args.project, unlinked=loose) + loose
+                    if locate.session_id(p).startswith(args.target)]
             if len(hits) == 1:
                 path = hits[0]
     try:
@@ -243,9 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
         return 0
     print(summary(a, out))
-    old = old_reports(out) if out else []
+    for x in args.extra:
+        print(f"New design: {x}")
+    old = [f for f in old_reports(out) if f not in args.extra] if out else []
     if len(old) > OLD_REPORTS_HINT:
         print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
     if out and not args.no_open:
         webbrowser.open(out.resolve().as_uri())
+        for x in args.extra:
+            webbrowser.open(x.resolve().as_uri())
     return 0

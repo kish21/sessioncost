@@ -1,5 +1,10 @@
 # What's new
 
+## 0.5.3
+
+- **A clearer README** with pictures of every part of the report and a one-minute video tour (made with a demo
+  chat, not a real one). No change to how SessionCost works.
+
 ## 0.5.2
 
 - **More deeper fixes:** the fix engine now also finds tool answers that said "output too large" (the agent then

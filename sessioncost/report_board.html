@@ -104,6 +104,10 @@ button:focus-visible,a:focus-visible,.toggle input:focus-visible,summary:focus-v
 .q[aria-expanded="true"]{background:var(--ink-2);color:var(--surface)}
 .tile .v{font:700 26px/1.1 var(--f-display);letter-spacing:-.01em}
 .tile .s{font-size:13px;color:var(--ink-2)}
+.tile .split{display:flex;gap:26px}
+.tile .split>span{display:grid}
+.tile .split small{font:600 13px/1.3 var(--f-body);color:var(--ink);letter-spacing:0}
+.tile .split em{font:400 12px/1.3 var(--f-body);font-style:normal;color:var(--ink-2);letter-spacing:0}
 .tile .bar{display:flex;height:9px;border-radius:3px;overflow:hidden;background:var(--raise)}
 .tile .bar i{display:block;height:100%}
 .tile .paidbar{display:flex;height:5px;border-radius:2px;overflow:hidden;background:var(--raise)}
@@ -712,9 +716,9 @@ const TILES = [
    viz: bar([[SB.setup / SENT * 100, 'var(--keep)', 'Step 0 ' + K(SB.setup)], [SB.history / SENT * 100, 'var(--keep-2)', 'earlier conversation ' + K(SB.history)], [Math.max(.8, SB.new / SENT * 100), 'var(--new)', 'new ' + K(SB.new)]]) + `<div class="paidbar" title="re-read from the cache ${K(CACHE)} / written fresh ${K(FRESH)}"><i style="width:${CACHE / SENT * 100}%;background:var(--cache)"></i><i style="width:${FRESH / SENT * 100}%;background:var(--fresh)"></i></div>`,
    pill: `${K(CACHE)} re-read from the cache · ${K(FRESH)} written fresh`,
    more: dl([['Step 0', K(SB.setup)], ['Earlier conversation', K(SB.history)], ['New', K(SB.new) + ' (' + pct(SB.new, SENT) + ')'], ['Re-read from the cache (cheap)', K(CACHE)], ['Written fresh (full price)', K(FRESH)], ['Written by the model', K(OUT)]])},
-  {id: 'turns', label: 'Turns and calls', v: `${NT} · ${CALLS}`, s: `messages you sent · model calls${HCALLS ? ` (+${HCALLS} by helpers)` : ''}`,
+  {id: 'turns', label: 'Turns and calls', v: `<span class="split"><span>${NT}<small>${NT === 1 ? 'turn' : 'turns'}</small><em>your messages</em></span><span>${CALLS}<small>${CALLS === 1 ? 'model call' : 'model calls'}</small><em>${HCALLS ? `+${HCALLS} by helpers` : "the agent's steps"}</em></span></span>`, s: 'Bars: tokens sent in each turn',
    help: 'A turn starts each time you send a message. One message can take many model calls while the agent works. Bars: tokens sent per turn.',
-   viz: spark(TURNS.map(t => t.sent), 'var(--heat)', heatOp), pill: `${(NT ? CALLS / NT : 0).toFixed(1)} calls per message`,
+   viz: spark(TURNS.map(t => t.sent), 'var(--heat)', heatOp), pill: `${(NT ? CALLS / NT : 0).toFixed(1)} calls per turn`,
    more: dl([['Heaviest turn', heavy ? `T${heavy.n} · ${K(heavy.sent)}` : '–'], ['Median turn', K(MEDIAN)], ['Most calls in one turn', String(Math.max(0, ...TURNS.map(t => t.calls.length)))], ['Turns with a fix', String(TURNS.filter(t => t.fixes.length).length)]].concat(HCALLS ? [['Helper calls', String(HCALLS)]] : []))},
   {id: 'cost', label: 'Cost', v: usd(USD), s: MO.subscription ? 'API-equivalent: your plan is not billed per token' : MO.exact ? `at API prices (${esc(MO.as_of)})` : 'an estimate (see the details)',
    help: 'What these tokens cost at API prices. Reading from the cache is cheap; new input and the model\'s own writing cost the most.',

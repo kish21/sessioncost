@@ -1,5 +1,12 @@
 # What's new
 
+## 0.5.6
+
+- **README: Codex app steps** for the plugin (Customize → Plugins → sessioncost → Install plugin), next to the
+  Codex CLI's `/plugins`. Tested with the Codex app.
+- **The "Turns and calls" tile names each number:** "12 turns (your messages)" next to "86 model calls (the
+  agent's steps)", instead of "12 · 86".
+
 ## 0.5.5
 
 - **When the fix engine is off or busy, the report says so plainly** ("not available right now", "busy: try

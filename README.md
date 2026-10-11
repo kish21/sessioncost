@@ -48,7 +48,7 @@ Plugins need Python 3.10 or newer on the computer (way 1 does not).
 | Agent | How |
 |---|---|
 | **Claude Code** | In a chat: `/plugin marketplace add kish21/sessioncost`, then `/plugin install sessioncost@sessioncost`. Or type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, and install **sessioncost** from the **Plugins** tab. (Needs Git.) |
-| **Codex** | In a terminal: `codex plugin marketplace add kish21/sessioncost`. Then in Codex type `/plugins`, pick **sessioncost**, install it, and start a new session. |
+| **Codex** | First, in a terminal: `codex plugin marketplace add kish21/sessioncost`. Then **Codex app:** open **Customize → Plugins**, choose **sessioncost**, click **Install plugin**. **Codex CLI:** type `/plugins`, pick **sessioncost**, install it. Start a new chat afterwards. |
 | **Cursor** | Not in Cursor's marketplace yet: use way 1. |
 | **Antigravity** | No plugin list yet: use way 1. |
 

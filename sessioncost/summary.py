@@ -27,6 +27,10 @@ PROGRAMS = {
 }
 GIT_SUB = {"status", "diff", "log", "add", "commit", "push", "pull", "fetch", "checkout", "switch", "branch", "merge",
            "rebase", "stash", "show", "reset", "tag", "clone", "init", "remote", "rev-parse", "ls-files", "restore"}
+# The agent's own folders (its install, plugins, skills, saved chats): reading them mid-task is a catalog pattern.
+AGENT_FILES = re.compile(r"[\\/]\.(?:claude|codex|cursor|gemini|windsurf)[\\/](?:plugins|skills|projects|sessions|"
+                         r"commands|agents|extensions|conversations)[\\/]|[\\/]\.claude-plugin[\\/]", re.I)
+AGENT_MEMORY = re.compile(r"[\\/]projects[\\/][^\\/]+[\\/]memory\b", re.I)   # its own notes: normal
 SOURCE_EXT = r"\.(py|js|jsx|ts|tsx|mjs|cjs|go|rs|java|kt|cs|cpp|c|h|rb|php|swift|html|css|scss|vue|svelte|json|ya?ml|toml|md)\b"
 
 
@@ -104,6 +108,7 @@ def build(s, a: dict) -> dict:
     t0 = s.started
     secs = lambda d: round((d - t0).total_seconds(), 1) if d and t0 else None
     seen_result: dict[str, str] = {}                  # target code -> result fingerprint last seen
+    seen_any: dict[str, str] = {}                     # result fingerprint -> the target code that first returned it
     by_id = {(c["agent"], c["n"]): c for c in a["calls"]}
 
     def step(x) -> dict:
@@ -117,6 +122,16 @@ def build(s, a: dict) -> dict:
             if x.result_hash:
                 st["same_result_as_last_time"] = seen_result.get(st["target"]) == x.result_hash
                 seen_result[st["target"]] = x.result_hash
+        flags = list(x.result_flags)
+        if x.result_hash and x.result_chars >= 2000:  # a big result the same as an earlier one of another step
+            first = seen_any.setdefault(x.result_hash, st.get("target", ""))
+            if first != st.get("target", ""):
+                flags.append("repeat_text")
+        if flags:
+            st["result_flags"] = flags
+        if x.target and x.kind in ("read", "search") and AGENT_FILES.search(x.target) \
+                and not AGENT_MEMORY.search(x.target):
+            st["agent_files"] = True
         if x.kind == "command" and x.target:
             st["program"], sub = _program(x.target)
             if sub:

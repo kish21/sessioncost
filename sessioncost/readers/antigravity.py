@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from ..textflags import text_flags
 from ..model import Action, Call, Event, Helper, Session, Turn, Usage
 from . import _pb
 from .claude import _turn_at, short
@@ -141,7 +142,8 @@ class _Thread:
             self.order[-1].actions.append(Action(
                 id=_pb.text(call, 1), tool=name, kind=kind, label=label, target=target, args_chars=len(raw),
                 written_chars=written, result_chars=max(0, len(rest) - len(raw)),
-                result_hash=hashlib.sha1(rest).hexdigest()[:16], is_error=error, ts=created, result_ts=done))
+                result_hash=hashlib.sha1(rest).hexdigest()[:16], is_error=error, ts=created, result_ts=done,
+                result_flags=text_flags(rest[len(raw.encode('utf-8', 'replace')):].decode('utf-8', 'replace'))))
             self.last_ts = done or created or self.last_ts
         return None
 

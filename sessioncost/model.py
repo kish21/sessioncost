@@ -52,6 +52,7 @@ class Action:
     written_chars: int = 0       # text put into a file (write / edit)
     result_chars: int = 0        # size of what came back
     result_hash: str = ""        # fingerprint of the result (to spot an unchanged re-read); the text is not kept
+    result_flags: list[str] = field(default_factory=list)   # yes/no facts about the result text (textflags.py)
     is_error: bool = False
     ts: datetime | None = None
     result_ts: datetime | None = None

@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..textflags import text_flags
 from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
 from .claude import short, ts
 from .codex import _command, _name
@@ -222,7 +223,8 @@ class _Builder:
             written = sum(len(str(p.get(k) or "")) for k in ("streamingContent", "contents", "code_edit", "newString"))
             c.actions.append(Action(id=str(t.get("toolCallId") or ""), tool=name, kind=kind, label=label,
                                     target=target, args_chars=len(raw), written_chars=written,
-                                    result_chars=len(result), is_error=t.get("status") == "error", ts=when))
+                                    result_chars=len(result), is_error=t.get("status") == "error", ts=when,
+                                    result_flags=text_flags(result)))
             out += len(raw)
             self.history += len(result)
             self.cur_group = group or self.cur_group

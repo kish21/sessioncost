@@ -23,6 +23,7 @@ import re
 import shlex
 from pathlib import Path
 
+from ..textflags import text_flags
 from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
 from .claude import _rows, _turn_at, short, ts
 
@@ -244,6 +245,7 @@ class _Thread:
             txt = _text(out) if not isinstance(out, dict) else str(out.get("content") or "")
             a.result_chars = len(txt)
             a.result_hash = hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:16]
+            a.result_flags = text_flags(txt)
             a.result_ts = rts
             a.is_error = bool(re.search(r"(?:Exit code|exit_code\"?:)\s*[1-9]", txt[:400]))
 

@@ -655,7 +655,7 @@ const RULES = [
   ['Do not re-run a command when no file has changed since the last run. Read the first result.', ['re-run']],
 ];
 const askForAll = rules => `Please add these rules to ${RULES_AT} (create the file if it does not exist; keep anything already in it), then tell me it is done:\n\n` + rules.map(r => '- ' + r).join('\n');
-const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers', 'waking up to check a job', 'failed edit scripts', 'cd on every command', 'probing an empty project', 'flaky tests', 'a Python the agent cannot run', 'one edit per answer', 'oversized helpers', 'helpers one after another', 'chained starts in the background'];
+const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers', 'waking up to check a job', 'failed edit scripts', 'cd on every command', 'probing an empty project', 'flaky tests', 'a Python the agent cannot run', 'one edit per answer', 'oversized helpers', 'helpers one after another', 'chained starts in the background', 'output too large', 'cut output run again', 'blocked steps tried again', 'tool uses you turned down', 'digging in the tool\'s own files', 'the same text twice'];
 
 /* ======================= header ======================= */
 $('who').innerHTML = `<b>SessionCost</b> · ${esc(M.agent_label)}${M.agent_version ? ' ' + esc(M.agent_version) : ''} · ${esc(M.models.join(', '))}${M.project ? ' · project ' + esc(M.project) : ''}${M.date ? ' · ' + esc(M.date) : ''} · session ${esc(M.session_id.slice(0, 8))}`;
@@ -1365,7 +1365,7 @@ $('fixlist').addEventListener('click', e => {
   const nGot = got ? RECEIVED.findings.length : 0;
   const holds = `<details><summary>What the summary holds, and what it never holds</summary>
       <ul style="margin-top:8px"><li>For each of the ${SUM.calls.length} model calls: when it ran (seconds from the start), its model, the tokens it sent (Step 0, earlier conversation, new), re-read from the cache, and wrote.</li>
-        <li>For each of the ${nSteps} tool steps: the tool's name, its size in tokens, whether it failed, and how long it took. Commands only by their program (like <code>git</code>) and yes/no flags.</li>
+        <li>For each of the ${nSteps} tool steps (yes/no only: whether the answer said “output too large”, was cut short, was stopped by a safety check or turned down by you, repeated an earlier one, or came from the agent's own folders): the tool's name, its size in tokens, whether it failed, and how long it took. Commands only by their program (like <code>git</code>) and yes/no flags.</li>
         <li>Files and commands only as codes (${nCodes} codes like <code>f1</code>, <code>c2</code>), new for every summary.</li>
         <li>The size of Step 0, how many tools it defines and uses, your ${SUM.turns.length} turns' sizes and waits, and the basic fixes found.</li>
         <li><b>Never:</b> your messages or the agent's replies, code or file contents, command text, file or folder names, the project name, the session id, or clock times.</li></ul></details>

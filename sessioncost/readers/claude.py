@@ -18,6 +18,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from ..textflags import text_flags
 from ..model import Action, Added, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
 
 # Text the harness puts into a `user` row. Never shown as something the user typed.
@@ -335,6 +336,7 @@ class _Thread:
         txt = _result_text(b)
         a.result_chars = len(txt)
         a.result_hash = hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:16]
+        a.result_flags = text_flags(txt)
         a.result_ts = rts
         a.is_error = bool(b.get("is_error"))
         if a.kind == "question":

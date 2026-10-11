@@ -1,5 +1,14 @@
 # What's new
 
+## 0.5.2
+
+- **More deeper fixes:** the fix engine now also finds tool answers that said "output too large" (the agent then
+  had to read a saved file in pieces), cut output that was run again, steps a safety check stopped that the agent
+  kept trying, tool uses you turned down more than once, digging in the tool's own files after a failure, and the
+  same long text brought into the chat twice.
+- **Still no content sent:** your computer turns each tool answer into yes/no marks (said "too large", was cut, was
+  stopped, was turned down). Only those marks are in the summary; the report shows them before you send it.
+
 ## 0.5.1
 
 - **"I did this": fixes you have done stop repeating.** Each fix you do once (a rule for the agent, a setting you

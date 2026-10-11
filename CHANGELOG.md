@@ -1,5 +1,16 @@
 # What's new
 
+## 0.4.1
+
+- **"Turn off unused tools" now counts only what you can turn off:** connected MCP servers, claude.ai connectors
+  and plugins. The agent's own built-in tools come with it and can't be turned off, so they are no longer counted
+  (0.4.0 overstated this saving). The fix names each one and where to turn it off.
+- **Fixes say whether you paste them or do them yourself:** a rule is pasted into the chat (the agent adds it to its
+  instruction file); a setting like turning off a connected tool is done by you, with numbered steps. The report
+  says which, so nobody pastes a setting into the chat.
+- **Step 0's tool list** marks built-in tools (grey, can't be turned off) apart from connected tools never used
+  (dashed, can be turned off).
+
 ## 0.4.0
 
 - **A new report, the session board** (now the default; `--design classic` opens the earlier one):

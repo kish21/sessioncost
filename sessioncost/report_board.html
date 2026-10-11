@@ -137,7 +137,9 @@ button:focus-visible,a:focus-visible,.toggle input:focus-visible,summary:focus-v
 .tool .tn{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tool .tb{height:12px}
 .tool .tb i{display:block;height:100%;border-radius:2px;background:var(--keep)}
-.tool.idle .tb i{background:var(--raise);border:1.5px dashed var(--ink-2)}
+.tool.idle .tb i{background:var(--raise);border:1.5px dashed var(--cut)}
+.tool.builtin .tb i{background:var(--line)}
+.tool.builtin .tn,.tool.builtin .tv{color:var(--ink-2)}
 .tool.idle .tn,.tool.idle .tv{color:var(--ink-2)}
 .tool .tv{font-size:11.5px;white-space:nowrap}
 .parts .p{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px}
@@ -277,6 +279,7 @@ button:focus-visible,a:focus-visible,.toggle input:focus-visible,summary:focus-v
 .copybox.rule .lbl{font-weight:400;font-size:12.5px;line-height:1.45}
 .steps2{margin:0;padding-left:20px;font-size:12.5px;color:var(--ink-2);display:grid;gap:2px}
 .steps2 b{color:var(--ink)}
+.steps2.do{font-size:13.5px;color:var(--ink);gap:5px}
 .deeper{border:2px dashed var(--line);border-radius:14px;padding:16px;display:grid;gap:10px}
 .deeper.got{border-style:solid;border-color:var(--new)}
 .deeper ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink-2);display:grid;gap:3px}
@@ -736,10 +739,12 @@ if (SETUP){
   const stack = parts.map((p, i) => `<i style="width:${p.tokens / SETUP * 100}%;background:var(--keep);opacity:${shades[Math.min(i, 7)]}" title="${esc(p.what)}: ~${K(p.tokens)}"></i>`).join('');
   const legend = parts.map((p, i) => `<span><i class="sw" style="background:var(--keep);opacity:${shades[Math.min(i, 7)]}"></i>${esc(p.what)} <b class="num">~${K(p.tokens)}</b></span>`).join('');
   const tools = [...SU.tools].sort((a, b) => b.tokens - a.tokens), tmax = Math.max(1, ...tools.map(t => t.tokens));
-  const toolRow = t => `<div class="tool${t.used ? '' : ' idle'}"><span class="tn">${esc(t.name)}</span><span class="tb"><i style="width:${Math.max(1.5, t.tokens / tmax * 100)}%"></i></span><span class="tv num">${K(t.tokens)} · ${t.used ? 'used' : 'never used'}</span></div>`;
+  const connected = t => /^mcp__.+__/.test(t.name);
+  const toolRow = t => `<div class="tool${t.used ? '' : connected(t) ? ' idle' : ' builtin'}"><span class="tn">${esc(t.name)}</span><span class="tb"><i style="width:${Math.max(1.5, t.tokens / tmax * 100)}%"></i></span><span class="tv num">${K(t.tokens)} · ${t.used ? 'used' : connected(t) ? 'never used · can be turned off' : 'not used · built in'}</span></div>`;
+  const offable = tools.filter(t => !t.used && connected(t)).length, builtinIdle = tools.filter(t => !t.used && !connected(t)).length;
   $('s0Parts').innerHTML = `<div class="s0stack" role="img" aria-label="Step 0 parts: ${parts.map(p => esc(p.what) + ' ' + K(p.tokens)).join(', ')}">${stack}</div>
     <div class="s0legend">${legend}</div>
-    ${tools.length ? `<h3 style="margin-top:6px">The ${tools.length} tools in it <span class="muted" style="font-weight:400;font-size:12.5px">· ${SU.unused.length} never used (dashed)</span></h3>
+    ${tools.length ? `<h3 style="margin-top:6px">The ${tools.length} tools in it <span class="muted" style="font-weight:400;font-size:12.5px">· ${offable ? `${offable} connected and never used (dashed): can be turned off` : 'every connected tool was used'}${builtinIdle ? ` · ${builtinIdle} of ${esc(M.agent_label)}'s own tools not used (grey): they come with it and cannot be turned off` : ''}</span></h3>
       <div class="tools">${tools.slice(0, 10).map(toolRow).join('')}</div>
       ${tools.length > 10 ? `<details><summary class="link" style="cursor:pointer">Show all ${tools.length} tools</summary><div class="tools" style="margin-top:6px">${tools.slice(10).map(toolRow).join('')}</div></details>` : ''}` : ''}
     ${parts.length > 1 ? '<span class="muted" style="font-size:11.5px">Sizes are estimated from the text of each part.</span>' : ''}`;
@@ -1228,7 +1233,8 @@ $('fixlist').innerHTML = FIXES.length ? FIXES.map(f => {
         <code>${esc(f.how)}</code>
         <ol class="steps2"><li>Press <b>Copy as a request</b>.</li><li>Paste it into your chat with ${esc(M.agent_label)} and send it: the agent adds the rule to ${esc(PASTE)} for you.</li></ol>
         <div class="row"><button type="button" class="btn primary" data-copy="${esc(f.id)}" data-as="ask">Copy as a request</button><button type="button" class="link" data-copy="${esc(f.id)}" data-as="rule">Copy the rule only</button><span class="muted" style="font-size:12px">(to add it to ${esc(PASTE)} yourself)</span></div></div>`
-      : `<div class="copybox"><span class="lbl">What to do</span><code>${esc(f.how)}</code></div>`) : ''}
+      : `<div class="copybox rule"><span class="lbl">${/^unused-/.test(f.id) ? '<b>A setting you change yourself.</b> The agent cannot change it from a chat, so pasting this into the chat will not work. Do these steps:' : '<b>Something for you to do.</b> It is about how the session is run, not a rule for the agent, so pasting it into the chat will not help:'}</span>
+          ${/^\d+\. /m.test(f.how) ? `<ol class="steps2 do">${f.how.split('\n').filter(Boolean).map(x => `<li>${esc(x.replace(/^\d+\.\s*/, ''))}</li>`).join('')}</ol>` : `<p style="font-size:13px">${esc(f.how)}</p>`}</div>`) : ''}
     <div class="row">${f.step0 ? '<button type="button" class="link" data-s0="1">Show me Step 0</button>' : `<button type="button" class="link" data-show="${esc(f.id)}">Show it on the board</button>`}</div>
   </article>`;
 }).join('') : '<p class="muted">None of the basic checks fired: no unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</p>';

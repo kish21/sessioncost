@@ -13,13 +13,55 @@ the calls inside it, and the fixes that would have sent less, measured from your
 
 ## Install
 
-Open a terminal, paste one line, press Enter. No Python or Git needed.
+Pick the way that suits you. Each one adds `/sessioncost` to every agent on your computer: **Claude Code, Codex,
+Cursor and Antigravity**.
 
-| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
+### 1. Not technical? One line, nothing else needed
+
+1. Open a terminal. **Windows:** press the Windows key, type `powershell`, press Enter. **Mac:** press Cmd + Space,
+   type `terminal`, press Enter.
+2. Paste the line for your computer and press Enter:
+
+   | Windows | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
+   |---|---|
+   | **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
+
+3. Wait about a minute. It ends with `/sessioncost added` for each agent it found.
+
+### 2. Use the command line? Install from PyPI
+
+Needs Python 3.10 or newer.
+
+```
+pip install sessioncost        # or: pipx install sessioncost  /  uv tool install sessioncost
+sessioncost setup              # adds /sessioncost to your agents
+```
+
+### 3. Use Claude Code plugins? Add it as a plugin
+
+Needs Git and Python 3.10 or newer. In a Claude Code chat:
+
+```
+/plugin marketplace add kish21/sessioncost
+/plugin install sessioncost@sessioncost
+```
+
+Or use the menu: type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, then install **sessioncost** from
+the **Plugins** tab.
+
+### Then, in your agent
+
+Restart the agent, open any chat, and type **`/sessioncost`** (or ask: "run sessioncost"). The report opens in
+your browser.
+
+| Agent | Where `/sessioncost` is added |
 |---|---|
-| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
+| Claude Code | `~/.claude/skills/sessioncost` (or the plugin) |
+| Codex (CLI, IDE, app) | `~/.codex/skills/sessioncost` |
+| Cursor | `~/.cursor/skills/sessioncost` |
+| Antigravity | `~/.gemini/config/skills/sessioncost` |
 
-Restart your agent and type **`/sessioncost`** in any chat. The report opens in your browser.
+Installed another agent later? Run `sessioncost setup` again (or paste the line from way 1 again).
 
 ![/sessioncost in a Claude Code chat](https://raw.githubusercontent.com/kish21/sessioncost/main/media/chat.png)
 
@@ -80,9 +122,9 @@ Options: `--no-open`, `--json`, `--subscription` (money as API-equivalent on Pro
 - **`/sessioncost` does nothing:** restart the agent after installing.
 - **Windows says scripts are disabled:** run
   `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.
-- **Prefer pip:** `pip install sessioncost`, then `python -m sessioncost setup`.
-- **Claude Code plugin** (needs Git and Python): `/plugin marketplace add kish21/sessioncost`, then
-  `/plugin install sessioncost@sessioncost`.
+- **Updated with pip:** `pip install -U sessioncost`, then `sessioncost setup`. **Plugin:** `/plugin` →
+  **Marketplaces** → sessioncost → **Update**, then restart Claude Code.
+- **"git not found" when adding the plugin:** use way 1 instead; it needs neither Git nor Python.
 - **The deeper fixes take a while:** the engine sleeps when idle; the first check can take up to a minute.
 </details>
 

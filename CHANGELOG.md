@@ -1,5 +1,13 @@
 # What's new
 
+## 0.5.5
+
+- **When the fix engine is off or busy, the report says so plainly** ("not available right now", "busy: try
+  again in a minute", "did not answer in time") instead of a technical error, and stops waiting after 100 seconds.
+  The report and its basic fixes never depend on the engine.
+- **Install guide by kind of user** in the README: one line (nothing else needed), PyPI, or the Claude Code
+  plugin, then where `/sessioncost` lands in each agent.
+
 ## 0.5.4
 
 - **A short README**: a moving picture of the path of turns and the calls inside a turn at the top, one line per

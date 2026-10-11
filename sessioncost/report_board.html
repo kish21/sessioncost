@@ -1400,16 +1400,27 @@ $('fixlist').addEventListener('click', e => {
   if ($('dSend')) $('dSend').onclick = async () => {
     const btn = $('dSend'), st = $('dState');
     btn.disabled = true; st.textContent = `Sending the summary (${kb} KB)…` + (local ? '' : ' The fix engine sleeps when no one has used it for a while: the first check can take up to a minute.');
+    /* The engine may be asleep (up to a minute), switched off, or busy: each says so in plain words, and the report
+       itself never depends on it. */
+    const stop = new AbortController(), timer = setTimeout(() => stop.abort(), 100000);
+    let status = 0;
     try {
-      const r = await fetch(URL_ + '/v1/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(SUM)});
-      const ans = await r.json();
-      if (!r.ok || !Array.isArray(ans.findings)) throw new Error(ans.error || ('the engine answered ' + r.status));
+      const r = await fetch(URL_ + '/v1/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(SUM), signal: stop.signal});
+      status = r.status;
+      let ans = null;
+      try { ans = await r.json(); } catch (_) {}          // a host's error page is not JSON
+      if (!r.ok || !ans || !Array.isArray(ans.findings)) throw new Error((ans && ans.error) || 'status ' + r.status);
       try { sessionStorage.setItem(ENGINE_KEY, JSON.stringify(ans)); again(); }
       catch (e) { st.innerHTML = `The fix engine found ${plural(ans.findings.length, 'fix', 'fixes')}: ${ans.findings.map(f => esc(f.title)).join('; ')}. (This browser would not keep them, so they are listed here only.)`; }
     } catch (e) {
       btn.disabled = false;
-      st.textContent = local ? `The fix engine did not answer. Is it running on this computer? (${e.message})` : `The fix engine did not answer (${e.message}). Nothing else was sent.`;
-    }
+      const after = ' Your report and its basic fixes above are not affected.';
+      st.textContent = local ? `The fix engine did not answer. Is it running on this computer? (${e.message})`
+        : status === 429 ? 'The fix engine is busy: too many checks in the last minute. Try again in a minute.' + after
+        : status === 400 || status === 413 ? 'The fix engine could not read this summary. Updating SessionCost (paste the install line again) usually fixes it.' + after
+        : e.name === 'AbortError' ? 'The fix engine did not answer in time. It may be waking up: try again in a minute.' + after
+        : 'The fix engine is not available right now, so there are no deeper fixes this time. Try again later.' + after;
+    } finally { clearTimeout(timer); }
   };
 })();
 try { if (sessionStorage.getItem('sessioncost-scroll') === 'deeper'){ sessionStorage.removeItem('sessioncost-scroll'); setTimeout(() => $('deeper').scrollIntoView({block: 'center'}), 60); } } catch (e) {}

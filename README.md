@@ -149,6 +149,8 @@ before you send it. The engine checks it in memory and keeps nothing: it is not 
 
 To hide the button entirely: `sessioncost --engine-url off` (or set `SESSIONCOST_ENGINE_URL=off`).
 
+The "I did this" ticks in a report are kept in your browser only and never sent.
+
 The report page loads a web font from Google Fonts when you are online and falls back to system fonts when you are
 not.
 

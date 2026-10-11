@@ -1,5 +1,15 @@
 # What's new
 
+## 0.5.1
+
+- **"I did this": fixes you have done stop repeating.** Each fix you do once (a rule for the agent, a setting you
+  change) has an **I did this** box, and the recommended rules have **I added these rules**. Your later reports then
+  show it as **✓ Done**, folded away, instead of the same advice again. Fixes that no longer happen are listed as
+  "Fixed by you, and not seen in this chat". If the problem comes back in a chat started after you ticked it, the
+  report says so plainly (**⚠ marked done, but it happened again**) and what to check. Habits, like starting a new
+  chat after a long break, have no box: they are about each chat. The ticks are kept in your browser only and are
+  never sent.
+
 ## 0.5.0
 
 - **Deeper fixes are here.** The report's "Deeper fixes" box now has a button, **Send the summary to the fix

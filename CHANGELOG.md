@@ -1,5 +1,9 @@
 # What's new
 
+## 0.5.8
+
+- **Video tour on YouTube** (1440p, with music), linked at the top of the README.
+
 ## 0.5.7
 
 - **README: Cursor plugin steps** (Customize → Plugins → From GitHub Repository), with the one-line install as the

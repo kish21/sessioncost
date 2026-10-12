@@ -9,7 +9,7 @@
 Every message you send makes the agent send the **whole chat again**. SessionCost shows each turn on one path,
 the calls inside it, and the fixes that would have sent less, measured from your own chat.
 
-▶ [1-minute video tour](https://github.com/kish21/sessioncost/blob/main/media/sessioncost-demo.mp4) · <sub>pictures use a made-up demo chat</sub>
+▶ **[Watch the 1-minute video tour on YouTube](https://youtu.be/TYfaJuEWr7U)** · <sub>pictures use a made-up demo chat</sub>
 
 ## Install
 

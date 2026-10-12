@@ -1,5 +1,10 @@
 # What's new
 
+## 0.5.9
+
+- **Security basics:** a SECURITY.md (report problems privately through GitHub), Dependabot, and a read-only
+  security scan on every change (HOL's plugin scanner, score 100/100).
+
 ## 0.5.8
 
 - **Video tour on YouTube** (1440p, with music), linked at the top of the README.

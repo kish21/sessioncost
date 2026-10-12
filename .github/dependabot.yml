@@ -1,0 +1,12 @@
+# Weekly checks for updates to the GitHub Actions this repo uses, and to Python packages (SessionCost itself has
+# no third-party dependencies; this keeps it that way visibly).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"

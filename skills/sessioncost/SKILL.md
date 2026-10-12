@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 0.5.10) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
+description: (SessionCost 0.5.11) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -23,11 +23,9 @@ writes an HTML report and prints a short summary. It uses no AI model and sends 
    If `python` is not found (or opens the Microsoft Store, or is older than 3.10), try `py` in its place (Windows),
    then `python3`. If none of them works, the one-line install may have brought SessionCost with its own Python: try
    `sessioncost last`, then `~/.local/bin/sessioncost last`. If that fails too, SessionCost needs
-   Python 3.10 or newer, which this computer does not have. Tell the user to paste the one line for their system in a
-   terminal, which installs it with its own Python, then restart Claude Code and stop:
-
-   - Windows (PowerShell): `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex`
-   - macOS or Linux: `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh | sh`
+   Python 3.10 or newer, which this computer does not have. Tell the user to install SessionCost with the one-line
+   installer from https://github.com/kish21/sessioncost#install (it brings its own Python), then restart the agent,
+   and stop. Do not run an installer yourself.
 
 2. Show the user the printed summary exactly as printed, in a code block. Do not reword or recompute it.
 

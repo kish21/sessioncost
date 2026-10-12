@@ -1,5 +1,12 @@
 # What's new
 
+## 0.5.11
+
+- **Ready for Anthropic's Claude plugin directory:** a plugin icon, and the skill no longer carries the install
+  commands: when SessionCost is missing, it points you to the install page instead.
+- **Reports load nothing from the internet:** the fonts are now built into each report (free open-licence fonts,
+  about 220 KB), instead of being fetched from Google Fonts. Same look, works offline.
+
 ## 0.5.10
 
 - **Listed in the HOL plugin registry** (awesome-ai-plugins, owner-verified): its live trust badge is in the README.

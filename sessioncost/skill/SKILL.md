@@ -18,10 +18,8 @@ nothing unless the user presses "Send the summary to the fix engine" in the repo
    ```
 
    If that fails because the program is missing, try `sessioncost last`. If that fails too, tell the user
-   SessionCost is not installed and give them the one line for their system, then stop:
-
-   - Windows (PowerShell): `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex`
-   - macOS or Linux: `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh | sh`
+   SessionCost is not installed and to install it from https://github.com/kish21/sessioncost#install, then stop. Do
+   not run an installer yourself.
 
 2. Show the user the printed summary exactly as printed, in a code block. Do not reword or recompute it.
 

@@ -1,5 +1,10 @@
 # What's new
 
+## 0.5.12
+
+- **Claude plugin directory details:** the plugin is named "SessionCost" and links to its documentation, support,
+  privacy and licence pages.
+
 ## 0.5.11
 
 - **Ready for Anthropic's Claude plugin directory:** a plugin icon, and the skill no longer carries the install

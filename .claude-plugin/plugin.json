@@ -1,7 +1,8 @@
 {
   "name": "sessioncost",
+  "displayName": "SessionCost",
   "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "author": {
     "name": "kish21"
   },
@@ -13,5 +14,9 @@
     "usage",
     "session"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "documentationUrl": "https://github.com/kish21/sessioncost#readme",
+  "supportUrl": "https://github.com/kish21/sessioncost/issues",
+  "privacyPolicyUrl": "https://github.com/kish21/sessioncost#private",
+  "termsOfServiceUrl": "https://github.com/kish21/sessioncost/blob/main/LICENSE"
 }

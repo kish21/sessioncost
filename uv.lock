@@ -4,5 +4,5 @@ requires-python = ">=3.10"
 
 [[package]]
 name = "sessioncost"
-version = "0.5.11"
+version = "0.5.12"
 source = { editable = "." }

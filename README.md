@@ -2,7 +2,7 @@
 
 **See where every token of your AI coding chat went, and what to fix to send fewer.**
 
-[![PyPI](https://img.shields.io/pypi/v/sessioncost)](https://pypi.org/project/sessioncost/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Works with](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%C2%B7%20Antigravity-1f6f78)
+[![PyPI](https://img.shields.io/pypi/v/sessioncost)](https://pypi.org/project/sessioncost/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Works with](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%C2%B7%20Antigravity-1f6f78) [![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dkish21%252Fsessioncost%26metric%3Dtrust)](https://hol.org/registry/plugins/kish21%2Fsessioncost)
 
 ![Every turn of a chat on one path; tap a turn to see the calls inside it](https://raw.githubusercontent.com/kish21/sessioncost/main/media/path.gif)
 

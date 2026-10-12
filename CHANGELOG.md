@@ -1,5 +1,9 @@
 # What's new
 
+## 0.5.10
+
+- **Listed in the HOL plugin registry** (awesome-ai-plugins, owner-verified): its live trust badge is in the README.
+
 ## 0.5.9
 
 - **Security basics:** a SECURITY.md (report problems privately through GitHub), Dependabot, and a read-only

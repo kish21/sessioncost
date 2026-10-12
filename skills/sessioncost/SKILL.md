@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 0.5.9) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
+description: (SessionCost 0.5.10) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
 ---
 
 # SessionCost: where did this session's tokens go?

@@ -11,7 +11,7 @@ import re
 
 from datetime import datetime
 
-from . import fixes as fixmod, summary as summarymod
+from . import fixes as fixmod, rules, summary as summarymod
 from . import __version__, prices as pricemod
 from .model import Call, Session
 
@@ -25,6 +25,7 @@ CATEGORIES = [
     ("commands", "Running commands"),
     ("writing", "Writing files"),
     ("research", "Research and helpers"),
+    ("reviewer", "The agent checking its own commands"),   # Codex's safety reviewer (codex-auto-review)
     ("other", "Other steps"),
     ("closing", "Closing message"),
 ]
@@ -204,6 +205,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
                    if e.kind in SAID and (e.ts is None or first.ts_first is None or e.ts <= first.ts_first))
         setup_tokens = max(first.usage.context - said, 0)     # measured; the text estimate only splits it
     first_id = main_calls[0].msg_id if main_calls else None
+    # the agent checking its own commands before they run (Codex): its own line, not "helpers"
+    reviewer_calls = {id(c) for h in s.helpers if h.agent_type == "reviewer" for c in h.calls}
     last_id = main_calls[-1].msg_id if main_calls else None
 
     # ---- calls (main first, then helpers), each with its parts
@@ -225,8 +228,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         d = {
             "agent": c.agent, "n": c.n, "turn": c.turn, "model": c.model,
             "ts": iso(c.ts_first), "end": iso(c.ts_last), "time": hhmm(c.ts_first),
-            "category": category(c, c.msg_id == first_id and c.agent == "main",
-                                 c.msg_id == last_id and c.agent == "main"),
+            "category": "reviewer" if id(c) in reviewer_calls else category(c, c.msg_id == first_id and c.agent == "main",
+                                                                         c.msg_id == last_id and c.agent == "main"),
             "label": call_label(c),
             "actions": [{"label": a.label, "kind": a.kind, "result_tokens": tok(a.result_chars), "tool": a.tool,
                          "secs": round(secs(a.ts, a.result_ts), 1) if a.ts and a.result_ts else None,
@@ -318,7 +321,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     parts = [{"what": p.what, "tokens": tok(p.chars)} for p in s.setup.parts]
     if setup_logged > setup_tokens and setup_logged:    # the text estimate ran over the measured size: scale it to fit
         parts = [dict(x, tokens=round(x["tokens"] * setup_tokens / setup_logged)) for x in parts]
-    elif setup_tokens > setup_logged:
+    elif setup_tokens > setup_logged + 50:             # a few tokens of rounding is not a part worth a line
         parts.append({"what": "the agent's built-in instructions and other start-up text (not spelled out in the log)",
                       "tokens": setup_tokens - setup_logged})
     setup = {"known": s.setup.known, "measured": first is not None, "tokens": setup_tokens, "logged": setup_logged,
@@ -337,7 +340,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         replay.append({"call": i, "cum_usd": running})
 
     as_of = str(prices.get("as_of") or "unknown date")
-    split_known = all(c.usage.write_split_known for c in s.all_calls)
+    # only Claude prices cache writes kept 5 minutes and 1 hour differently; elsewhere the split does not matter
+    split_known = s.agent != "claude-code" or all(c.usage.write_split_known for c in s.all_calls)
     exact = not P.unchecked and s.tokens_exact and split_known
     long_label, short_label = money_label(exact, as_of, subscription, s.tokens_exact)
     if not exact and long_label.startswith("exact"):
@@ -371,6 +375,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             # file in .cursor/rules is ignored, those need Cursor's .mdc format)
             "rules_file": {"claude-code": "CLAUDE.md", "codex": "AGENTS.md", "cursor": "AGENTS.md",
                            "antigravity": "GEMINI.md"}.get(s.agent, "the agent's instruction file"),
+            # which recommended rules are already in the instruction files (read here, never sent)
+            "rules_check": rules.check(s.agent, s.cwd),
         },
         "money": {"label": long_label, "short": short_label, "as_of": as_of, "exact": exact,
                   "subscription": subscription, "unchecked_models": sorted(P.unchecked), "why": why,
@@ -417,6 +423,13 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         for tr in turn_rows:
             if tr["n"] in f.turns:
                 tr["fixes"].append(f.id)
+    # risky steps (risks.py): not a cost, shown above the fixes, whether or not the fix engine is used
+    tried = [(c, a) for c in s.all_calls for a in c.actions if "skips_commit_checks" in a.risks]
+    out["warnings"] = [{"id": "hook-bypass", "title": "Your agent tried to switch off the commit checks",
+                        "times": [hhmm(a.ts or c.ts_first) for c, a in tried],
+                        "refused": sum(1 for _, a in tried if a.is_error or {"blocked", "rejected"} & set(a.result_flags)),
+                        "how": "Never switch off the commit checks (no SKIP=, no --no-verify). If a check fails, fix "
+                               "the cause or tell me which check and why."}] if tried else []
     out["summary"] = summarymod.build(s, out)      # what a deeper-fix check would receive: no content (summary.py)
     return out
 

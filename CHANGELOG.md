@@ -1,5 +1,32 @@
 # What's new
 
+## 0.5.13
+
+- **The rules box copies only what this chat needed:** "Copy the 2 rules this chat needed" instead of all 7.
+  The other rules are behind "Show the other rules (prevention only)", with their own copy link. When nothing was
+  needed, the box says so and has no copy button. A rule you already added is not copied again, unless the problem
+  came back. The deeper fixes copy only the findings for this chat.
+- **Checks your instruction files:** the rules box reads CLAUDE.md, AGENTS.md, GEMINI.md, Cursor's rules and your
+  personal file, on your computer. A rule already there shows as "in your CLAUDE.md" and is not copied again; one that
+  was there before the chat while the problem still happened shows as "not followed". The box says how big the files
+  are, since they go with every call. Only yes/no per rule is kept; the text never leaves your computer.
+- **Names the agent, not Claude:** the pricing chart, the cache notes and the plan names now fit Codex, Cursor and
+  Antigravity too; Claude's 5-minute and 1-hour cache rows show only when a chat used them.
+- **Reads chats more correctly:** `/build` and Codex's `$skill` count as skill commands; a command that only prints
+  files counts as a read; Codex re-reads can now be spotted (its results carry run times that differ every time);
+  Cursor re-reads are counted when the same part of a same-length file is read again with no edit between.
+- **Codex's safety reviewer** (the agent checking its own commands) has its own line instead of counting as helpers.
+- **Nothing to cut:** one bar instead of two equal ones.
+- **Warns when the agent tried to switch off the commit checks** (SKIP= with a commit, `--no-verify`, `commit -n`,
+  HUSKY=0), whether it ran or was refused: "Your agent tried to switch off the commit checks at 09:15". The summary for
+  the fix engine carries only a yes/no; the command never leaves your computer.
+- **Checked prices for Codex, Cursor and Antigravity models** (vendors' own pages, 2026-10-16): gpt-6.1-sol,
+  composer-2.5, grok-4.7 and gemini-3.8-flash. Before, gpt-6.1-sol and Cursor's models fell back to a default price:
+  a Codex /build chat shown as $11.67 is $4.12, a Cursor one $5.15 is $3.15.
+- **New fix: switch off Claude Code tools you never use.** Claude Code's Artifact (~14.5k tokens) and Workflow tools go
+  out with every call; a setting removes them (`"enableArtifact": false`, `"disableWorkflows": true`). Shown when a
+  chat never used them.
+
 ## 0.5.12
 
 - **Claude plugin directory details:** the plugin is named "SessionCost" and links to its documentation, support,

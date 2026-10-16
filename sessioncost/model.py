@@ -11,8 +11,19 @@ A number the log does not hold stays None; the report then says "not in this log
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import datetime
+
+# A message that is only a skill or command call: /build (Claude Code, Cursor, Antigravity), $product-playbook:build
+# (Codex, written as a link: [$product-playbook:build](.../SKILL.md)). It loads a skill, so the chat used one even when no tool call says so.
+_SKILL_CALL = re.compile(r"\[?[/$][A-Za-z][\w.:-]*(?=\s|$|\]\()")
+
+
+def said_kind(text: str, typed: str = "typed") -> str:
+    """'command' for a message that starts with a skill or command call, else `typed`."""
+    return "command" if _SKILL_CALL.match(text.strip()) else typed
 
 
 @dataclass
@@ -53,6 +64,8 @@ class Action:
     result_chars: int = 0        # size of what came back
     result_hash: str = ""        # fingerprint of the result (to spot an unchanged re-read); the text is not kept
     result_flags: list[str] = field(default_factory=list)   # yes/no facts about the result text (textflags.py)
+    risks: list[str] = field(default_factory=list)   # risky steps (risks.py), e.g. skips_commit_checks
+    result_guessed: bool = False  # the log kept no result text (Cursor reads): size and fingerprint are a guess
     is_error: bool = False
     ts: datetime | None = None
     result_ts: datetime | None = None

@@ -48,7 +48,7 @@ def _flags(cmd: str) -> list[str]:
         f.append("chained")
     if re.search(r"(^|\s)&\s*$|start-process|nohup|run_in_background", low):
         f.append("background")
-    if re.match(r"(sleep|start-sleep|timeout)\b", low):
+    if re.match(r"(sleep|start-sleep|timeout)\b", low) or whole == "(checked on a running command)":   # Codex
         f.append("wait")
     wl = whole.lower()
     if re.search(r"(sed\s+-i|perl\s+-pi|set-content|out-file|python3?\s+-c|>\s*\S+" + SOURCE_EXT + r"|<<)", wl) \
@@ -95,6 +95,11 @@ def _tool_name(tool: str) -> str:
     return "mcp" if tool.lower().startswith("mcp") else tool
 
 
+def _helper_kind(agent_type: str) -> str:
+    t = (agent_type or "").lower()
+    return "reviewer" if t == "reviewer" else "browser" if "browser" in t else "helper"
+
+
 def build(s, a: dict) -> dict:
     """The summary for one session: s is the Session, a the analysis made from it."""
     codes: dict[tuple[str, str], str] = {}
@@ -132,6 +137,8 @@ def build(s, a: dict) -> dict:
         if x.target and x.kind in ("read", "search") and AGENT_FILES.search(x.target) \
                 and not AGENT_MEMORY.search(x.target):
             st["agent_files"] = True
+        if "skips_commit_checks" in x.risks:          # yes/no only: the command itself is never sent
+            st["skips_commit_checks"] = True
         if x.kind == "command" and x.target:
             st["program"], sub = _program(x.target)
             if sub:
@@ -168,6 +175,9 @@ def build(s, a: dict) -> dict:
                    "waited_s": round(t["waited_min"] * 60), "calls": len(t["calls"]),
                    "confirm_only": "confirm-turn" in t["fixes"]} for t in a["turns"]],
         "calls": [call(c) for c in s.calls] + [call(c) for h in s.helpers for c in h.calls],
-        "helpers": [{"calls": h["calls"], "turn": h["turn"], "tokens": h["tokens"]} for h in a["helpers"]],
+        # each helper's kind, never its name: "reviewer" is the agent checking its own commands (Codex), started again
+        # for each command, so its pauses are not waits for a job
+        "helpers": [{"calls": h["calls"], "turn": h["turn"], "tokens": h["tokens"], "kind": _helper_kind(h["type"])}
+                    for h in a["helpers"]],
         "basic_fixes": [{"id": f["id"], "tokens": f["saving_tokens"]} for f in a["fixes"]],
     }

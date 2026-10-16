@@ -24,7 +24,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from ..textflags import text_flags
-from ..model import Action, Call, Event, Helper, Session, Turn, Usage
+from ..model import Action, Call, Event, Helper, Session, Turn, Usage, said_kind
 from . import _pb
 from .claude import _turn_at, short
 from .codex import _command, _name
@@ -225,9 +225,9 @@ class AntigravityReader:
                 txt = _pb.text(payload, 19, 2).strip() or _attachments(payload)
                 when = _ts(meta, 1)
                 waited = (when - th.last_ts).total_seconds() if when and th.last_ts and when > th.last_ts else 0.0
-                t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind="typed", text=short(txt, 300) or "(empty)",
+                t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind=said_kind(txt), text=short(txt, 300) or "(empty)",
                          ts=when, waited_s=waited if turns else 0.0)
-                t.events.append(Event("typed", "you typed", short(txt, 300), len(txt), when))
+                t.events.append(Event(t.kind, "you ran a command" if t.kind == "command" else "you typed", short(txt, 300), len(txt), when))
                 turns.append(t)
                 continue
             c = th.step(typ, meta, payload, bool(err))

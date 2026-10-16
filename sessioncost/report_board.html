@@ -266,6 +266,8 @@ button:focus-visible,a:focus-visible,.toggle input:focus-visible,summary:focus-v
 .fx .turnchips button{font:600 11.5px var(--f-mono);border:1px solid var(--line);background:var(--raise);border-radius:6px;padding:2px 6px;cursor:pointer;color:var(--ink)}
 .fx .turnchips button:hover{border-color:var(--cut)}
 .fx ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--ink-2)}
+.warnrow{margin:0 0 10px;padding:10px 12px;border:1px solid var(--cut);border-radius:9px;background:color-mix(in srgb, var(--cut) 8%, var(--surface));font-size:13.5px}
+.warnrow code{white-space:normal}
 .rulesbox{border:2px solid var(--keep);border-radius:14px;padding:16px;display:grid;gap:10px;background:color-mix(in srgb, var(--keep) 5%, var(--surface))}
 .rulesbox h3{font-size:16px}
 .rulelist{margin:0;padding:0;list-style:none;display:grid;gap:6px}
@@ -542,7 +544,11 @@ let RECEIVED = null;
 try { RECEIVED = JSON.parse(sessionStorage.getItem(ENGINE_KEY) || 'null'); } catch (e) {}
 if (RECEIVED && Array.isArray(RECEIVED.findings)){
   const have = new Set(D.fixes.map(f => f.id));
-  D.fixes = D.fixes.concat(RECEIVED.findings.filter(f => f && f.id && !have.has(f.id))
+  /* a risk (no saving, e.g. hook-bypass) is a warning, not a fix; this report may already have found it itself */
+  D.warnings = D.warnings || [];
+  RECEIVED.findings.filter(f => f && f.risk && !D.warnings.some(w => w.id === f.id))
+    .forEach(f => D.warnings.push({id: f.id, title: f.title, why: f.why || '', how: f.how || '', times: [], refused: 0}));
+  D.fixes = D.fixes.concat(RECEIVED.findings.filter(f => f && f.id && !f.risk && !have.has(f.id))
     .map(f => ({items: [], turns: [], per_turn: {}, calls: [], how: '', paste: false, where: '', ...f, source: f.source || 'the fix engine'})));
   D.fix_engines = (D.fix_engines || []).concat(['the fix engine']);
 }
@@ -554,7 +560,7 @@ const N = n => Math.round(+n || 0).toLocaleString('en-US');
 const pct = (a, b) => { if (!b || !a) return '0%'; const p = a / b * 100; return p > 0 && p < 1 ? 'under 1%' : Math.round(p) + '%'; };
 const usd = x => { x = +x || 0; if (x === 0) return '$0'; if (x >= 100) return '$' + x.toFixed(0); if (x >= 0.995) return '$' + x.toFixed(2); if (x >= 0.01) return '$' + x.toFixed(3); return '$' + x.toFixed(4); };
 /* minutes: rounded first, then split, so it never reads "25h 60m" */
-const mins = m => { m = +m || 0; const r = Math.round(m); return r >= 60 ? Math.floor(r/60) + 'h ' + String(r % 60).padStart(2,'0') + 'm' : (m >= 10 ? Math.round(m) : m.toFixed(1)) + ' min'; };
+const mins = m => { m = +m || 0; const r = Math.round(m); return r >= 60 ? Math.floor(r/60) + 'h ' + String(r % 60).padStart(2,'0') + 'm' : (m >= 10 ? Math.round(m) : +m.toFixed(1)) + ' min'; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
 const plural = (n, w, ws) => `${n} ${n === 1 ? w : (ws || w + 's')}`;
@@ -581,7 +587,7 @@ const freshOf = c => Math.max(0, c.context - c.usage.cache_read);
 const inUsd = c => c.cost_by_class.input + c.cost_by_class.cache_write_5m + c.cost_by_class.cache_write_1h + c.cost_by_class.cache_read;
 /* fixes: Step 0 fixes apply to every call (no turns); the others name their turns and calls */
 const FIXES = D.fixes.map(f => ({...f, step0: !f.turns.length && !Object.keys(f.per_turn || {}).length,
-  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'repeated-reads': 're-read files', 'confirm-turn': 'confirm stops', 'long-chat': 'new chat'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
+  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'unused-builtin': 'unused built-ins', 'repeated-reads': 're-read files', 'confirm-turn': 'confirm stops', 'long-chat': 'new chat'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
   .sort((a, b) => b.saving_usd - a.saving_usd || b.saving_tokens - a.saving_tokens);     // money first: a cut of cheap cache re-reads must not look like the biggest win
 const FIX = Object.fromEntries(FIXES.map(f => [f.id, f]));
 const CALLFIX = {}; FIXES.forEach(f => (f.calls || []).forEach(i => { if (!f.step0) CALLFIX[i] = CALLFIX[i] || f.id; }));
@@ -638,17 +644,25 @@ const NEWCHAT = new Set((FIX['long-chat'] || {turns: []}).turns);
 const fixWhere = f => f.step0 ? `every call (Step 0)` : plural(f.turns.length, 'turn');
 function paidAs(f){
   if (f.step0){ const per = CALLS ? f.saving_tokens / CALLS : 0;
-    return `${K(per)} per call, on all ${CALLS} calls. In this session Step 0 was ${pct(S0_CACHE, S0_TOTAL)} re-read from the cache (about a tenth of the price), so the tokens are many but the money is small.`; }
+    return `${K(per)} per call, on all ${CALLS} calls. In this session Step 0 was ${pct(S0_CACHE, S0_TOTAL)} re-read from the cache (${CACHE_SHARE} of the price), so the tokens are many but the money is small.`; }
   const ts = TURNS.filter(t => f.turns.includes(t.n)), rr = sum(ts, t => t.cacheRead), all = sum(ts, t => t.sent);
   return `In these turns ${pct(rr, all)} of what was sent was re-read from the cache (cheap); the rest was written fresh (full price).`;
 }
 const PASTE = M.rules_file || "the agent's instruction file";
+/* the words that depend on the agent: Claude's 5-minute and 1-hour cache, and each agent's monthly plan */
+const CLAUDE = M.agent === 'claude-code';
+/* what a cache re-read costs next to normal input, for the main model: a tenth for Claude and Gemini, a quarter for
+   Grok, a twentieth for some OpenAI models. "About a tenth" written everywhere was wrong for the others. */
+const RM0 = (MO.rates || {})[M.model] || Object.values(MO.rates || {})[0] || {};
+const CACHE_SHARE = RM0.input && RM0.cache_read ? (r => r === 10 ? 'about a tenth' : r === 4 ? 'about a quarter' : r === 2 ? 'about half' : `about 1/${r}`)(Math.round(RM0.input / RM0.cache_read)) : 'a fraction';
+const CURSOR = M.agent === 'cursor';
+const PLAN = ({'claude-code': 'Claude Pro or Max', 'codex': 'a ChatGPT plan', 'cursor': 'a Cursor plan', 'antigravity': 'a Google AI plan'})[M.agent] || 'a monthly plan';
 const RULES_AT = ({'claude-code': 'CLAUDE.md in this project', 'codex': 'AGENTS.md in this project',
   'cursor': 'AGENTS.md in this project', 'antigravity': 'GEMINI.md in this project'})[M.agent] || "this project's instruction file";
 const askFor = rule => `Please add this rule to ${RULES_AT} (create the file if it does not exist), then tell me it is done:\n\n${rule}`;
 /* The recommended rules: habits that keep an agent from wasting tokens, for every user. Each names the fixes that
    show this session needed it (basic fixes, or the fix engine's when it was asked). */
-const RULES = [
+const RULES_DEFAULT = [     // the same list as rules.py, for a report made before 0.5.13
   ['When the next step is clear, go ahead without asking me to confirm. Tell me what you did afterwards.', ['confirm-turn']],
   ['When the next steps are the same kind of short command, run them together in one script or one chained command and print the result.', ['mechanical']],
   ['Do not read a file again if it has not changed since you last read it: use what you already read.', ['repeated-reads']],
@@ -658,6 +672,14 @@ const RULES = [
   ['Do not re-run a command when no file has changed since the last run. Read the first result.', ['re-run']],
 ];
 const askForAll = rules => `Please add these rules to ${RULES_AT} (create the file if it does not exist; keep anything already in it), then tell me it is done:\n\n` + rules.map(r => '- ' + r).join('\n');
+/* Which rules to copy: only the ones this chat needed (a fix fired), never one already added, unless it was needed
+   again (added before this chat started, yet the fix still fired). Copying all 7 by default made rules files longer
+   with no measured gain. doneAt(r) is the date the rule was added, or nothing. */
+const addedBefore = (at, start) => !!at && !!start && start < Date.parse(at);
+const rulesToCopy = (rows, doneAt, start) => rows.filter(r => r.hit.length && !r.inFile && !addedBefore(doneAt(r), start));
+/* the rules, and which are already in the agent's instruction files (read on this computer by rules.py) */
+const RCHECK = M.rules_check || {}, RFILES = RCHECK.files || [];
+const RULES = (RCHECK.rules || []).length ? RCHECK.rules.map(r => [r.text, r.ids, r.in_file || '', r.file_changed || '']) : RULES_DEFAULT;
 const ENGINE_PATTERNS = ['re-runs with nothing changed', 'long command output', 'research in the main chat', 'one read per call', 'git look-ups', 'spread edits', 'failed commands', 'unused skills', 'polling', 'help-flag probing', 'mid-turn cache expiry', 'bookkeeping calls', 'environment probing', 'unused MCP servers', 'waking up to check a job', 'failed edit scripts', 'cd on every command', 'probing an empty project', 'flaky tests', 'a Python the agent cannot run', 'one edit per answer', 'oversized helpers', 'helpers one after another', 'chained starts in the background', 'output too large', 'cut output run again', 'blocked steps tried again', 'tool uses you turned down', 'digging in the tool\'s own files', 'the same text twice'];
 
 /* ======================= header ======================= */
@@ -675,6 +697,12 @@ $('ansSub').innerHTML = `${ALL_CUT ? pct(ALL_CUT, SENT) + ' less' : 'Nothing obv
 (function(){
   const need = SENT - ALL_CUT, w = v => SENT ? v / SENT * 100 : 0;
   const cutBar = [[Math.min(S0_CUT, ALL_CUT), 'Step 0 that could go'], [Math.max(0, ALL_CUT - S0_CUT), 'Turns that could be cut']];
+  /* nothing to cut: one bar; two equal bars read as if the fixes did nothing */
+  if (!ALL_CUT){
+    $('ba').innerHTML = `<span class="lab">Sent</span>
+    <span class="bar" role="img" aria-label="${K(SENT)} sent"><i style="width:100%;background:var(--keep)" title="Sent: ${K(SENT)}"></i></span>
+    <span class="v">${K(SENT)}</span>`;
+  } else
   $('ba').innerHTML = `<span class="lab">Now</span>
     <span class="bar" role="img" aria-label="${K(SENT)} sent: ${K(need)} needed, ${K(ALL_CUT)} could be cut"><i style="width:${w(need)}%;background:var(--keep)" title="Needed: ${K(need)}"></i>${cutBar.filter(c => c[0] > 0).map(c => `<i class="hatch" style="width:${w(c[0])}%" title="${c[1]}: ${K(c[0])}"></i>`).join('')}</span>
     <span class="v">${K(SENT)}</span>
@@ -682,20 +710,22 @@ $('ansSub').innerHTML = `${ALL_CUT ? pct(ALL_CUT, SENT) + ' less' : 'Nothing obv
     <span class="bar" role="img" aria-label="${K(need)} after the fixes"><i style="width:${w(need)}%;background:var(--keep)" title="Needed: ${K(need)}"></i></span>
     <span class="v" style="color:var(--keep)">${K(need)}</span>`;
   const normal = USD - USD_READ + (T.cache_read_full_usd || 0);
-  $('baKeys').innerHTML = `<span><i class="sw" style="background:var(--keep)"></i>needed <b class="num" style="color:var(--ink)">${K(need)}</b></span>
+  $('baKeys').innerHTML = `${ALL_CUT ? `<span><i class="sw" style="background:var(--keep)"></i>needed <b class="num" style="color:var(--ink)">${K(need)}</b></span>` : `<span>Nothing obvious to cut in this chat.</span>`}
     ${ALL_CUT ? `<span><i class="sw hatch"></i>could be cut <b class="num" style="color:var(--ink)">${K(ALL_CUT)}</b>: ${K(Math.min(S0_CUT, ALL_CUT))} in Step 0, ${K(Math.max(0, ALL_CUT - S0_CUT))} in the turns</span>` : ''}
-    <p class="cachenote" style="flex-basis:100%;max-width:none"><i class="sw" style="background:var(--cache)"></i><span><b>${pct(CACHE, SENT)} of these tokens were re-read from the cache</b>, which costs about a tenth of the normal price. That is why ${K(SENT)} tokens cost ${usd(USD)}${T.cache_read_full_usd ? `; at the normal input price they would have cost ${usd(normal)}` : ''}. Cheap or not, every token still fills the chat, so cutting them gives you more room and more turns.</span></p>`;
+    <p class="cachenote" style="flex-basis:100%;max-width:none"><i class="sw" style="background:var(--cache)"></i><span><b>${pct(CACHE, SENT)} of these tokens were re-read from the cache</b>, which costs ${CACHE_SHARE} of the normal price. That is why ${K(SENT)} tokens cost ${usd(USD)}${T.cache_read_full_usd ? `; at the normal input price they would have cost ${usd(normal)}` : ''}. Cheap or not, every token still fills the chat, so cutting them gives you more room and more turns.</span></p>`;
 })();
 $('top3H').textContent = FIXES.length ? `The ${FIXES.length >= 3 ? 3 : FIXES.length} biggest fix${FIXES.length === 1 ? '' : 'es'}` : 'What to fix';
 $('allFixes').textContent = FIXES.length > 3 ? `All ${FIXES.length} fixes ↓` : 'How to fix ↓';
 const amtLine = f => !f.saving_tokens ? `${usd(f.saving_usd)}<small>saved, no tokens cut</small>` : f.step0 ? `−${K(CALLS ? f.saving_tokens / CALLS : 0)}<small>per call · saves ${usd(f.saving_usd)}<br><span class="sep"> · </span>${K(f.saving_tokens)} in all, mostly cache</small>`
   : `−${K(f.saving_tokens)}<small>${pct(f.saving_tokens, SENT)} of the session<br><span class="sep"> · </span>saves ${usd(f.saving_usd)}</small>`;
+/* risks first (not a cost): e.g. the agent tried to switch off the commit checks */
+$('top3').insertAdjacentHTML('beforebegin', (D.warnings || []).map(w => `<p class="warnrow" role="alert"><b>⚠ ${esc(w.title)}</b> ${!w.times.length ? esc(w.why) : w.times.length === 1 ? 'at ' + esc(w.times[0]) : `${w.times.length} times (${w.times.map(esc).join(', ')})`}${w.refused ? `; ${w.refused === w.times.length ? (w.refused === 1 ? 'it was' : 'all were') : w.refused + ' were'} refused` : ''}. Not a cost, but the checks are there to catch mistakes. A rule for ${esc(PASTE)}: <code>${esc(w.how)}</code></p>`).join(''));
 $('top3').innerHTML = (FIXES.length ? FIXES.slice(0, 3).map(f => `<article class="fixcard">
     <span class="amt">${amtLine(f)}</span>
     <span class="t">${esc(f.title)}</span>
     <span class="w">Where: <b>${fixWhere(f)}</b>. ${f.step0 ? 'Cheap cache re-reads, but on every call.' : ''}</span>
     <span class="acts">${f.step0 ? '<button type="button" class="link" data-s0="1">Show me Step 0</button>' : `<button type="button" class="link" data-show="${esc(f.id)}">Show me on the board</button>`}<button type="button" class="link" data-how="${esc(f.id)}">How to fix it ↓</button></span>
-  </article>`).join('') : `<article class="fixcard"><span class="amt" style="color:var(--keep)">✓</span><span class="t">None of the basic checks fired</span><span class="w">No unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</span></article>`)
+  </article>`).join('') : `<article class="fixcard"><span class="amt" style="color:var(--keep)">✓</span><span class="t">None of the basic checks fired</span><span class="w">No unused tools sent with every call, ${M.agent === 'cursor' ? 'no stop that only waited for a yes, and no part of a file read again with the same length and no edit in between (Cursor does not keep what a read returned, so that is the closest check).' : 'no unchanged file read twice, no stop that only waited for a yes.'}</span></article>`)
   + (ENGINE ? '' : `<article class="fixcard" style="border-style:dashed">
     <span class="amt" style="color:var(--new)">More?<small>deeper check</small></span>
     <span class="t">${FIXES.length ? 'Find more to cut with the deeper check' : 'Nothing basic to cut. Look deeper?'}</span>
@@ -717,7 +747,7 @@ const TILES = [
    more: dl([['Step 0', K(SB.setup)], ['Earlier conversation', K(SB.history)], ['New', K(SB.new) + ' (' + pct(SB.new, SENT) + ')'], ['Re-read from the cache (cheap)', K(CACHE)], ['Written fresh (full price)', K(FRESH)], ['Written by the model', K(OUT)]])},
   {id: 'turns', label: 'Turns and calls', v: `<span class="split"><span>${NT}<small>${NT === 1 ? 'turn' : 'turns'}</small><em>your messages</em></span><span>${CALLS}<small>${CALLS === 1 ? 'model call' : 'model calls'}</small><em>${HCALLS ? `+${HCALLS} by helpers` : "the agent's steps"}</em></span></span>`, s: 'Bars: tokens sent in each turn',
    help: 'A turn starts each time you send a message. One message can take many model calls while the agent works. Bars: tokens sent per turn.',
-   viz: spark(TURNS.map(t => t.sent), 'var(--heat)', heatOp), pill: `${(NT ? CALLS / NT : 0).toFixed(1)} calls per turn`,
+   viz: spark(TURNS.map(t => t.sent), 'var(--heat)', heatOp), pill: `${+(NT ? CALLS / NT : 0).toFixed(1)} calls per turn`,
    more: dl([['Heaviest turn', heavy ? `T${heavy.n} · ${K(heavy.sent)}` : '–'], ['Median turn', K(MEDIAN)], ['Most calls in one turn', String(Math.max(0, ...TURNS.map(t => t.calls.length)))], ['Turns with a fix', String(TURNS.filter(t => t.fixes.length).length)]].concat(HCALLS ? [['Helper calls', String(HCALLS)]] : []))},
   {id: 'cost', label: 'Cost', v: usd(USD), s: MO.subscription ? 'API-equivalent: your plan is not billed per token' : MO.exact ? `at API prices (${esc(MO.as_of)})` : 'an estimate (see the details)',
    help: 'What these tokens cost at API prices. Reading from the cache is cheap; new input and the model\'s own writing cost the most.',
@@ -725,7 +755,7 @@ const TILES = [
    pill: ALL_USD ? `the fixes save ${usd(ALL_USD)}` : esc(MO.short),
    more: dl([['Re-read from the cache', usd(USD_READ)], ['Written fresh', usd(USD_WRITE)], ['Written by the model', usd(USD_OUT)]].concat(T.helpers_usd ? [['of it by helpers', usd(T.helpers_usd)]] : []))},
   {id: 'time', label: 'Time', v: mins(WORK) + ' working', s: `${mins(WAIT)} waiting for you`,
-   help: 'Working: the agent busy on your messages. Waiting: from the agent finishing until your next message. A break over 5 minutes (one hour at most) lets the cache expire.',
+   help: 'Working: the agent busy on your messages. Waiting: from the agent finishing until your next message. ' + (CLAUDE ? 'A break over 5 minutes (one hour at most) lets the cache expire.' : 'A long break can let the cache expire.'),
    viz: bar([[WORK / Math.max(1e-9, WORK + WAIT) * 100, 'var(--keep)', 'working ' + mins(WORK)], [WAIT / Math.max(1e-9, WORK + WAIT) * 100, 'var(--ink-2)', 'waiting ' + mins(WAIT)]]),
    pill: breaks ? `${plural(breaks, 'break')} expired the cache` : 'the cache never expired',
    more: dl([['Working, per turn', mins(NT ? WORK / NT : 0)], ['Longest wait', mins(Math.max(0, ...TURNS.map(t => t.waitMin)))]])},
@@ -1059,9 +1089,9 @@ function drawTileKey(){
       <li><b>Header:</b> redder = more tokens in the turn; the red bar under it says the same as a length</li>
       <li><b>Big number ↑ in:</b> tokens sent to the model in this turn</li>
       <li><b>The bar:</b> <i class="sw" style="background:var(--cache)"></i>re-read from the cache (cheap), <i class="sw" style="background:var(--fresh)"></i>new at full price</li>
-      <li><b>↻ 99%:</b> share re-read from the cache · <b style="color:var(--out)">↓ 8k:</b> written by the model</li>
+      <li><b>↻ %:</b> share re-read from the cache · <b style="color:var(--out)">↓:</b> written by the model</li>
       <li><b>Dots:</b> one per call; <span style="color:var(--cut)">●</span> a fix applies, <span style="color:var(--cache)">●</span> a helper's call</li>
-      <li><b style="color:var(--cut)" class="num">−12k:</b> what the fixes would cut in this turn</li></ul>`;
+      <li><b style="color:var(--cut)" class="num">−:</b> what the fixes would cut in this turn (only when one applies)</li></ul>`;
 }
 $('board').addEventListener('click', e => { const g = e.target.closest('.node'); if (g) activate(+g.dataset.k); });
 $('board').addEventListener('keydown', e => { const g = e.target.closest('.node'); if (g && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); activate(+g.dataset.k); } });
@@ -1151,9 +1181,9 @@ function callDetails(c){
     ${items ? `<table class="t"><tr><th>What came in new</th><th class="n">tokens</th></tr>${items}</table>` : ''}
     ${acts ? `<table class="t"><tr><th>What it did</th><th class="n">came back</th></tr>${acts}</table>` : ''}
     <table class="t"><tr><th>What it wrote</th><th class="n">tokens</th></tr>${wrote}<tr class="sum"><td>= written</td><td class="n">${N(c.written.tokens)}</td></tr></table>
-    <table class="t"><tr><th>As the log counts it</th><th class="n">tokens</th><th class="n">cost</th></tr>
+    <table class="t"><tr><th>${CURSOR ? 'As estimated (Cursor keeps no token counts)' : 'As the log counts it'}</th><th class="n">tokens</th><th class="n">cost</th></tr>
       <tr><td>new input, not cached</td><td class="n">${N(u.input)}</td><td class="n">${usd(cc.input)}</td></tr>
-      <tr><td>new input, cached (5 min / 1 hour)</td><td class="n">${N(u.cache_write_5m + u.cache_write_1h)}</td><td class="n">${usd(cc.cache_write_5m + cc.cache_write_1h)}</td></tr>
+      ${CLAUDE || u.cache_write_5m + u.cache_write_1h ? `<tr><td>new input, cached${CLAUDE ? ' (5 min / 1 hour)' : ''}</td><td class="n">${N(u.cache_write_5m + u.cache_write_1h)}</td><td class="n">${usd(cc.cache_write_5m + cc.cache_write_1h)}</td></tr>` : ''}
       <tr><td>re-read from the cache</td><td class="n">${N(u.cache_read)}</td><td class="n">${usd(cc.cache_read)}</td></tr>
       <tr><td>written${u.thinking != null ? ' (of which ' + N(u.thinking) + ' hidden thinking)' : ''}</td><td class="n">${N(u.output)}</td><td class="n">${usd(cc.output)}</td></tr>
       <tr class="sum"><td>= this call · ${esc(c.model)} · ${esc(c.time)}</td><td class="n">${N(c.context + u.output)}</td><td class="n">${usd(c.usd)}</td></tr></table>
@@ -1260,7 +1290,7 @@ $('fixlist').innerHTML = FIXES.length ? FIXES.map(f => {
           ${/^\d+\. /m.test(f.how) ? `<ol class="steps2 do">${f.how.split('\n').filter(Boolean).map(x => `<li>${esc(x.replace(/^\d+\.\s*/, ''))}</li>`).join('')}</ol>` : `<p style="font-size:13px">${esc(f.how)}</p>`}</div>`) : ''}
     <div class="row">${f.step0 ? '<button type="button" class="link" data-s0="1">Show me Step 0</button>' : `<button type="button" class="link" data-show="${esc(f.id)}">Show it on the board</button>`}</div>
   </article>`;
-}).join('') : '<p class="muted">None of the basic checks fired: no unused tools sent with every call, no unchanged file read twice, no stop that only waited for a yes.</p>';
+}).join('') : '';      // the header line above already says none fired
 /* ---- "I did this": fixes the user has done are remembered in this browser only (never sent anywhere), so later
    reports show them as ✓ instead of repeating them, and say so plainly when the problem comes back. Only one-time
    fixes get a box (a rule for the agent, a setting); habits, like starting a new chat after a break, are about each
@@ -1291,38 +1321,67 @@ function paintDone(f){
 }
 /* ---- the recommended rules box */
 (function rulesBox(){
-  const rows = RULES.map(([text, ids]) => { const hit = ids.map(id => FIX[id]).filter(Boolean); return {text, ids, hit}; });
+  const rows = RULES.map(([text, ids, inFile, fileAt]) => { const hit = ids.map(id => FIX[id]).filter(Boolean); return {text, ids, hit, inFile: inFile || '', fileAt: fileAt || ''}; });
+  /* in the file since before this chat started, and the problem still happened: the agent did not follow it */
+  const ignored = r => r.inFile && r.hit.length && START && r.fileAt && Date.parse(r.fileAt) < START;
   const rowDone = r => r.ids.map(id => DONE[id]).filter(Boolean).map(d => d.at).sort()[0];
   const status = r => {
+    if (r.inFile) return ignored(r) ? `<span class="bad">⚠ in ${esc(r.inFile)}, not followed</span><small>the problem happened anyway</small>`
+      : r.hit.length ? `✓ in ${esc(r.inFile)} now<small>changed after this chat started</small>` : `<span class="ok">✓ in ${esc(r.inFile)}</span>`;
     const at = rowDone(r), cut = `<small>−${K(sum(r.hit, f => f.saving_tokens))} tokens · ${usd(sum(r.hit, f => f.saving_usd))}</small>`;
     if (at && r.hit.length) return START && START < Date.parse(at) ? `✓ added ${esc(doneDay(at))}<small>this chat started before that</small>` : `<span class="bad">⚠ added ${esc(doneDay(at))}, needed again</span>${cut}`;
     if (at) return `<span class="ok">✓ added ${esc(doneDay(at))}</span>`;
     return r.hit.length ? `✓ needed here${cut}` : 'prevents it next time';
   };
+  /* fixed when the page opens, so ticking "I added these" does not empty the list under your hand */
+  const toCopy = rulesToCopy(rows, rowDone, START), needed = rows.filter(r => r.hit.length);
+  const others = rows.filter(r => !r.hit.length), othersToCopy = others.filter(r => !rowDone(r) && !r.inFile);
+  const sets = {needed: toCopy, others: othersToCopy};
+  const isAdded = list => list.length > 0 && list.every(r => r.inFile || addedBefore(rowDone(r), START) || (!r.hit.length && rowDone(r)));
+  const li = r => `<li class="${r.hit.length && (ignored(r) || (!r.inFile && !addedBefore(rowDone(r), START))) ? 'needed' : ''}"><span>${esc(r.text)}</span><span class="st">${status(r)}</span></li>`;
+  const tick = (set, list, text) => `<div class="donebar"><label><input type="checkbox" data-rules-done="${set}"${isAdded(list) ? ' checked' : ''}> ${text}</label><span class="muted">Remembered in this browser only; your next reports mark them as added.</span></div>`;
+  /* the instruction files that were checked, and their size: they go with every call (Step 0) */
+  const filesLine = () => {
+    if (!M.rules_check) return '';
+    if (!RFILES.length) return `<p class="muted" style="font-size:12.5px;max-width:none">No instruction file found for this project (looked for ${esc(PASTE)} and your personal one).</p>`;
+    const total = sum(RFILES, f => f.tokens);
+    /* many Cursor rule files: one entry for all of them */
+    const rulesDir = RFILES.filter(f => f.name.startsWith('.cursor/rules/')), shown = RFILES.filter(f => !rulesDir.includes(f))
+      .map(f => `${esc(f.name)} (~${K(f.tokens)} tokens)`).concat(rulesDir.length > 2 ? [`${rulesDir.length} rule files in .cursor/rules (~${K(sum(rulesDir, f => f.tokens))} tokens)`] : rulesDir.map(f => `${esc(f.name)} (~${K(f.tokens)} tokens)`));
+    return `<p class="muted" style="font-size:12.5px;max-width:none">Checked against ${shown.join(', ')}, as they are now.${total >= 2000 ? ` <b style="color:var(--ink)">Together about ${K(total)} tokens, sent with every call: ${K(total * CALLS)} over this chat.</b> Keep them short: a rule no chat needs still costs on every call.` : ''}</p>`;
+  };
+  let othersOpen = false;
   function render(){
-    const needed = rows.filter(r => r.hit.length), all = rows.every(rowDone);
-    $('rulesbox').innerHTML = `<div class="row spread"><h3>Recommended rules for your agent</h3><span class="src basic">${rows.length} rules</span></div>
-    <p style="font-size:13.5px;max-width:none">Habits that keep an agent from wasting tokens. They go in ${esc(PASTE)}, which ${esc(M.agent_label)} reads at the start of every chat, so they apply from your next chat on. ${needed.length ? `<b>${plural(needed.length, 'rule')} would have helped in this session</b> (marked), with what each would have cut.` : 'None of the problems they prevent showed up in this session; they keep it that way.'}</p>
-    <ul class="rulelist">${rows.map(r => `<li class="${r.hit.length && !(rowDone(r) && START < Date.parse(rowDone(r))) ? 'needed' : ''}"><span>${esc(r.text)}</span>
-      <span class="st">${status(r)}</span></li>`).join('')}</ul>
-    ${all ? '' : `<ol class="steps2"><li>Press <b>Copy all as a request</b>.</li><li>Paste it into your chat with ${esc(M.agent_label)} and send it: the agent adds the rules to ${esc(PASTE)} for you.</li><li>Tick <b>I added these rules</b>.</li></ol>`}
-    <div class="row"><button type="button" class="btn${all ? '' : ' primary'}" data-copy-all="ask">Copy all as a request</button><button type="button" class="link" data-copy-all="rules">Copy the rules only</button><span class="muted" style="font-size:12px">(to add them to ${esc(PASTE)} yourself)</span></div>
-    <div class="donebar"><label><input type="checkbox" id="rulesDone"${all ? ' checked' : ''}> I added these rules</label><span class="muted">Remembered in this browser only; your next reports mark them as added.</span></div>`;
+    const n = toCopy.length, them = n === 1 ? 'it' : 'them';
+    $('rulesbox').innerHTML = `<div class="row spread"><h3>Recommended rules for your agent</h3><span class="src basic">${plural(needed.length, 'rule')} needed</span></div>
+    <p style="font-size:13.5px;max-width:none">Habits that keep an agent from wasting tokens. They go in ${esc(PASTE)}, which ${esc(M.agent_label)} reads at the start of every chat, so they apply from your next chat on. ${needed.length ? `<b>${plural(needed.length, 'rule')} would have helped in this session</b>, with what each would have cut.` : ''}</p>
+    ${filesLine()}
+    ${needed.length ? `<ul class="rulelist">${needed.map(li).join('')}</ul>` : ''}
+    ${rows.some(ignored) ? `<p style="font-size:13px;max-width:none"><span class="bad">⚠ ${plural(rows.filter(ignored).length, 'rule')} ${rows.filter(ignored).length === 1 ? 'was' : 'were'} already in your instruction file before this chat, and the agent did not follow ${rows.filter(ignored).length === 1 ? 'it' : 'them'}.</span> Adding it again will not help. Check that the rule is worded plainly, and remind the agent in the chat that it must follow it.</p>` : ''}
+    ${n ? `<ol class="steps2"><li>Press <b>Copy the ${n === 1 ? 'rule' : n + ' rules'} this chat needed</b>.</li><li>Paste it into your chat with ${esc(M.agent_label)} and send it: the agent adds ${them} to ${esc(PASTE)} for you.</li><li>Tick <b>I added ${n === 1 ? 'this rule' : 'these rules'}</b>.</li></ol>
+    <div class="row"><button type="button" class="btn${isAdded(toCopy) ? '' : ' primary'}" data-copy-all="ask" data-set="needed">Copy the ${n === 1 ? 'rule' : n + ' rules'} this chat needed</button><button type="button" class="link" data-copy-all="rules" data-set="needed">Copy the rule${n === 1 ? '' : 's'} only</button><span class="muted" style="font-size:12px">(to add ${them} to ${esc(PASTE)} yourself)</span></div>
+    ${tick('needed', toCopy, n === 1 ? 'I added this rule' : 'I added these rules')}`
+      : `<p style="font-size:13.5px;max-width:none">${needed.length ? 'The rules this chat needed are already in place; nothing to add.' : 'None of these problems showed up in this chat; nothing to add.'}</p>`}
+    ${others.length ? `<div class="row">${others.every(r => r.inFile) ? `<span class="ok" style="font-size:13px">✓ The other ${plural(others.length, 'rule')} ${others.length === 1 ? 'is' : 'are'} already in your instruction files.</span>` : ''}<button type="button" class="link" data-others="1" aria-expanded="${othersOpen}">${othersOpen ? 'Hide' : 'Show'} the other ${plural(others.length, 'rule')}${others.every(r => r.inFile) ? '' : ' (prevention only)'}</button></div>
+    <div ${othersOpen ? '' : 'hidden'}><p class="muted" style="font-size:12.5px;max-width:none">Nothing in this chat shows these would have helped. Add them only if you want to prevent these problems before they happen.</p>
+      <ul class="rulelist">${others.map(li).join('')}</ul>
+      ${othersToCopy.length ? `<div class="row"><button type="button" class="link" data-copy-all="ask" data-set="others">Copy ${othersToCopy.length === 1 ? 'it' : 'these ' + othersToCopy.length} as a request</button></div>${tick('others', othersToCopy, 'I added these too')}` : ''}</div>` : ''}`;
   }
   render();
   $('rulesbox').addEventListener('change', e => {
-    if (e.target.id !== 'rulesDone') return;
+    const set = e.target.dataset.rulesDone; if (!set) return;
     const now = new Date().toISOString();
-    rows.forEach(r => r.ids.forEach(id => {
-      if (e.target.checked && !DONE[id]) DONE[id] = {at: now, from: 'rules'};
-      if (!e.target.checked && DONE[id] && DONE[id].from === 'rules') delete DONE[id];
+    sets[set].forEach(r => r.ids.forEach(id => {
+      if (e.target.checked) DONE[id] = {at: now, from: 'rules'};        // a rule needed again is added again: today
+      else if (DONE[id] && DONE[id].from === 'rules') delete DONE[id];
     }));
     if (!saveDone()){ e.target.checked = false; e.target.parentElement.nextElementSibling.textContent = 'This browser will not keep it (a private window, or storage is blocked).'; return; }
     render(); FIXES.forEach(paintDone);
   });
   $('rulesbox').addEventListener('click', e => {
+    if (e.target.closest('[data-others]')){ othersOpen = !othersOpen; render(); return; }
     const b = e.target.closest('[data-copy-all]'); if (!b) return;
-    const list = RULES.map(r => r[0]), text = b.dataset.copyAll === 'ask' ? askForAll(list) : list.map(r => '- ' + r).join('\n'), label = b.textContent;
+    const list = sets[b.dataset.set].map(r => r.text), text = b.dataset.copyAll === 'ask' ? askForAll(list) : list.map(r => '- ' + r).join('\n'), label = b.textContent;
     const done = ok => { b.textContent = ok ? 'Copied: now paste it' : 'Could not copy here'; setTimeout(() => b.textContent = label, 2200); };
     try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); } catch (_) { done(false); }
   });
@@ -1374,9 +1433,14 @@ $('fixlist').addEventListener('click', e => {
         <li><b>Never:</b> your messages or the agent's replies, code or file contents, command text, file or folder names, the project name, the session id, or clock times.</li></ul></details>
     <details><summary>See the exact summary (${kb} KB)</summary><pre id="dJson"></pre><div class="row" style="margin-top:6px"><button type="button" class="btn" id="dCopy">Copy</button><span class="muted" id="dCopied" style="font-size:12px"></span></div></details>`;
   let head, body;
+  /* the rules to copy from the deeper fixes: only what the engine returned for this chat, never its full catalog;
+     not those the recommended rules box already copies, and not one added before this chat started */
+  const inRules = new Set(RULES.flatMap(r => r[1]));
+  const dRules = got ? RECEIVED.findings.filter(f => f && f.id && f.paste && f.how && !inRules.has(f.id) && !addedBefore((DONE[f.id] || {}).at, START)) : [];
   if (got){
     head = `<h3>Deeper fixes: ${nGot ? plural(nGot, 'fix', 'fixes') + ' found' : 'none found'}</h3><span class="src deep">received</span>`;
     body = `<p style="font-size:13.5px">${nGot ? `They are now in the answer at the top, on the board (filters and flags) and in the list above, marked <span class="src deep">deeper fix</span>.` : 'The fix engine checked this session and found nothing more to cut.'} Only the summary below was sent, to ${where || 'the fix engine'}.</p>
+      ${dRules.length ? `<div class="row"><button type="button" class="btn" id="dRules">Copy the ${dRules.length === 1 ? 'rule' : dRules.length + ' rules'} from these deeper fixes</button><span class="muted" style="font-size:12px">(as a request to paste into your chat with ${esc(M.agent_label)})</span></div>` : ''}
       ${holds}<div class="row"><button type="button" class="link" id="dForget">Show the page without the deeper fixes</button></div>`;
   } else if (ENGINE){
     head = `<h3>Deeper fixes</h3><span class="src deep">fix engine on</span>`;
@@ -1399,6 +1463,10 @@ $('fixlist').addEventListener('click', e => {
   $('dJson').textContent = json;
   $('dCopy').onclick = () => { try { navigator.clipboard.writeText(json).then(() => $('dCopied').textContent = 'Copied.', () => $('dCopied').textContent = 'Could not copy here: select the text above instead.'); } catch (_) { $('dCopied').textContent = 'Could not copy here: select the text above instead.'; } };
   const again = () => { try { sessionStorage.setItem('sessioncost-scroll', 'deeper'); } catch (e) {} location.reload(); };
+  if ($('dRules')) $('dRules').onclick = () => {
+    const b = $('dRules'), label = b.textContent, done = ok => { b.textContent = ok ? 'Copied: now paste it' : 'Could not copy here'; setTimeout(() => b.textContent = label, 2200); };
+    try { navigator.clipboard.writeText(askForAll(dRules.map(f => f.how))).then(() => done(true), () => done(false)); } catch (_) { done(false); }
+  };
   if ($('dForget')) $('dForget').onclick = () => { try { sessionStorage.removeItem(ENGINE_KEY); } catch (e) {} again(); };
   if ($('dSend')) $('dSend').onclick = async () => {
     const btn = $('dSend'), st = $('dState');
@@ -1522,10 +1590,10 @@ $('strip').addEventListener('pointercancel', () => dragging = false);
     ${helpers}
     <div style="display:grid;gap:6px"><h3>About these numbers</h3><div class="about">
       <div><b>Why tokens come first</b><p>Every call sends the agent's setup and the whole conversation so far, again. Tokens sent are what you can change (a shorter chat, fewer tools, not re-reading files, fewer stops), and the cost follows them.</p></div>
-      <div><b>How the money is counted</b><p>Each kind of text is priced on its own: new text read, text kept in the cache (5 minutes or 1 hour), text re-read from the cache, and everything the model wrote, hidden thinking included. Prices as of ${esc(MO.as_of)}. A fix's saving is priced the same way: cache re-reads at the cache price.</p></div>
-      <div><b>Why it says “${esc(MO.short)}”</b><p>${esc(MO.why)}</p>${MO.subscription ? '' : '<p>On a plan with a fixed monthly price (Claude Pro or Max, a ChatGPT plan), nothing is billed per token: read these figures as API-equivalent.</p>'}</div>
+      <div><b>How the money is counted</b><p>Each kind of text is priced on its own: new text read, text kept in the cache${CLAUDE ? ' (5 minutes or 1 hour)' : ''}, text re-read from the cache, and everything the model wrote, hidden thinking included. Prices as of ${esc(MO.as_of)}. A fix's saving is priced the same way: cache re-reads at the cache price.</p></div>
+      <div><b>Why it says “${esc(MO.short)}”</b><p>${esc(MO.why)}</p>${MO.subscription ? '' : '<p>On a plan with a fixed monthly price (' + esc(PLAN) + '), nothing is billed per token: read these figures as API-equivalent.</p>'}</div>
       ${own}
-      <div><b>What is estimated (marked ~)</b><p>How much of a call's input was the fixed setup, and how much of its output was a file or a message, are sized from the text (characters ÷ 4) and scaled so the parts add up exactly to the token counts in the log.</p></div>
+      <div><b>What is estimated (marked ~)</b><p>How much of a call's input was the fixed setup, and how much of its output was a file or a message, are sized from the text (characters ÷ 4) and scaled so the parts add up exactly to ${CURSOR ? 'the context size Cursor recorded (it keeps no token counts)' : 'the token counts in the log'}.</p></div>
       ${D.notes.length ? `<div><b>About this log</b>${D.notes.map(n => `<p>${esc(n)}</p>`).join('')}</div>` : ''}
       <div><b>Private</b><p>Made by SessionCost from a log file on this computer. Nothing was sent anywhere and no AI model was used.</p></div>
     </div></div>`;
@@ -1560,7 +1628,7 @@ function drawCharts(){
   const paid = growthView === 'paid', n = MAIN.length;
   const share = (a, b) => b ? a / b * 100 : 0;
 
-  /* ---- 1. how Claude charges: the price of each kind of token, and why most tokens cost the least */
+  /* ---- 1. how the agent charges: the price of each kind of token, and why most tokens cost the least */
   const RATES = MO.rates || {}, model = RATES[M.model] ? M.model : Object.keys(RATES)[0];
   const R = model ? RATES[model] : null;
   const ratio = R && R.cache_read && R.input ? Math.round(R.input / R.cache_read) : 0;
@@ -1570,7 +1638,7 @@ function drawCharts(){
     ['cache_write_1h', 'New input, saved to the cache for 1 hour', 'var(--fresh)'],
     ['cache_read', 'Re-read from the cache', 'var(--cache)'],
     ['output', 'Written by the model', 'var(--out)'],
-  ].filter(([k]) => R[k] || CLS(k).tokens) : [];
+  ].filter(([k]) => CLS(k).tokens || (R[k] && !k.startsWith('cache_write'))) : [];   // cache-write rows only when this chat wrote to the cache (Gemini, Codex and Cursor mostly do not)
   const rmax = Math.max(1e-9, ...ladder.map(([k]) => R[k] || 0));
   const times = k => !R.input ? '' : R[k] === R.input ? 'the normal price' : R[k] < R.input ? `1/${Math.round(R.input / R[k])} of the normal price` : `${+(R[k] / R.input).toFixed(2)}× the normal price`;
   const ladderRows = ladder.map(([k, label, col]) => { const c = CLS(k); return `<div class="lad">
@@ -1583,8 +1651,8 @@ function drawCharts(){
   const allTok = sum(kinds3, x => x[1].tokens), allUsd = sum(kinds3, x => x[1].usd);
   const split = (key, total, fmt) => `<div class="share"><span>${key}</span><span class="bar">${kinds3.map(([nm, x, col]) => `<i style="width:${share(fmt === 'tok' ? x.tokens : x.usd, total)}%;background:${col}" title="${nm}: ${fmt === 'tok' ? K(x.tokens) : usd(x.usd)} (${pct(fmt === 'tok' ? x.tokens : x.usd, total)})"></i>`).join('')}</span></div>
       <div class="sharekeys">${kinds3.map(([nm, x, col]) => `<span><i class="sw" style="background:${col}"></i>${nm} <b>${pct(fmt === 'tok' ? x.tokens : x.usd, total)}</b></span>`).join('')}</div>`;
-  const pricing = R ? `<div class="chart"><h3>How Claude charges for these tokens</h3>
-      <p class="sub2">Every kind of token has its own price, per million tokens, for <b>${esc(model)}</b>${MO.subscription ? ' (API prices: your plan is not billed per token)' : ''}. ${ratio ? `<b>Re-reading from the cache costs 1/${ratio} of the normal input price.</b> ` : ''}New input saved to the cache costs a little more than normal once, so that later calls can re-read it cheaply. What the model writes costs the most.</p>
+  const pricing = R ? `<div class="chart"><h3>How ${esc(M.agent_label)} charges for these tokens</h3>
+      <p class="sub2">Every kind of token has its own price, per million tokens, for <b>${esc(model)}</b>${MO.subscription ? ' (API prices: your plan is not billed per token)' : ''}. ${ratio ? `<b>Re-reading from the cache costs 1/${ratio} of the normal input price.</b> ` : ''}${R.cache_write_5m > R.input && (CLS('cache_write_5m').tokens || CLS('cache_write_1h').tokens) ? 'New input saved to the cache costs a little more than normal once, so that later calls can re-read it cheaply. ' : ''}What the model writes costs the most.</p>
       <div class="ladder"><div class="lad head"><span>Kind of token</span><span>Price per million</span><span class="v">$ / million</span><span class="v">Tokens</span></div>${ladderRows}</div>
       <h3 style="margin-top:6px;font-size:14.5px">So the tokens and the money are split very differently</h3>
       ${split('Tokens', allTok, 'tok')}${split('Money', allUsd, 'usd')}

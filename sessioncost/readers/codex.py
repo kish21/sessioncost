@@ -16,15 +16,14 @@ Tool definitions are not in the log, so the setup holds the instructions only.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import shlex
 from pathlib import Path
 
-from ..textflags import text_flags
-from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
+from ..textflags import fingerprint, text_flags
+from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage, said_kind
 from .claude import _rows, _turn_at, short, ts
 
 CALL_ITEMS = ("function_call", "custom_tool_call", "local_shell_call", "web_search_call", "tool_search_call")
@@ -45,6 +44,12 @@ SETUP_LABELS = {
     "app-context": "app context",
 }
 
+
+# Codex checks on a running command by "typing" nothing into it and waiting a moment for output (write_stdin with
+# chars ""). That is polling: every check is a model call. All of them share one target, so repeats show.
+POLL = "(checked on a running command)"
+EMPTY_STDIN = re.compile(r"""chars\s*:\s*(?:""|'')""")
+TYPED_STDIN = re.compile(r"""chars\s*:\s*(?:"[^"]|'[^'])""")
 
 def codex_home() -> Path:
     base = os.environ.get("CODEX_HOME")
@@ -156,8 +161,8 @@ def describe(p: dict) -> tuple[str, str, str, str, int]:
             used = sorted(set(TOOL_RE.findall(text)))
             if "apply_patch" in used:
                 return _patch(name, text.replace("\\n", "\n"))
-            if used == ["write_stdin"]:
-                return name, "command", "typed into a running command", "", 0
+            if used == ["write_stdin"]:          # nothing typed: only waiting for a running command's output
+                return (name, "command", "checked on a running command", POLL, 0) if EMPTY_STDIN.search(text) and                     not TYPED_STDIN.search(text) else (name, "command", "typed into a running command", "", 0)
             if any(u.startswith("web") for u in used):
                 q = QUERY_RE.search(text)
                 return name, "web", (f"searched the web: {short(_unquote(q.group(1)), 60)}" if q
@@ -177,7 +182,7 @@ def describe(p: dict) -> tuple[str, str, str, str, int]:
     if name == "js":
         return name, "command", "ran a script", short(text, 200), 0
     if name == "write_stdin":
-        return name, "command", "typed into a running command", "", 0
+        return (name, "command", "checked on a running command", POLL, 0) if not str(args.get("chars") or "")             else (name, "command", "typed into a running command", "", 0)
     if name == "update_plan":
         return name, "plan", "updated its plan", "", 0
     if name == "request_user_input":
@@ -244,10 +249,10 @@ class _Thread:
             out = p.get("output")
             txt = _text(out) if not isinstance(out, dict) else str(out.get("content") or "")
             a.result_chars = len(txt)
-            a.result_hash = hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:16]
+            a.result_hash = fingerprint(txt)
             a.result_flags = text_flags(txt)
             a.result_ts = rts
-            a.is_error = bool(re.search(r"(?:Exit code|exit_code\"?:)\s*[1-9]", txt[:400]))
+            a.is_error = bool(re.search(r"(?:Exit code|exit_code\"?:)\s*[1-9]|^Script failed", txt[:400]))
 
     def tokens(self, info: dict | None, rts) -> Call | None:
         """A token count closes the call it follows; a repeated or empty count is not a call."""
@@ -415,10 +420,13 @@ class CodexReader:
                     waited = (rts - last_agent_ts).total_seconds() if rts and last_agent_ts and rts > last_agent_ts \
                         else 0.0
                     n = len([x for x in turns if x.n > 0]) + 1
-                    kind = "queued" if len(task_typed) > 1 else "typed"
+                    # an answer to a question the agent asked (request_user_input) is not a message typed while it worked
+                    kind = "answer" if text.startswith("<send_user_message_question_reply>") else \
+                        "queued" if len(task_typed) > 1 else said_kind(text)
                     turn = Turn(n=n, kind=kind, text=short(text, 300), ts=rts, waited_s=waited if turns else 0.0)
-                    turn.events.append(Event(kind, "you typed" if kind == "typed" else "you typed (while the agent worked)",
-                                             short(text, 300), len(text), rts))
+                    said = {"queued": "you typed (while the agent worked)", "command": "you ran a command",
+                            "answer": "you answered its question"}.get(kind, "you typed")
+                    turn.events.append(Event(kind, said, short(text, 300), len(text), rts))
                     turns.append(turn)
         # A reply left without a token count (cut off) has no usage to price, so it is not counted as a call.
         return turns, setup

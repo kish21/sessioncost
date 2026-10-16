@@ -27,8 +27,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..textflags import text_flags
-from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
+from ..textflags import fingerprint, text_flags
+from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage, said_kind
 from .claude import short, ts
 from .codex import _command, _name
 
@@ -220,11 +220,18 @@ class _Builder:
             kind, label, target = describe(name, p)
             raw = str(t.get("params") or t.get("rawArgs") or "")
             result = str(t.get("result") or "")
+            fp, guessed, size = (fingerprint(result) if result else ""), False, len(result)
+            lines = re.fullmatch(r'\{"totalLinesInFile":\s*(\d+)\}', result.strip()) if kind == "read" else None
+            if lines:   # Cursor keeps only the line count: same file, same part, same length = likely the same text
+                part = {k: p.get(k) for k in ("offset", "limit", "startLine", "endLine", "charsLimit") if p.get(k) is not None}
+                total = int(lines[1])
+                shown = min(int(part.get("limit") or total), max(0, total - int(part.get("offset") or 0)))
+                fp, guessed, size = fingerprint(f"{target}|{json.dumps(part, sort_keys=True)}|{total}"), True,                     shown * 35          # the lines this part covers, about 35 characters a line
             written = sum(len(str(p.get(k) or "")) for k in ("streamingContent", "contents", "code_edit", "newString"))
             c.actions.append(Action(id=str(t.get("toolCallId") or ""), tool=name, kind=kind, label=label,
                                     target=target, args_chars=len(raw), written_chars=written,
-                                    result_chars=len(result), is_error=t.get("status") == "error", ts=when,
-                                    result_flags=text_flags(result)))
+                                    result_chars=size, is_error=t.get("status") == "error", ts=when,
+                                    result_hash=fp, result_guessed=guessed, result_flags=text_flags(result)))
             out += len(raw)
             self.history += len(result)
             self.cur_group = group or self.cur_group
@@ -331,9 +338,9 @@ class CursorReader:
                                                   short(text, 80), len(text), when))
                     continue
                 waited = (when - last_agent).total_seconds() if when and last_agent and when > last_agent else 0.0
-                t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind="typed", text=short(text, 300) or "(no text)", ts=when,
+                t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind=said_kind(text), text=short(text, 300) or "(no text)", ts=when,
                          waited_s=waited if turns else 0.0)
-                t.events.append(Event("typed", "you typed", short(text, 300), len(text), when))
+                t.events.append(Event(t.kind, "you ran a command" if t.kind == "command" else "you typed", short(text, 300), len(text), when))
                 turns.append(t)
             elif b.get("type") == AGENT:
                 c = builder.agent_msg(b, when)

@@ -175,12 +175,53 @@ def unused_tools(s: Session, P) -> Fix | None:
         saving_usd=usd, saving_tokens=saving, where="every call", items=items[:8])
 
 
+# Claude Code's own tools that a setting can switch off (code.claude.com/docs: artifacts, settings-reference,
+# 2026-10-16). Removing one takes its definition out of every call; a deny rule on the bare name does the same.
+BUILTIN_SWITCHES = {
+    "Artifact": ('"enableArtifact": false', "CLAUDE_CODE_DISABLE_ARTIFACT=1"),
+    "Workflow": ('"disableWorkflows": true', "CLAUDE_CODE_DISABLE_WORKFLOWS=1"),
+}
+BUILTIN_MIN = 1000       # tokens of definition worth a setting
+
+
+def unused_builtins(s: Session, P) -> Fix | None:
+    """Claude Code's big built-in tools that can be switched off, sent with every call and never used."""
+    if s.agent != "claude-code" or not s.calls:
+        return None
+    used = {a.tool for a in s.actions()}
+    idle = [t for t in s.setup.tools if t.what in BUILTIN_SWITCHES and t.what not in used and tok(t.chars) >= BUILTIN_MIN]
+    if not idle:
+        return None
+    tokens = sum(tok(t.chars) for t in idle)
+    usd = 0.0
+    for c in s.calls:
+        r, u = P.rates(c), c.usage
+        from_cache = min(tokens, u.cache_read)
+        as_new = min(tokens - from_cache, u.new_input)
+        usd += (from_cache * r["cache_read"] + as_new * pricemod.new_input_rate(u, r)) / 1e6
+    names = ", ".join(t.what for t in idle)
+    settings = ", ".join(BUILTIN_SWITCHES[t.what][0] for t in idle)
+    steps = [f"Open ~/.claude/settings.json (for every project) or .claude/settings.json in this project, and add {settings}.",
+             "Start a new chat: the change applies from then on.",
+             "Type /context to see Step 0 get smaller. Turn it back on when you want the tool again."]
+    return Fix(how="\n".join(f"{i}. {x}" for i, x in enumerate(steps, 1)), paste=False,
+        id="unused-builtin", title="Switch off Claude Code tools you never use",
+        why=(f"Claude Code's own {names} tool{'s' if len(idle) > 1 else ''} went out with every call (~{tokens:,} "
+             "tokens each time) and this session never used it. Unlike most built-in tools, a setting removes "
+             f"{'them' if len(idle) > 1 else 'it'} from the prompt. Only do it if you do not use "
+             f"{'them' if len(idle) > 1 else 'it'} in other chats either."),
+        saving_usd=usd, saving_tokens=tokens * len(s.calls), where="every call",
+        items=[f"{t.what}: ~{tok(t.chars):,} tokens on every call ({BUILTIN_SWITCHES[t.what][0]}, or "
+               f"{BUILTIN_SWITCHES[t.what][1]})" for t in idle])
+
+
 def repeated_reads(s: Session, P) -> Fix | None:
     """The same file read again with exactly the same content, in the same thread."""
     threads = [s.calls] + [h.calls for h in s.helpers]
     usd, tokens, items, turns = 0.0, 0, [], set()
     per_turn: dict[int, int] = {}
     hit_calls: list[tuple[str, int]] = []
+    guessed = False
     for calls in threads:
         seen: dict[str, str] = {}
         for i, c in enumerate(calls):
@@ -205,7 +246,8 @@ def repeated_reads(s: Session, P) -> Fix | None:
                     turns.add(c.turn)
                     per_turn[c.turn] = per_turn.get(c.turn, 0) + t
                     hit_calls.append((c.agent, c.n))
-                    items.append(f"{a.label} again (~{t:,} tokens, unchanged), call {c.n}"
+                    guessed = guessed or a.result_guessed
+                    items.append(f"{a.label} again (~{t:,} tokens, {'likely ' if a.result_guessed else ''}unchanged), call {c.n}"
                                  + ("" if c.agent == "main" else f" of helper {c.agent.split(':')[-1]}"))
                 else:
                     seen[key] = a.result_hash + str(a.label)
@@ -214,7 +256,10 @@ def repeated_reads(s: Session, P) -> Fix | None:
     return Fix(
         id="repeated-reads", title="Don't re-read a file that has not changed",
         why=(f"{len(items)} read{'s' if len(items) > 1 else ''} returned exactly the same text as an earlier read in "
-             "the same chat. The copy was paid for when it came in and again on every later call that carried it."),
+             "the same chat." + (" (Cursor keeps only a file's line count: a read of the same file, the same part and "
+                                 "the same length with no edit in between counts as likely unchanged, and its size is "
+                                 "estimated from the lines.)" if guessed else "")
+             + " The copy was paid for when it came in and again on every later call that carried it."),
         saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
         per_turn=per_turn, calls=hit_calls, paste=True,
         how="Do not read a file again if it has not changed since you last read it: use what you already read.")
@@ -337,8 +382,9 @@ class BasicFixes:
     name = "built-in"
 
     def find(self, session: Session, pricer) -> list[Fix]:
-        return [f for f in (unused_tools(session, pricer), repeated_reads(session, pricer),
-                            confirm_turns(session, pricer), long_chat(session, pricer)) if f]
+        return [f for f in (unused_tools(session, pricer), unused_builtins(session, pricer),
+                            repeated_reads(session, pricer), confirm_turns(session, pricer),
+                            long_chat(session, pricer)) if f]
 
 
 def load_engines() -> list:

@@ -12,13 +12,12 @@ What the log holds (checked on CLI 2.1.2xx logs):
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from datetime import datetime
 from pathlib import Path
 
-from ..textflags import text_flags
+from ..textflags import fingerprint, text_flags
 from ..model import Action, Added, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
 
 # Text the harness puts into a `user` row. Never shown as something the user typed.
@@ -335,7 +334,7 @@ class _Thread:
             return None
         txt = _result_text(b)
         a.result_chars = len(txt)
-        a.result_hash = hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:16]
+        a.result_hash = fingerprint(txt)
         a.result_flags = text_flags(txt)
         a.result_ts = rts
         a.is_error = bool(b.get("is_error"))

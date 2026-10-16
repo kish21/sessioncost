@@ -841,7 +841,18 @@ function nodes(){
   return out;
 }
 const firstTurn = nd => nd.type === 'turn' ? nd.t : nd.type === 'pill' ? nd.turns[0] : null;
-const inFocus = nd => !focusKind || (nd.type === 's0' ? !!(FIX[focusKind] && FIX[focusKind].step0) : nd.type === 'turn' ? nd.t.fixes.some(f => f.id === focusKind) : false);
+/* which tiles the chosen fix touches. Inside a turn the call tiles count too: before, a filter left on dimmed every
+   call of an opened turn, the fix's own calls included (2026-10-16, turn 40 of a 54-turn chat) */
+const FIXCALLS = Object.fromEntries(FIXES.map(f => [f.id, new Set(f.calls || [])]));
+/* a fix that names its calls lights those; one that names only turns (like "new chat") lights the main chat's calls
+   in the opened turn */
+const callInFocus = i => !!FIX[focusKind] && (FIX[focusKind].step0 || (FIXCALLS[focusKind].size ? FIXCALLS[focusKind].has(i)
+  : !!zoom && C[i].agent === 'main' && zoom.fixes.some(f => f.id === focusKind)));
+const inFocus = nd => !focusKind || (nd.type === 's0' ? !!(FIX[focusKind] && FIX[focusKind].step0)
+  : nd.type === 'turn' ? nd.t.fixes.some(f => f.id === focusKind)
+  : nd.type === 'parent' ? nd.t.fixes.some(f => f.id === focusKind) || !!(FIX[focusKind] && FIX[focusKind].step0)
+  : nd.type === 'call' ? callInFocus(nd.x.i)
+  : nd.type === 'cpill' ? nd.calls.some(x => callInFocus(x.i)) : false);
 let PAD = 26, CW, CH, TW, TH, NODES = [], POS = [], COLS = 10;
 function sizes(){ const ph = PHONE(); if (detail){ CW = 160; CH = ph ? 136 : 150; TW = 132; TH = 108; } else { CW = 112; CH = ph ? 94 : 118; TW = 78; TH = 68; } }
 let boardOpen = !PHONE();
@@ -968,9 +979,11 @@ function zoomBar(){
   zb.hidden = false;
   zb.innerHTML = `<button type="button" class="btn back" id="zBack">← Back to all turns</button>
     <span style="flex:1 1 260px;min-width:0"><b>Turn ${t.n}</b>${t.n ? `: “${esc(t.said.length > 80 ? t.said.slice(0, 79) + '…' : t.said)}”` : ''} <span class="muted">· ${plural(nc, 'call')}${t.calls.length ? ` (#${t.calls[0].c.n}–${t.calls[t.calls.length - 1].c.n} of the session)` : ''} · ${K(t.sent)} sent · ${usd(t.usd)}${t.cut ? ` · −${K(t.cut)} could be cut` : ''}</span></span>
+    ${focusKind && FIX[focusKind] ? `<span class="row" style="gap:6px;font-size:12.5px"><span>Bright: <b>${esc(FIX[focusKind].short)}</b>${t.calls.concat(t.helpers).some(x => callInFocus(x.i)) ? '' : ' (nothing in this turn)'}</span><button type="button" class="link" id="zAll">show all calls</button></span>` : ''}
     <span class="muted" style="font-size:12px">or press Esc</span>
     <span class="row" style="gap:6px">${prev ? `<button type="button" class="btn" data-zoom="${prev.n}">‹ T${prev.n}</button>` : ''}${next ? `<button type="button" class="btn" data-zoom="${next.n}">T${next.n} ›</button>` : ''}</span>`;
   $('zBack').onclick = () => unzoom();
+  if ($('zAll')) $('zAll').onclick = () => { focusKind = null; drawFilters(); drawBoard(); zoomBar(); };
 }
 function zoomInto(n){
   const t = TURNS.find(x => x.n === n); if (!t) return;

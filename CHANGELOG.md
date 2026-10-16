@@ -1,5 +1,13 @@
 # What's new
 
+## 0.5.15
+
+- **A fix filter no longer fades a whole opened turn:** with "Show me on the board" on, the fix's own calls stay
+  bright inside a turn, and the turn bar says which fix is lit ("nothing in this turn" when so), with "show all calls".
+- **No more two /sessioncost in Cursor or Codex:** setup (and `update`) no longer adds a copy of the skill to an agent
+  whose SessionCost plugin already brings one, and removes a copy an earlier setup wrote. Claude Code already worked this
+  way.
+
 ## 0.5.14
 
 - **`sessioncost update`** (or `/sessioncost update` in a chat): updates every copy of SessionCost on the computer,

@@ -140,9 +140,22 @@ def claude_plugin_installed(home: Path) -> bool:
     return any(k.startswith("sessioncost@") for k in (plugins.get("plugins") or {}))
 
 
+def plugin_installed(folder: str, home: Path) -> bool:
+    """True when this agent has the SessionCost plugin, which brings its own /sessioncost (2026-10-16: Cursor and Codex
+    showed two /sessioncost, the plugin's and a copy setup had written)."""
+    if folder == ".claude":
+        return claude_plugin_installed(home)
+    plugins = home / folder / "plugins"
+    if folder == ".codex":
+        return (plugins / "cache").is_dir() and any((plugins / "cache").glob("*/sessioncost"))
+    if folder == ".cursor":
+        return plugins.is_dir() and any(p.is_dir() for p in plugins.glob("**/sessioncost"))
+    return False
+
+
 def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
     """Add the /sessioncost skill to every agent installed for this user. Returns (agent, skill file written), with
-    None for Claude Code when the plugin already provides /sessioncost."""
+    None for an agent whose SessionCost plugin already provides /sessioncost."""
     home = home or Path.home()
     # The skill names this exact Python, so it runs even when no 'python' or 'sessioncost' is on the PATH.
     exe = Path(sys.executable).as_posix()
@@ -155,7 +168,7 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
         if not (home / folder).is_dir():
             continue
         dest = home / folder / sub / "sessioncost" / "SKILL.md"
-        if folder == ".claude" and claude_plugin_installed(home):
+        if plugin_installed(folder, home):
             # Two /sessioncost in one agent confuse people: remove a copy an earlier setup wrote, add none.
             if dest.is_file() and "name: sessioncost" in dest.read_text(encoding="utf-8", errors="replace"):
                 dest.unlink()

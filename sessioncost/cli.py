@@ -224,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local: reads log files; sends nothing unless you press 'Send the summary to the fix engine' in the report.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--json", action="store_true", help="print the full model as JSON instead of a report")
@@ -240,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="the fix engine offered under 'Find deeper fixes' (or set SESSIONCOST_ENGINE_URL; default: "
                          f"{DEFAULT_ENGINE_URL}; 'off' hides the button). The summary is sent only when you "
                          "press the button in the report")
+    ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     args = ap.parse_args(argv)
 
@@ -247,6 +248,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_setup()
     if args.target == "clean":
         return cmd_clean()
+    if args.target == "update":
+        from . import update
+        return update.run(dry_run=args.dry_run)
     if args.target == "list":
         return cmd_list(args)
     if args.target == "last":

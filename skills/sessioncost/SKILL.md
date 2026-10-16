@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 0.5.13) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
+description: (SessionCost 0.5.14) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -46,6 +46,18 @@ python "${CLAUDE_PLUGIN_ROOT}/run.py" clean
 ```
 
 It deletes every saved report except the latest and prints what it freed. Show that line.
+
+## Updating SessionCost
+
+Only when the user asks to update SessionCost (for example "/sessioncost update"), run (with the same fallbacks as
+step 1):
+
+```
+python "${CLAUDE_PLUGIN_ROOT}/run.py" update
+```
+
+It updates every copy on this computer (the program, and the Claude Code, Codex or Cursor plugin) and prints each
+step. Show its output as printed, then tell the user to restart the agent.
 
 ## Never
 

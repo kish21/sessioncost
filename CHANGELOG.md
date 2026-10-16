@@ -1,5 +1,12 @@
 # What's new
 
+## 0.5.14
+
+- **`sessioncost update`** (or `/sessioncost update` in a chat): updates every copy of SessionCost on the computer,
+  each the right way: the program (install line or pip), the Claude Code plugin, the Codex plugin, and the
+  /sessioncost skill in each agent. Plugins from our marketplace do not all update by themselves.
+- **README: how each agent gets new versions**, including Claude Code's "Enable auto-update" for our marketplace.
+
 ## 0.5.13
 
 - **The rules box copies only what this chat needed:** "Copy the 2 rules this chat needed" instead of all 7.

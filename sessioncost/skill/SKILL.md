@@ -41,6 +41,18 @@ it as printed and do not ask anything about it. Only when the user asks to delet
 
 It deletes every saved report except the latest and prints what it freed. Show that line.
 
+## Updating SessionCost
+
+Only when the user asks to update SessionCost (for example "/sessioncost update"), run (with the same fallbacks as
+step 1):
+
+```
+{{RUN}} update
+```
+
+It updates every copy on this computer (the program, and the Claude Code, Codex or Cursor plugin) and prints each
+step. Show its output as printed, then tell the user to restart the agent.
+
 ## Never
 
 - Never read the session log or the HTML report into the conversation. Both are large; reading them would cost more

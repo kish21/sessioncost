@@ -54,6 +54,19 @@ Plugins need Python 3.10 or newer on the computer (way 1 does not).
 
 Use one way per agent: with the plugin installed, you don't need the copy from way 1 or 2 in that agent.
 
+### Staying up to date
+
+Not every agent updates a plugin by itself. The simple way: type `/sessioncost update` in a chat, or run
+`sessioncost update` in a terminal (`python -m sessioncost update` on Windows). It updates every copy of SessionCost on
+the computer, each the right way, and tells you what it did.
+
+| Agent | New versions |
+|---|---|
+| **Claude Code** | Once: `/plugin` → **Marketplaces** → sessioncost → **Enable auto-update**. From then on each new version arrives by itself. |
+| **Codex** | Codex looks for a new version when it starts. To be sure: `codex plugin marketplace upgrade`. |
+| **Cursor** | **Customize** → the marketplace with SessionCost → **Refresh**. |
+| **Antigravity**, and way 1 or 2 | `sessioncost update`, or paste the install line again. |
+
 ### Then, in your agent
 
 Restart the agent, open any chat, and type **`/sessioncost`** (or ask: "run sessioncost"). The report opens in
@@ -123,13 +136,14 @@ Options: `--no-open`, `--json`, `--subscription` (money as API-equivalent on Pro
 <details>
 <summary>Update, or fix a problem</summary>
 
-- **Update:** paste the install line again, then restart your agent.
+- **Update:** `/sessioncost update` in a chat (or `sessioncost update`), then restart your agent. Pasting the install
+  line again works too.
 - **`/sessioncost` does nothing:** restart the agent after installing.
 - **"sessioncost is not recognized"** (Windows): use `python -m sessioncost` instead of `sessioncost`.
 - **Windows says scripts are disabled:** run
   `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.
 - **Updated with pip:** `python -m pip install -U sessioncost`, then `python -m sessioncost setup`. **Plugin:** `/plugin` →
-  **Marketplaces** → sessioncost → **Update**, then restart Claude Code.
+  **Marketplaces** → sessioncost → **Update**, then restart Claude Code (or turn on **Enable auto-update** there once).
 - **"git not found" when adding the plugin:** use way 1 instead; it needs neither Git nor Python.
 - **The deeper fixes take a while:** the engine sleeps when idle; the first check can take up to a minute.
 </details>

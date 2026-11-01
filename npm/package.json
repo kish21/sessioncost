@@ -1,6 +1,6 @@
 {
   "name": "sessioncost",
-  "version": "0.6.0-rc.6",
+  "version": "0.6.0-rc.7",
   "description": "See how many tokens each turn of your coding-agent chat sends, why, and what to cut. Runs the SessionCost Python tool (installs it once, privately).",
   "license": "MIT",
   "author": "kish21",

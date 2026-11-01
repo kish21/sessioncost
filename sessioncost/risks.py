@@ -69,7 +69,7 @@ Only the yes/no mark leaves this module; the command text is never kept.
 """
 from __future__ import annotations
 
-import fnmatch
+import dataclasses
 import json
 import os
 import re
@@ -232,6 +232,7 @@ _TO_PLUGINS = re.compile(r">>?\s*['\"]?[^\s'\"]*[\\/]\.claude[\\/]+plugins[\\/]|
 _TAMPER_CMD = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove)\b|\bSESSIONCOST_GUARD_DIR\b|\bdisableAllHooks\b|"
                          r"^\s*hooks\s*=\s*false\b", re.I | re.M)      # (the last: Codex's [features] switch)
 _READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|grep|rg|findstr|Select-String|ls|dir|"
+                        r"cd|pushd|Set-Location|sl|jq|"
                         r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b[^>|;&]*$", re.I)
 _SINKS = {"guard_tamper", "wipe", "privilege", "guardrails", "secrets", "skips_commit_checks", "git_push", "deletes", "installs", "force_push",
           "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off"}
@@ -408,6 +409,30 @@ def _parts(cmd: str) -> list[str]:
     return [p for p in re.split(r"&&|\|\||;|\n|\|", cmd) if p.strip()]
 
 
+# a search: its words are what it looks for, not steps it takes (grep "pip install" TESTING.md installs nothing)
+_SEARCH = re.compile(r"^\s*(?:grep|egrep|fgrep|rg|ag|ack|findstr|Select-String|sls|git\s+grep|git\s+log\b[^\n]*--grep)\b"
+                     r"(?![^\n]*>)", re.I)
+
+
+def _split_outside_quotes(cmd: str) -> list[str]:
+    """_parts, but a | or ; inside quotes (grep "a\\|b") does not split."""
+    mask = _QUOTED.sub(lambda m: "x" * len(m.group(0)), cmd)
+    out, start = [], 0
+    for m in re.finditer(r"&&|\|\||;|\n|\|", mask):
+        out.append(cmd[start:m.start()])
+        start = m.end()
+    out.append(cmd[start:])
+    return [p for p in out if p.strip()]
+
+
+def _without_searches(cmd: str, inner: list[str]) -> str:
+    """The command without its search parts, for the rules about steps it takes (installs, pushes, deletes...)."""
+    # quoted text with spaces is prose (a commit message, an issue comment); bash -c "…" comes back in `inner`
+    # (each quoted string on its own: "git" "push" "--force" is three words, not prose)
+    prose = lambda p: _QUOTED.sub(lambda m: " " if re.search(r"\s", m.group(0)) else m.group(0), p)
+    return "\n".join(_unquote(prose(p)) for c in [cmd, *inner] for p in _split_outside_quotes(c) if not _SEARCH.match(p))
+
+
 def _no_prose(cmd: str) -> str:
     """The command without its prose: commit messages and quoted text with spaces (an echo, a search query) only
     mention things; a quoted single word ("git", '.env') was already unquoted."""
@@ -472,9 +497,11 @@ def watch_marks(a, cwd: str) -> list[str]:
     t = _unquote(_shell_part(full)) if a.kind == "command" else full
     if a.kind == "command" and (inner := _inner_cmds(_shell_part(full))):
         t += "".join("\n" + _unquote(_shell_part(i)) for i in inner)      # bash -c "...": the inner command, on its own line
+    # the steps it takes, search words left out
+    run = _without_searches(_shell_part(full), [_shell_part(i) for i in _inner_cmds(_shell_part(full))]) if a.kind == "command" else t
     if a.kind in ("edit", "write") and any(_outside(p, cwd) for p in full.splitlines()):
         out.append("outside_project")
-    if a.kind == "web" or tool.startswith("mcp__") or tool in _OUTWARD_TOOLS or (a.kind == "command" and _NET_CMD.search(t)):
+    if a.kind == "web" or tool.startswith("mcp__") or tool in _OUTWARD_TOOLS or (a.kind == "command" and _NET_CMD.search(run)):
         out.append("network")
     if a.kind == "command" and _INLINE.search(full):
         out.append("inline_script")
@@ -490,12 +517,12 @@ def watch_marks(a, cwd: str) -> list[str]:
         out.append("secrets")
     if tool.startswith("mcp__"):
         out += _mcp_marks(tool.split("__")[-1], full, cwd)
-    if a.kind == "command" and (_DELETE.search(t) or _moves_out(t, cwd) or
-                                (_DB_CLIENT.search(t) and (_SQL_DESTROY.search(full) or _DB_WIPE.search(full)))):
+    if a.kind == "command" and (_DELETE.search(run) or _moves_out(run, cwd) or
+                                (_DB_CLIENT.search(run) and (_SQL_DESTROY.search(full) or _DB_WIPE.search(full)))):
         out.append("deletes")
-    if a.kind == "command" and _PUSH.search(t):
+    if a.kind == "command" and _PUSH.search(run):
         out.append("git_push")
-    if a.kind == "command" and _INSTALL.search(t):
+    if a.kind == "command" and _INSTALL.search(run):
         out.append("installs")
     if (a.kind in ("edit", "write") and any(_GUARD.search(p.strip()) or _MEMORY.search(p.strip()) or _rules_file(p.strip(), cwd)
                                             for p in full.splitlines())) or \
@@ -503,8 +530,8 @@ def watch_marks(a, cwd: str) -> list[str]:
         out.append("guardrails")
     if a.kind == "command":
         for mark, rx, text in (("pipe_to_shell", _PIPE_SHELL, t), ("encoded_command", _ENCODED, full), ("env_dump", _ENV_DUMP, _QUOTED.sub("''", t)),
-                               ("force_push", _FORCE, _no_prose(t)), ("persistence", _PERSIST, t), ("security_off", _SEC_OFF, t),
-                               ("wipe", _WIPE, t), ("privilege", _PRIVILEGE, t)):
+                               ("force_push", _FORCE, _no_prose(run)), ("persistence", _PERSIST, run), ("security_off", _SEC_OFF, run),
+                               ("wipe", _WIPE, run), ("privilege", _PRIVILEGE, run)):
             if rx.search(text):
                 out.append(mark)
         if "pipe_to_shell" not in out and _downloads_then_runs(t):
@@ -518,7 +545,7 @@ def watch_marks(a, cwd: str) -> list[str]:
             out.append("secrets")       # cmdkey /list, gh auth token: a stored login printed
         if _RC_FILE.search(t) and _WRITES.search(_QUIET.sub(" ", t)) and "persistence" not in out:
             out.append("persistence")
-        if _direct(t):
+        if _direct(run):
             out.append("skips_commit_checks")
     elif a.kind in ("edit", "write") and any(_RC_FILE.search(p.strip()) for p in full.splitlines()):
         out.append("persistence")
@@ -539,9 +566,14 @@ def _tampers(a, full: str, shell: str) -> bool:
         if _TAMPER_CMD.search(_no_prose(full)):
             return True
         bare = _no_prose(shell)
-        parts = [p for p in re.split(r"&&|\|\||;|\n", bare) if p.strip()]
-        if any(_OWN_PATH.search(p) and not _READ_ONLY.search(p) for p in parts):
-            return True                       # the guard's folder and your allow file: read them, nothing else
+        parts = _parts(_QUIET.sub(" ", bare))   # each part of a pipe too: cat … | head reads; … | tee <file> writes
+        inside = False                        # after cd into the guard's folder, every later part acts on it
+        for p in parts:
+            if re.match(r"\s*(?:cd|pushd|Set-Location|sl)\b", p, re.I):
+                inside = bool(_OWN_PATH.search(p))
+                continue
+            if (inside or _OWN_PATH.search(p)) and not _READ_ONLY.search(p):
+                return True                   # the guard's folder and your allow file: read them, nothing else
         if _INLINE.search(full) and _OWN_PATH.search(full.replace("~/", " ~/")):
             return True                       # a script written into the command can do anything with them
         # an installed plugin: running its scripts is how skills work; a write, move or delete aimed at its files is not
@@ -646,15 +678,49 @@ def _slashes(p: str) -> str:
     return p.lower() if os.name == "nt" else p
 
 
-def _allowed(a, mark: str, rules: list[tuple[str, str]]) -> bool:
-    things = [_slashes(x.strip()) for x in (a.target or "").splitlines() if x.strip()] + [_slashes(a.target or "").strip()]
-    things.append((a.tool or "").lower() if os.name == "nt" else a.tool or "")
-    for m, pat in rules:
-        if m == mark:
-            p = _slashes(os.path.expanduser(pat))        # ~ and the home folder are the same thing on both sides
-            if any(fnmatch.fnmatchcase(x, p) for x in things if x):
-                return True
-    return False
+def _rule_re(pat: str, chain: bool = True) -> re.Pattern:
+    """A .sessioncost-allow pattern. With `chain`, its * and ? stop at a chain (&&, ||, ;, |, a new line), so
+    `npm run build*` never covers `npm run build && git push`."""
+    star = r"[^&|;\n]" if chain else "."
+    out, i = [], 0
+    while i < len(pat):
+        c = pat[i]
+        end = pat.find("]", i + 2) if c == "[" else -1
+        if c == "*":
+            out.append(star + "*")
+        elif c == "?":
+            out.append(star)
+        elif end > 0:                                    # [abc] or [!abc], as in shell patterns
+            body = pat[i + 1:end].replace("\\", "\\\\")
+            out.append("[" + ("^" + body[1:] if body.startswith("!") else body) + "]")
+            i = end
+        else:
+            out.append(re.escape(c))
+        i += 1
+    return re.compile("".join(out), re.S)
+
+
+def _allowed(a, mark: str, rules: list[tuple[str, str]], cwd: str = "", carries=None) -> bool:
+    """Whether the project's rules for `mark` cover step `a`. A rule matches the tool name, the whole target, or each
+    part of it: in a chained command (or a target of several lines) every part that carries the mark on its own must
+    match a rule, so one expected step never covers another chained to it. `carries(part_action)` says whether a part
+    carries the mark (default: risks.watch_marks); when no part does on its own, every part must match."""
+    pats = [_slashes(os.path.expanduser(pat)) for m, pat in rules if m == mark]   # ~ is the home folder on both sides
+    if not pats:
+        return False
+    parts = _split_outside_quotes(a.target or "") if a.kind == "command" else (a.target or "").splitlines()
+    parts = [x.strip() for x in parts if x.strip()]
+    loose = [_rule_re(p, chain=False) for p in pats]
+    hit = lambda x, rx=loose: any(p.fullmatch(x) for p in rx)
+    whole = _slashes(a.target or "").strip()
+    if hit((a.tool or "").lower() if os.name == "nt" else a.tool or "") or (whole and hit(whole, loose if len(parts) < 2 else
+                                                                                         [_rule_re(p) for p in pats])):
+        return True
+    if len(parts) < 2:
+        return False
+    carries = carries or (lambda sub: mark in watch_marks(sub, cwd))
+    marked = [x for x in parts if carries(dataclasses.replace(a, target=x))] or parts
+    return all(hit(_slashes(x)) for x in marked)
 
 
 def mark_watch(s: Session) -> None:
@@ -666,13 +732,13 @@ def mark_watch(s: Session) -> None:
             for m in watch_marks(a, s.cwd):
                 if m in a.risks or m in a.allowed:
                     continue
-                (a.allowed if _allowed(a, m, rules) else a.risks).append(m)
+                (a.allowed if _allowed(a, m, rules, s.cwd) else a.risks).append(m)
     for t in s.turns:                       # the main chat, turn by turn: your message is the checkpoint
         source = None
         for c in t.calls:
             for a in c.actions:
                 if source and "after_untrusted" not in a.risks and (_SINKS & set(a.risks) or _sends_out(a)):
-                    if _allowed(a, "after_untrusted", rules):
+                    if _allowed(a, "after_untrusted", rules, s.cwd):
                         a.allowed.append("after_untrusted")
                     else:
                         a.risks.append("after_untrusted")

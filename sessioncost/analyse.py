@@ -31,7 +31,8 @@ def guard_summary(session_id: str) -> dict | None:
     p = guardmod.log_path(session_id)
     if not session_id or not p.is_file():
         return None
-    intact, entries = guardmod.verify_log(p)
+    v = guardmod.verify_status(p)
+    intact, entries = v["status"] in ("intact", "empty"), v["entries"]
     steps = {}
     for e in entries:
         if e.get("event") == "pre" and e.get("decision") in ("blocked", "asked"):
@@ -39,7 +40,7 @@ def guard_summary(session_id: str) -> dict | None:
         elif e.get("event") == "allowed" and e.get("id") in steps:
             steps[e["id"]]["allowed"] = True
     inv = next((e for e in reversed(entries) if e.get("event") == "inventory"), None)
-    return {"intact": intact, "lines": len(entries), "steps": steps,
+    return {"intact": intact, "status": v["status"], "lines": len(entries), "steps": steps,
             "injections": sum(1 for e in entries if e.get("event") == "injection" and e.get("at") != "start"),
             "loaded": [w for e in entries if e.get("event") == "injection" and e.get("at") == "start" for w in e.get("where") or []],
             "keys_seen": sum(1 for e in entries if e.get("event") == "key_seen"),

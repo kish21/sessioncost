@@ -3106,7 +3106,7 @@ if (PHONE()) $('keybox').open = false;
     }
     const proj = esc(GA.project), plural_ = (k, w) => `${n(k)} ${w}${k === 1 ? '' : 's'}`;
     $('guardHead').textContent = `${GA.project}: ${plural_(GA.chats, 'chat')} with the guard on`;
-    const here = GUARD ? `<p><b>In this chat the guard was on:</b> ${n(GUARD.blocked)} stopped (did not run) · ${n(GUARD.asked)} asked you first (you said yes to ${n(GUARD.allowed)}) · record ${GUARD.intact ? 'untouched ✓' : '<b style="color:var(--heat)">edited</b>'}. Those steps are marked in the <a class="link" href="#skyview" data-sky="1">Trace &amp; risk map</a>.</p>`
+    const here = GUARD ? `<p><b>In this chat the guard was on:</b> ${n(GUARD.blocked)} stopped (did not run) · ${n(GUARD.asked)} asked you first (you said yes to ${n(GUARD.allowed)}) · record ${GUARD.intact ? 'untouched ✓' : `<b style="color:var(--heat)">${{incomplete: 'cut off', unreadable: 'could not be read'}[GUARD.status] || 'edited'}</b>`}. Those steps are marked in the <a class="link" href="#skyview" data-sky="1">Trace &amp; risk map</a>.</p>`
       : `<p><b>The guard was off in this chat.</b> Type <code>/livesession</code> (Claude Code): every chat is guarded from then on, until <code>/livesession off</code>.</p>`;
     const tile = (v, l, cls = '') => `<div class="${cls}"><b>${v}</b><span>${l}</span></div>`;
     const reasons = [...new Set([...GA.reasons.blocked, ...GA.reasons.asked].map(r => r[0]))].slice(0, 6);
@@ -3370,7 +3370,7 @@ function drawSky(){
       (G.keys_seen ? ` · <b style="color:var(--alarm)">a key or token showed up in ${G.keys_seen} tool result${G.keys_seen > 1 ? 's' : ''}</b>` : '') +
       (G.inventory ? ` · ${G.inventory.first ? `${G.inventory.items} skills, plugins and MCP servers recorded` : (G.inventory.new || []).length + (G.inventory.changed || []).length
         ? `<b>new or changed since the last chat: ${esc([...(G.inventory.new || []), ...(G.inventory.changed || [])].map(k => k.replace(':', ' ')).join(', '))}</b>` : `${G.inventory.items} skills, plugins and MCP servers unchanged`}` : '') + ' · ' +
-      (G.intact ? `<span class="ok">log intact ✓</span> <span class="muted">(${G.lines} lines, each chained to the one before)</span>` : `<b style="color:var(--alarm)">log changed ✗: a line was edited or removed after it was written</b>`) + '</span>'
+      (G.intact ? `<span class="ok">log intact ✓</span> <span class="muted">(${G.lines} lines, each chained to the one before)</span>` : `<b style="color:var(--alarm)">${{incomplete: 'log cut off ✗: its last line was not written in full', unreadable: 'log could not be read ✗: it cannot be checked'}[G.status] || 'log changed ✗: a line was edited or removed after it was written'}</b>`) + '</span>'
     : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Type <code>/livesession</code> (Claude Code) and every chat is guarded until <code>/livesession off</code>: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
   const trace = !!t && sky.view === 'trace';
   box.classList.toggle('trace', trace);

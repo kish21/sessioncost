@@ -12,9 +12,10 @@ import json
 import os
 from pathlib import Path
 
-from .guard import WHY, home, verify_log
+from .guard import WHY, home, verify_status
 
 AGENT = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "antigravity": "Antigravity"}
+BROKEN = {"incomplete": "cut off", "unreadable": "could not be read"}     # any other failed check: "edited"
 
 
 def collect(folder: Path | None = None) -> dict:
@@ -24,11 +25,13 @@ def collect(folder: Path | None = None) -> dict:
     kinds = {"blocked": collections.Counter(), "asked": collections.Counter()}
     days = collections.defaultdict(collections.Counter)
     for p in sorted((folder or home()).glob("*.jsonl")):
-        ok, entries = verify_log(p)
-        if not entries:
+        v = verify_status(p)
+        entries = v["entries"]
+        if not entries and v["status"] != "unreadable":                 # a log it cannot read is shown, not skipped
             continue
-        c = {"id": p.stem, "first": entries[0].get("ts", ""), "last": entries[-1].get("ts", ""), "cwd": "", "via": "claude",
-             "turns": 0, "checked": 0, "blocked": 0, "asked": 0, "allowed": 0, "injections": 0, "intact": ok}
+        c = {"id": p.stem, "first": entries[0].get("ts", "") if entries else "", "last": entries[-1].get("ts", "") if entries else "",
+             "cwd": "", "via": "claude", "turns": 0, "checked": 0, "blocked": 0, "asked": 0, "allowed": 0, "injections": 0,
+             "intact": v["status"] in ("intact", "empty"), "status": v["status"]}
         for e in entries:
             ev = e.get("event")
             if e.get("cwd") and not c["cwd"]:
@@ -89,7 +92,7 @@ def render(r: dict, folder: Path | None = None) -> str:
         f'<tr><td class="num">{_e(c["last"].replace("T", " ")[:16])}</td><td>{_e(AGENT.get(c["via"], c["via"]))}</td>'
         f'<td title="{_e(c["cwd"])}">{_e(c["project"])}</td><td class="n num">{c["turns"] or ""}</td><td class="n num">{c["checked"]}</td>'
         f'<td class="n num bad">{c["blocked"] or ""}</td><td class="n num warn">{c["asked"] or ""}</td>'
-        f'<td class="n num">{c["injections"] or ""}</td><td>{"untouched" if c["intact"] else "<b class=bad>edited</b>"}</td>'
+        f'<td class="n num">{c["injections"] or ""}</td><td>{"untouched" if c["intact"] else "<b class=bad>" + BROKEN.get(c["status"], "edited") + "</b>"}</td>'
         f'<td class="muted num">{_e(c["id"][:8])}</td></tr>' for c in chats[:200])
     step_rows = "".join(
         f'<tr><td class="num">{_e(s["ts"].replace("T", " ")[:16])}</td><td class="{"bad" if s["decision"] == "blocked" else "warn"}">'

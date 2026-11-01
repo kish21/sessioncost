@@ -83,11 +83,11 @@ NEVER = {"guard_tamper", "wipe", "pipe_to_shell", "encoded_command", "env_dump",
          "skips_commit_checks", "secret_commit"}      # the live guard blocks these (reading a secret too: see guard.tier)
 ALLOW_FILE = ".sessioncost-allow"
 
-_COMMIT = re.compile(r"\bgit\s+(?:-c\s+\S+\s+)*commit\b", re.I)
+_COMMIT = re.compile(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*commit\b", re.I)
 _SKIP_SET = re.compile(r"(?:^|[\s;&|(])(?:\$env:SKIP\s*=|(?:export\s+|set\s+)?SKIP\s*=)", re.I)
 # the options before any quoted message: a message that mentions "-n" or "--no-verify" is not the option
-_NO_VERIFY = re.compile(r"""\bgit\s+(?:-c\s+\S+\s+)*(?:commit|push)\b[^\n;&|"']*?\s--no-verify\b""", re.I)
-_COMMIT_N = re.compile(r"""\bgit\s+(?:-c\s+\S+\s+)*commit\b[^\n;&|"']*?\s-(?=[a-z]*n)[a-z]+\b""", re.I)   # -n, -an
+_NO_VERIFY = re.compile(r"""\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*(?:commit|push)\b[^\n;&|"']*?\s--no-verify\b""", re.I)
+_COMMIT_N = re.compile(r"""\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*commit\b[^\n;&|"']*?\s-(?=[a-z]*n)[a-z]+\b""", re.I)   # -n, -an
 _HOOKS_OFF = re.compile(r"\b(?:HUSKY\s*=\s*['\"]?0|HUSKY_SKIP_HOOKS\s*=\s*['\"]?1|PRE_COMMIT_ALLOW_NO_CONFIG\s*=)", re.I)
 LOOK_AHEAD = 3           # a SKIP set on its own counts when one of the next few commands commits
 
@@ -117,17 +117,23 @@ _OUTWARD_TOOLS = {"webfetch", "websearch", "artifact", "senduserfile", "pushnoti
 _SEND_ONLY = {"senduserfile", "pushnotification", "sendmessage", "remotetrigger"}   # network out, nothing comes back in
 _NET_CMD = re.compile(r"(?:^|[\s;&|(`])(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|ssh|scp|sftp|rsync|ftp|"
                       r"gh\s+\w+|git\s+(?:-c\s+\S+\s+)*(?:clone|fetch|pull))\b|https?://", re.I)
-_INLINE = re.compile(r"<<-?\s*['\"]?[A-Za-z_]\w*|@['\"][ \t]*$|(?:^|[\s;&|(])(?:python3?|py|node|ruby|perl|php)\s+(?:-[a-zA-Z]+\s+)*-[ce]\s",
+_INLINE = re.compile(r"<<-?\s*['\"]?[A-Za-z_]\w*|@['\"][ \t]*$|"
+                     r"(?:^|[\s;&|(\\/])(?:python3?|py|node|ruby|perl|php)(?:\.exe)?\s+(?:-[a-zA-Z]+\s+)*-[ce]\s",
                      re.I | re.M)
 _SECRET = re.compile(r"(?:^|[\\/\s'\"`=@])\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(?:\.[\w.-]+)?(?:$|[\s'\"`;|&)])|[\\/]\.ssh(?:[\\/]|$)|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|"
                      r"\.(?:pem|key|p12|pfx)(?:$|[\s'\"`;|&)])|[\\/]\.aws[\\/]credentials|\bcredentials\.json\b|"
                      r"(?:^|[\\/\s'\"`])\.(?:npmrc|pypirc|netrc)\b|\bsecrets?\.(?:json|ya?ml|toml|env)\b", re.I)
 _DELETE = re.compile(r"(?:^|[\s;&|(`])(?:rm|del|erase|rmdir|rd|Remove-Item|ri)\s|"
-                     r"\bgit\s+(?:-c\s+\S+\s+)*(?:clean\s+-\w*f|reset\s+--hard|branch\s+-D)\b", re.I)
-_PUSH = re.compile(r"\bgit\s+(?:-c\s+\S+\s+)*push\b", re.I)
-_INSTALL = re.compile(r"\b(?:pip3?|uv\s+pip|python3?\s+-m\s+pip)\s+install\b|\buv\s+(?:add|tool\s+install)\b|"
-                      r"\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add)\b|(?:^|[\s;&|(])(?:npx|uvx|pnpx|bunx)\s|"
-                      r"\b(?:apt(?:-get)?|brew|winget|choco|scoop|cargo|go|gem)\s+install\b", re.I)
+                     r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*(?:clean\s+(?:-\w+\s+)*-\w*f\w*|reset\s+--hard|branch\s+-D)\b", re.I)
+_PUSH = re.compile(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*push\b", re.I)
+# Windows names count too: .\.venv\Scripts\pip.exe install (Antigravity, 2026-11-01), npm.cmd install
+_INSTALL = re.compile(r"\b(?:pip3?(?:\.exe)?|uv(?:\.exe)?\s+pip|python3?(?:\.exe)?\s+-m\s+pip)\s+install\b|"
+                      r"\buv(?:\.exe)?\s+(?:add|tool\s+install)\b|"
+                      r"\b(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?\s+(?:i|install|add)\b|"
+                      r"(?:^|[\s;&|(\\/])(?:npx|uvx|pnpx|bunx)(?:\.cmd|\.exe)?\s|"
+                      r"\b(?:apt(?:-get)?|brew|winget|choco|scoop|cargo|go|gem)(?:\.exe)?\s+install\b|"
+                      r"\b(?:poetry|pdm|rye)(?:\.exe)?\s+add\b|\bpipx(?:\.exe)?\s+(?:install|run)\b|"
+                      r"\b(?:conda|mamba|micromamba)(?:\.exe)?\s+install\b", re.I)
 
 
 _GUARD = re.compile(r"(?:^|[\\/])(?:\.cursorrules|\.mcp\.json|\.pre-commit-config\.ya?ml|"
@@ -197,7 +203,7 @@ _READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|gre
                         r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b[^>|;&]*$", re.I)
 _SINKS = {"guard_tamper", "wipe", "privilege", "guardrails", "secrets", "skips_commit_checks", "git_push", "deletes", "installs", "force_push",
           "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off"}
-_ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export\s+-p)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|dir|ls)\s+env:(?![A-Za-z_])|"
+_ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export\s+-p)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|Get-Item|gi|dir|ls)\s+env:(?![A-Za-z_])|"
                        r"\[Environment\]::GetEnvironmentVariables|/proc/[\w*]+/environ", re.I | re.M)
 _PIPE_SHELL = re.compile(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n;]*\|\s*(?:sudo\s+)?"
                          r"(?:sh|bash|zsh|dash|python3?|node|iex|Invoke-Expression|pwsh|powershell)\b|"
@@ -205,9 +211,9 @@ _PIPE_SHELL = re.compile(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestM
                          r"\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)\b|"
                          r"https?://[^\n;|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|python3?|node|iex|Invoke-Expression|pwsh|powershell)\b",
                          re.I)                         # (the last: any web address piped into a shell, whatever fetched it)
-_ENCODED = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*\s-e(?:nc(?:odedcommand)?)?\s+[A-Za-z0-9+/=]{16,}|"
+_ENCODED = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*\s-e(?:c|n\w*)?\s+[A-Za-z0-9+/=]{16,}|"
                       r"\bbase64\s+(?:-d|--decode)\b[^\n;]*\|\s*(?:sh|bash|zsh|python3?|node)\b|\bFromBase64String\b[^\n]*\b(?:iex|Invoke-Expression)\b", re.I)
-_FORCE = re.compile(r"\bgit\s+(?:-c\s+\S+\s+)*push\b[^\n;&|]*\s(?:--force(?:-with-lease)?\b|-f\b|\+\S+)|\bgit\s+filter-(?:branch|repo)\b", re.I)
+_FORCE = re.compile(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*push\b[^\n;&|]*\s(?:--force(?:-with-lease)?\b|-f\b|\+\S+)|\bgit(?:\.exe)?\s+filter-(?:branch|repo)\b", re.I)
 _PERSIST = re.compile(r"\bcrontab\s+(?!-l\b)\S|\bschtasks(?:\.exe)?\s+/create\b|\bRegister-ScheduledTask\b|"
                       r"\breg(?:\.exe)?\s+add\s+\S*\\Run(?:Once)?\b|\\CurrentVersion\\Run(?:Once)?\b[^\n]*\b(?:Set|New)-ItemProperty\b|"
                       r"\b(?:Set|New)-ItemProperty\b[^\n]*\\CurrentVersion\\Run|\bsystemctl\s+(?:--user\s+)?enable\b|\blaunchctl\s+(?:load|bootstrap)\b|"
@@ -218,7 +224,12 @@ _QUOTED = re.compile(r"'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\"")      # quoted text: a 
 # printing one secret variable: echo $OPENAI_API_KEY, Write-Output $env:GITHUB_TOKEN, or $env:X_SECRET on its own
 _SECRET_VAR = re.compile(r"(?:^|[;&|(]\s*)(?:echo|printf|print|Write-Output|Write-Host|cat\s+<<<)\b[^;&|\n]*"
                          r"\$\{?(?:env:)?\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|CREDENTIALS?)\}?(?![\w])|"
-                         r"^\s*\$env:\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT)\s*$", re.I | re.M)
+                         r"^\s*\$env:\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT)\s*$|"
+                         # cmd's echo %X_SECRET%, .NET's GetEnvironmentVariable('X_SECRET'), Get-Item env:X_SECRET
+                         r"(?:^|[;&|(]\s*)echo\b[^;&|\n]*%\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|CREDENTIALS?)\w*%|"
+                         r"\[(?:System\.)?Environment\]::GetEnvironmentVariable\(\s*['\"]?\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|CREDENTIALS?)\w*['\"]?\s*[,)]|"
+                         r"\b(?:Get-Item|gi|Get-Content|gc|cat|type)\s+env:\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|CREDENTIALS?)\w*\b",
+                         re.I | re.M)
 # a script run from the command that prints every environment variable (one variable read by name is fine)
 _SCRIPT_ENV = re.compile(r"\b(?:print|pprint|json\.dumps|repr|str|len)\(\s*(?:dict\(\s*)?os\.environ\s*\)|"
                          r"\bos\.environ\.(?:items|keys|values|copy)\(\)|\bfor\s+\w+(?:\s*,\s*\w+)?\s+in\s+(?:sorted\()?os\.environ\b|"
@@ -229,6 +240,10 @@ _KEY_VAR = r"\w*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PAT|CREDENTIALS?)\w*"
 _PRINTS_KEY = re.compile(rf"\b(?:print|pprint|console\.(?:log|info|error)|puts|echo|printf|Write-(?:Output|Host))\b[^\n]*?"
                          rf"(?:os\.environ\s*\[\s*['\"]{_KEY_VAR}['\"]|os\.(?:getenv|environ\.get)\(\s*['\"]{_KEY_VAR}['\"]|"
                          rf"process\.env\.{_KEY_VAR}\b|ENV\[\s*['\"]{_KEY_VAR}['\"]|\$\{{?(?:env:)?{_KEY_VAR}\}}?)", re.I)
+
+
+# .NET's file reads, which name the file inside quotes: [IO.File]::ReadAllText('.env')
+_FILE_API = re.compile(r"\[(?:System\.)?IO\.File\]::(?:Read|Open|Copy)\w*|\bFile\.(?:Read|Open)\w*\(", re.I)
 
 
 def prints_key(script: str) -> bool:
@@ -425,8 +440,9 @@ def watch_marks(a, cwd: str) -> list[str]:
             out.append("pipe_to_shell")
         if "env_dump" not in out and _INLINE.search(full) and _RUNS_BODY.search(t) and _SCRIPT_ENV.search(full):
             out.append("env_dump")
-        if "secrets" not in out and _SECRET_VAR.search(t):
-            out.append("secrets")
+        if "secrets" not in out and (_SECRET_VAR.search(t) or (_INLINE.search(full) and _PRINTS_KEY.search(full)) or
+                                     (_FILE_API.search(full) and _SECRET.search(_QUOTED.sub(lambda m: " " + m.group(0)[1:-1] + " ", full)))):
+            out.append("secrets")       # python -c "print(os.environ['X_SECRET'])", [IO.File]::ReadAllText('.env')
         if _RC_FILE.search(t) and _WRITES.search(_QUIET.sub(" ", t)) and "persistence" not in out:
             out.append("persistence")
         if _direct(t):
@@ -513,7 +529,7 @@ def push_targets(cmd: str) -> list[str]:
     """Where each git push in a command goes: the remote name or the URL as written ('' for the default remote)."""
     out = []
     for p in _parts(_unquote(_shell_part(cmd or ""))):
-        m = re.search(r"\bgit\s+(?:-c\s+\S+\s+|-C\s+\S+\s+)*push\b(.*)$", p, re.I)
+        m = re.search(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+|-C\s+\S+\s+)*push\b(.*)$", p, re.I)
         if not m:
             continue
         words, dest, skip = m.group(1).split(), "", False

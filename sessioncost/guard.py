@@ -1568,11 +1568,27 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # ---- putting the guard into Codex, Cursor, Antigravity and Copilot CLI (Claude Code gets it with the plugin) ----
+def _path_arg(p: str) -> str:
+    """A path for a hook command, quoted only when it must be: Antigravity hands the command to cmd.exe with every `"`
+    escaped as `\\"`, which cmd cannot read. A Windows path with spaces gets its short (8.3) form when there is one."""
+    if not re.search(r'[\s"&()^|<>]', p):
+        return p
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(32768)
+            if ctypes.windll.kernel32.GetShortPathNameW(p, buf, len(buf)) and not re.search(r'[\s"&()^|<>]', buf.value):
+                return buf.value
+        except (OSError, AttributeError):
+            pass
+    return f'"{p}"'
+
+
 def _launch(event: str, agent: str) -> str:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
-    run = f'"{g}"' if g.is_file() else "-m sessioncost.guard"
-    return f'"{sys.executable}" {run} hook {event} {agent}'
+    run = _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
+    return f'{_path_arg(sys.executable)} {run} hook {event} {agent}'
 
 
 def _backup(p: Path) -> None:

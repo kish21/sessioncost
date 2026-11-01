@@ -31,14 +31,28 @@ def tok(chars: int) -> int:
     return max(0, int(chars) // 4)
 
 
-def is_confirm(text: str) -> bool:
+def helper_name(s: Session, agent: str) -> str:
+    """A helper as the report names it: its task ("Vision Co-Founder Reviewer"), else its id."""
+    h = next((h for h in s.helpers if h.calls and h.calls[0].agent == agent), None)
+    return f"“{h.description}”" if h and h.description else agent.split(":", 1)[-1]
+
+
+def is_confirm(text: str, options: bool = False) -> bool:
+    """A reply that only says go ahead. With `options` (the agent listed a) b) c) choices), a bare letter too."""
     t = re.sub(r"[^\w\s]", "", (text or "").lower()).strip()
     t = re.sub(r"\s+", " ", t)
-    return bool(t) and len(t) <= 25 and t in CONFIRM
+    return bool(t) and len(t) <= 25 and (t in CONFIRM or (options and t in ("a", "b", "c")))
 
 
 ASK_RE = re.compile(r"\b(shall i|should i|do you want|would you like|want me to|may i|can i|ok to|okay to|is that ok|"
                     r"sound good|good to go|ready (?:for me )?to|before i (?:go|continue|proceed))\b", re.I)
+OPTIONS_RE = re.compile(r"(?:^|\n)\s*[*_]*[a-c][).][*_]*\s+\S")
+OPTIONS_TAIL = 600       # lettered choices count when they are in the end of the message
+
+
+def lettered(text: str) -> bool:
+    """Did the agent's message end with lettered choices (a) ... b) ...), the way many skills ask?"""
+    return bool(OPTIONS_RE.search((text or "")[-OPTIONS_TAIL:]))
 
 
 def asked(text: str) -> bool:
@@ -46,7 +60,7 @@ def asked(text: str) -> bool:
     not, so an "ok" after it is the user saying thanks, not a stop the agent made."""
     t = re.sub(r"[\s*_`>)\]]+$", "", text or "")
     tail = re.split(r"(?<=[.!?])\s+", t)[-2:]
-    return t.endswith("?") or any("?" in x for x in tail) or bool(ASK_RE.search(" ".join(tail)))
+    return t.endswith("?") or any("?" in x for x in tail) or bool(ASK_RE.search(" ".join(tail))) or lettered(text)
 
 
 def sent_usd(c: Call, r: dict) -> float:
@@ -248,7 +262,7 @@ def repeated_reads(s: Session, P) -> Fix | None:
                     hit_calls.append((c.agent, c.n))
                     guessed = guessed or a.result_guessed
                     items.append(f"{a.label} again (~{t:,} tokens, {'likely ' if a.result_guessed else ''}unchanged), call {c.n}"
-                                 + ("" if c.agent == "main" else f" of helper {c.agent.split(':')[-1]}"))
+                                 + ("" if c.agent == "main" else f" of the helper {helper_name(s, c.agent)}"))
                 else:
                     seen[key] = a.result_hash + str(a.label)
     if not items:
@@ -265,16 +279,246 @@ def repeated_reads(s: Session, P) -> Fix | None:
         how="Do not read a file again if it has not changed since you last read it: use what you already read.")
 
 
+WRITE_MIN = 800          # characters (~200 tokens): a smaller rewrite is not worth an edit instead
+
+
+def repeated_writes(s: Session, P) -> Fix | None:
+    """The same file written whole again in the same thread. Each rewrite after the first was paid as output, then
+    carried by every later call of that thread. An edit would have written only the lines that changed, so this is
+    the most it could save."""
+    usd, tokens, items, turns = 0.0, 0, [], set()
+    per_turn: dict[int, int] = {}
+    hit_calls: list[tuple[str, int]] = []
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
+        seen: dict[str, int] = {}
+        for i, c in enumerate(calls):
+            for a in c.actions:
+                if a.kind != "write" or not a.target or a.written_chars < WRITE_MIN:
+                    continue
+                seen[a.target] = seen.get(a.target, 0) + 1
+                if seen[a.target] < 2:
+                    continue
+                t = tok(a.written_chars)
+                usd += (t * P.rates(c)["output"] + sum(t * P.rates(k)["cache_read"] for k in calls[i + 1:])) / 1e6
+                tokens += t
+                turns.add(c.turn)
+                per_turn[c.turn] = per_turn.get(c.turn, 0) + t
+                hit_calls.append((c.agent, c.n))
+                items.append(f"{a.label} again, time {seen[a.target]} (~{t:,} tokens), call {c.n}"
+                             + ("" if c.agent == "main" else f" of the helper {helper_name(s, c.agent)}"))
+    if not items:
+        return None
+    return Fix(
+        id="repeated-writes", title="Edit an existing file instead of rewriting all of it",
+        why=(f"{len(items)} write{'s' if len(items) > 1 else ''} rewrote a whole file this chat had already written. "
+             "The new copy was paid for as output, and again on every later call that carried it. An edit writes "
+             "only the lines that change, so this is the most it could save."),
+        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=per_turn, calls=hit_calls, paste=True,
+        how="Write a new file once. When changing an existing file, edit only the lines that changed instead of "
+            "writing the whole file again.")
+
+
+ERRORS_MIN = 3           # this many failed steps in a chat, or two in a row in one turn, is a pattern
+
+
+def error_loop(s: Session, P) -> Fix | None:
+    """Failed tool steps, and above all retries straight after a failure. Each error message rode on every later
+    call of its thread; a retry right after a failure also re-sent the whole conversation to try again. Stopping to
+    find the cause after the second failure would have saved the retries (the most it could save)."""
+    usd, tokens, items, turns, fails, longest, same = 0.0, 0, [], set(), 0, 0, 0
+    per_turn: dict[int, int] = {}
+    hit_calls: list[tuple[str, int]] = []
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
+        run, turn = 0, None
+        failed: set[tuple[str, str]] = set()      # what failed since the last change to a file: the same again is blind
+        for i, c in enumerate(calls):
+            if c.turn != turn:
+                run, turn = 0, c.turn
+            for a in c.actions:
+                if a.kind in ("write", "edit"):
+                    failed.clear()
+                if not a.is_error:
+                    run = 0
+                    continue
+                key = (a.tool, re.sub(r"\s+", " ", a.target or a.label).strip())
+                again = key in failed
+                failed.add(key)
+                same += again
+                fails += 1
+                run += 1
+                longest = max(longest, run)
+                t = tok(a.result_chars)
+                cost = 0.0
+                if t and i + 1 < len(calls):
+                    nxt = calls[i + 1]
+                    cost += t * pricemod.new_input_rate(nxt.usage, P.rates(nxt))
+                    cost += sum(t * P.rates(k)["cache_read"] for k in calls[i + 2:])
+                retry = run > 1
+                if retry and a is c.actions[0]:       # this call only happened to try again after a failure
+                    cost += sent_usd(c, P.rates(c)) * 1e6
+                    t += c.usage.context
+                usd += cost / 1e6
+                tokens += t
+                turns.add(c.turn)
+                per_turn[c.turn] = per_turn.get(c.turn, 0) + t
+                if (c.agent, c.n) not in hit_calls:
+                    hit_calls.append((c.agent, c.n))
+                note = ", the same as before and unchanged" if again else ", again right after a failure" if retry else ""
+                items.append(f"{a.label} failed{note}, call {c.n}"
+                             + ("" if c.agent == "main" else f" of the helper {helper_name(s, c.agent)}"))
+    if fails < ERRORS_MIN and longest < 2:
+        return None
+    return Fix(
+        id="error-loop", title="Stop and find the cause after a step fails twice",
+        why=(f"{fails} step{'s' if fails > 1 else ''} failed in this chat"
+             + (f", up to {longest} in a row" if longest > 1 else "")
+             + (f"; {same} of them ran exactly what had already failed, with no file changed in between" if same else "")
+             + ". Each error message was carried by every later call, and each retry right after a failure re-sent "
+             "the whole conversation to try again. Finding the cause first is usually cheaper than trying again."),
+        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=per_turn, calls=hit_calls, paste=True,
+        how="When a command or tool fails twice in a row, stop and find the cause before trying again. Do not retry "
+            "the same thing with small changes.")
+
+
+TEST_CMD = re.compile(r"(?:^|[\s;&|(/\\])(?:pytest|py\.test|jest|vitest|mocha|rspec|phpunit|tox|nox|"
+                      r"python3?\s+-m\s+(?:pytest|unittest)|go\s+test|cargo\s+test|dotnet\s+test|deno\s+test|bun\s+test|"
+                      r"(?:npm|pnpm|yarn)\s+(?:run\s+)?test|make\s+(?:check|test)|(?:mvn|gradlew?)\s+(?:\S+\s+)*test)"
+                      r"(?=$|[\s;&|)])", re.I)
+CODE_EXT = re.compile(r"\.(py|js|jsx|ts|tsx|mjs|cjs|go|rs|java|kt|cs|cpp|cc|c|h|hpp|rb|php|swift|scala|vue|svelte|sql)$", re.I)
+
+
+def is_test(a) -> bool:
+    return a.kind == "command" and bool(TEST_CMD.search(a.target or ""))
+
+
+def test_reruns(s: Session, P) -> Fix | None:
+    """The same test command run again with nothing changed in between: no file written or edited, no other
+    command. Its second result tells nothing new, and it was carried by every later call."""
+    usd, tokens, items, turns = 0.0, 0, [], set()
+    per_turn: dict[int, int] = {}
+    hit_calls: list[tuple[str, int]] = []
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
+        ran: set[str] = set()                     # test commands run since the last change
+        for i, c in enumerate(calls):
+            for a in c.actions:
+                if a.kind in ("write", "edit") or (a.kind == "command" and not is_test(a)):
+                    ran.clear()
+                    continue
+                if not is_test(a):
+                    continue
+                key = re.sub(r"\s+", " ", a.target).strip()
+                if key not in ran:
+                    ran.add(key)
+                    continue
+                t = tok(a.result_chars)
+                if t and i + 1 < len(calls):
+                    nxt = calls[i + 1]
+                    usd += (t * pricemod.new_input_rate(nxt.usage, P.rates(nxt))
+                            + sum(t * P.rates(k)["cache_read"] for k in calls[i + 2:])) / 1e6
+                tokens += t
+                turns.add(c.turn)
+                per_turn[c.turn] = per_turn.get(c.turn, 0) + t
+                hit_calls.append((c.agent, c.n))
+                items.append(f"{a.label} again with nothing changed, call {c.n}"
+                             + ("" if c.agent == "main" else f" of the helper {helper_name(s, c.agent)}"))
+    if not items:
+        return None
+    return Fix(
+        id="test-rerun", title="Don't run the tests again when nothing changed",
+        why=(f"The tests were run {len(items)} more time{'s' if len(items) > 1 else ''} with no file changed since "
+             "the last run, so the result could not be different. Each copy of the output was carried by every "
+             "later call."),
+        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=per_turn, calls=hit_calls, paste=True,
+        how="Do not re-run a command when no file has changed since the last run. Read the first result.")
+
+
+def untested_edits(s: Session) -> dict | None:
+    """Code the main agent changed after the last test run of the chat, with no test run after it. Only in a chat
+    that ran the tests at least once (so the project has tests). Not a cost: shown above the fixes."""
+    last, changed = None, []
+    for c in s.calls:
+        for a in c.actions:
+            if is_test(a):
+                last, changed = c, []
+            elif a.kind in ("write", "edit") and last is not None:
+                changed += [f for f in (a.target or "").splitlines() if CODE_EXT.search(f.strip())]
+    if last is None or not changed:
+        return None
+    names = list(dict.fromkeys(re.split(r"[\\/]", f.strip())[-1] for f in changed))
+    return {"id": "untested-edits", "title": "Code was changed after the last test run",
+            "times": [], "refused": 0,
+            "why": (f"{', '.join(names[:5])}{' and more' if len(names) > 5 else ''} changed after the tests last ran "
+                    f"(turn {last.turn}), and the tests were not run again"),
+            "note": "Not a cost, but untested changes are how bugs get through.",
+            "how": "After changing code, run the tests before you say the work is done."}
+
+
+POLL_TOOLS = {"schedule"}                               # a timer to look again (Antigravity)
+POLL_ACTIONS = {("manage_subagents", "list"), ("manage_subagents", "status")}
+
+
+def _polls(a) -> bool:
+    return a.tool in POLL_TOOLS or any(a.tool == t and f"({v})" in a.label for t, v in POLL_ACTIONS)
+
+
+def helper_polling(s: Session, P) -> Fix | None:
+    """Main-agent calls that only waited for a helper: a timer, or a look at the list of running helpers. A helper
+    sends its answer back by itself, so each of these calls re-sent the whole conversation for nothing."""
+    if not s.helpers:
+        return None
+    usd, tokens, items, turns = 0.0, 0, [], set()
+    per_turn: dict[int, int] = {}
+    hit_calls: list[tuple[str, int]] = []
+    helper_turns = {c.turn for h in s.helpers for c in h.calls}
+    for c in s.calls:
+        if not c.actions or c.turn not in helper_turns or not all(_polls(a) for a in c.actions):
+            continue
+        usd += sent_usd(c, P.rates(c))
+        tokens += c.usage.context
+        turns.add(c.turn)
+        per_turn[c.turn] = per_turn.get(c.turn, 0) + c.usage.context
+        hit_calls.append((c.agent, c.n))
+        items.append(f"call {c.n} (turn {c.turn}): {'; '.join(a.label for a in c.actions)}, re-sending "
+                     f"{c.usage.context:,} tokens")
+    if not items:
+        return None
+    return Fix(
+        id="helper-polling", title="Let helpers report back instead of checking on them",
+        why=(f"{len(items)} call{'s' if len(items) > 1 else ''} of the main agent only waited for a helper: a timer, "
+             "or a look at which helpers were still running. A helper sends its answer back by itself, and each of "
+             "these calls re-sent the whole conversation to wait."),
+        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=per_turn, calls=hit_calls, paste=True,
+        how="When a helper is working, wait for its message. Do not set timers or check on it in between.")
+
+
+SKILL_STOPS = 2          # this many a) / b) stops in a chat that ran a skill: the skill's own questions cause them
+SKILL_DIR = re.compile(r"[\\/]skills[\\/]([^\\/]+)[\\/]", re.I)
+
+
+def skill_in_use(s: Session) -> str:
+    """The skill the chat ran: a /command you typed ("/idea"), else the folder of a SKILL.md the agent read."""
+    cmd = next((t.text.split()[0] for t in s.turns if t.kind == "command" and t.text.strip()), "")
+    if cmd:
+        return cmd
+    return next((m.group(1) for a in s.actions(include_helpers=False) if a.kind == "read"
+                 for m in [SKILL_DIR.search(a.target or "")] if m), "")
+
+
 def confirm_turns(s: Session, P) -> Fix | None:
     """A stop where the user only said yes / ok / save, and the next call just acted on it."""
-    usd, hits, turns, tokens = 0.0, [], set(), 0
+    usd, hits, turns, tokens, choices = 0.0, [], set(), 0, 0
     per_turn: dict[int, int] = {}
     hit_calls: list[tuple[str, int]] = []
     before = None                       # the last main call before this turn: what the agent said last
     for t in s.turns:
         prev, before = before, (t.calls[-1] if t.calls else before)
-        if t.kind in ("typed", "queued") and t.calls and is_confirm(t.text) and \
-                (prev is None or asked(prev.last_text or prev.first_text)):
+        said = (prev.last_text or prev.first_text) if prev is not None else ""
+        if t.kind in ("typed", "queued") and t.calls and is_confirm(t.text, lettered(said)) and \
+                (prev is None or asked(said)):
             c = t.calls[0]
             usd += sent_usd(c, P.rates(c))
             tokens += c.usage.context
@@ -283,6 +527,7 @@ def confirm_turns(s: Session, P) -> Fix | None:
             hits.append(f"turn {t.n}: you typed “{t.text}”; the next call re-sent "
                         f"{c.usage.context:,} tokens to receive it")
             turns.add(t.n)
+            choices += lettered(said)
         for e in t.events:
             if e.kind != "answer" or not e.ts:
                 continue
@@ -300,10 +545,14 @@ def confirm_turns(s: Session, P) -> Fix | None:
                 turns.add(t.n)
     if not hits:
         return None
+    skill = skill_in_use(s)
+    from_skill = (f" {choices} of these stops answered the a) / b) choices of the {skill} skill: asking for one "
+                  "approval per stage in the skill itself removes them in every chat that uses it."
+                  if skill and choices >= SKILL_STOPS else "")
     return Fix(
         id="confirm-turn", title="Skip the stop that only asks you to confirm",
         why=("The agent stopped and waited for a yes. Receiving it meant re-sending the whole conversation once "
-             "more. Let it go ahead and ask “change anything?” afterwards instead."),
+             "more. Let it go ahead and ask “change anything?” afterwards instead." + from_skill),
         saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=hits,
         per_turn=per_turn, calls=hit_calls, paste=True,
         how="When the next step is clear, go ahead without asking me to confirm. Tell me what you did afterwards.")
@@ -329,6 +578,32 @@ def new_chat_steps(agent: str) -> str:
     ], 1))
 
 
+GIT_COMMIT = re.compile(r"\bgit\s+(?:-c\s+\S+\s+)*commit\b")
+SKILL_FILE = re.compile(r"[\\/]skills[\\/]|[\\/]SKILL\.md$", re.I)
+
+
+def task_starts(s: Session) -> list[tuple]:
+    """(turn, why) for each turn where a new task likely began: after a long break, after the previous turn made a
+    git commit, at a new /command, or when the agent first read a skill's files. The first turn is not one."""
+    out, prev, skills = [], None, set()
+    for t in s.turns:
+        new_skill = {a.target for c in t.calls for a in c.actions
+                     if a.kind == "read" and a.target and SKILL_FILE.search(a.target)} - skills
+        if t.n > 1 and prev is not None:
+            if t.waited_s >= LONG_BREAK_S:
+                out.append((t, f"a {round(t.waited_s / 60)} min break"))
+            elif any(a.kind == "command" and GIT_COMMIT.search(a.target or "") for c in prev.calls for a in c.actions):
+                out.append((t, f"after a git commit in turn {prev.n}"))
+            elif t.kind == "command":
+                out.append((t, f"a new command in turn {t.n}"))
+            elif new_skill:
+                out.append((t, f"a new skill read in turn {t.n}"))
+        skills |= new_skill
+        if t.n > 0:
+            prev = t
+    return out
+
+
 def long_chat(s: Session, P) -> Fix | None:
     """A long conversation carried on after a long break: every later call re-sent all of it. A new chat (or a
     compacted one) at the break would have carried a short summary instead. The saving is measured call by call:
@@ -337,8 +612,11 @@ def long_chat(s: Session, P) -> Fix | None:
     if len(calls) < 2:
         return None
     setup = calls[0].usage.context                      # the first call carries little more than the setup
-    splits = [t for t in s.turns if t.n > 1 and t.calls and t.waited_s >= LONG_BREAK_S
-              and t.calls[0].usage.context - setup >= LONG_CHAT]
+    splits, why = [], {}
+    for t, reason in task_starts(s):
+        if t.n > 1 and t.calls and t.calls[0].usage.context - setup >= LONG_CHAT:
+            splits.append(t)
+            why[t.n] = reason
     if not splits:
         return None
     usd, tokens, per_turn, items, hit = 0.0, 0, {}, [], []
@@ -362,14 +640,17 @@ def long_chat(s: Session, P) -> Fix | None:
             seg += take
             per_turn[c.turn] = per_turn.get(c.turn, 0) + take
         hit.append((t.calls[0].agent, t.calls[0].n))
-        items.append(f"before turn {t.n}: a {round(t.waited_s / 60)} min break with ~{base:,} tokens of conversation; "
+        items.append(f"before turn {t.n}: {why[t.n]}, with ~{base:,} tokens of conversation; "
                      f"a new chat would have cut ~{seg:,} tokens from the {end - start} calls after it")
     if not tokens:
         return None
     turns = [t.n for t in splits]
+    breaks = all(why[n].endswith("break") for n in turns)
+    where = (f"{len(turns)} long break{'s' if len(turns) > 1 else ''}" if breaks else
+             f"{len(turns)} point{'s' if len(turns) > 1 else ''} where a task ended or a new one began")
     return Fix(
-        id="long-chat", title="Start a new chat after a long break",
-        why=(f"This chat went on after {len(turns)} long break{'s' if len(turns) > 1 else ''} with "
+        id="long-chat", title="Start a new chat after a long break" if breaks else "Start a new chat for each new task",
+        why=(f"This chat went on after {where} with "
              f"{max(t.calls[0].usage.context - setup for t in splits) // 1000}k tokens of conversation, and every "
              "later call re-sent all of it, including old work that had nothing to do with the next task. A new "
              "chat, or a compacted one, would have carried a short summary instead. (A fresh chat may re-read a "
@@ -383,7 +664,10 @@ class BasicFixes:
 
     def find(self, session: Session, pricer) -> list[Fix]:
         return [f for f in (unused_tools(session, pricer), unused_builtins(session, pricer),
-                            repeated_reads(session, pricer), confirm_turns(session, pricer),
+                            repeated_reads(session, pricer), repeated_writes(session, pricer),
+                            error_loop(session, pricer), helper_polling(session, pricer),
+                            test_reruns(session, pricer),
+                            confirm_turns(session, pricer),
                             long_chat(session, pricer)) if f]
 
 

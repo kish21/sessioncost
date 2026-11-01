@@ -11,7 +11,8 @@ from typing import Protocol
 
 from .. import risks
 from ..model import Session
-from . import antigravity, claude, codex, cursor
+from . import antigravity, claude, codex, copilot, cursor, vscode_chat
+from ._util import clean_cmd
 
 
 class Reader(Protocol):
@@ -22,7 +23,8 @@ class Reader(Protocol):
     def read(self, path: Path) -> Session: ...
 
 
-READERS: list[Reader] = [claude.ClaudeCodeReader(), codex.CodexReader(), antigravity.AntigravityReader()]
+READERS: list[Reader] = [copilot.CopilotReader(), vscode_chat.VSCodeChatReader(), claude.ClaudeCodeReader(),
+                         codex.CodexReader(), antigravity.AntigravityReader()]
 
 
 class NotSupported(Exception):
@@ -64,10 +66,20 @@ def _command_reads(s: Session) -> None:
                     f"read {len(names)} files: " + ", ".join(f"`{n}`" for n in names[:3]) + (", …" if len(names) > 3 else "")
 
 
+def _command_labels(s: Session) -> None:
+    """Now that the project folder is known, say paths inside it relative to it ("ran `python tools/x.py`")."""
+    for c in s.all_calls:
+        for a in c.actions:
+            if a.kind == "command" and a.target and a.label.startswith("ran `"):
+                a.label = f"ran `{clean_cmd(a.target, s.cwd)}`"
+
+
 def read(path) -> Session:
     s = _read(path)
     _command_reads(s)
+    _command_labels(s)
     risks.mark_commit_check_skips(s)
+    risks.mark_watch(s)
     return s
 
 
@@ -81,4 +93,5 @@ def _read(path) -> Session:
         if r.can_read(p):
             return r.read(p)
     raise NotSupported(f"{p.name}: not a session log this version can read (Claude Code and Codex .jsonl, "
-                       "Antigravity .db; Cursor chats are opened by id)")
+                       "Copilot CLI events.jsonl, VS Code Copilot Chat chatSessions files, Antigravity .db; Cursor chats "
+                       "are opened by id)")

@@ -7,13 +7,48 @@ token counts the log does give. Those parts are marked `estimated`.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from datetime import datetime
 
-from . import fixes as fixmod, rules, summary as summarymod
+from . import fixes as fixmod, rules
 from . import __version__, prices as pricemod
-from .model import Call, Session
+from .model import Call, Session, Usage
+from .readers._util import clean_cmd
+from .risks import _SECRET_VALUE, ALLOW_FILE, NEVER, SEVERITY, WATCH, read_allow
+from . import guard as guardmod
+
+
+def _hide_keys(text: str) -> str:
+    """A step's words as the report shows them: any API key or token in a command (sk-..., ghp_..., AKIA...) hidden."""
+    return _SECRET_VALUE.sub("[secret hidden]", text or "")
+
+
+def guard_summary(session_id: str) -> dict | None:
+    """What the live guard did in this chat (guard.py's log), or None when it was not on: each step it blocked or
+    asked about (by tool call id), what you allowed, and whether the log's hash chain is intact."""
+    p = guardmod.log_path(session_id)
+    if not session_id or not p.is_file():
+        return None
+    intact, entries = guardmod.verify_log(p)
+    steps = {}
+    for e in entries:
+        if e.get("event") == "pre" and e.get("decision") in ("blocked", "asked"):
+            steps[e.get("id")] = {"decision": e["decision"], "marks": e.get("marks", []), "what": _hide_keys(e.get("what", ""))}
+        elif e.get("event") == "allowed" and e.get("id") in steps:
+            steps[e["id"]]["allowed"] = True
+    inv = next((e for e in reversed(entries) if e.get("event") == "inventory"), None)
+    return {"intact": intact, "lines": len(entries), "steps": steps,
+            "injections": sum(1 for e in entries if e.get("event") == "injection" and e.get("at") != "start"),
+            "loaded": [w for e in entries if e.get("event") == "injection" and e.get("at") == "start" for w in e.get("where") or []],
+            "keys_seen": sum(1 for e in entries if e.get("event") == "key_seen"),
+            "strict": any(e.get("strict") for e in entries if e.get("event") == "start"),
+            "inventory": {k: inv.get(k) for k in ("items", "first", "new", "changed", "removed") if k in inv} if inv else None,
+            "blocked": sum(1 for x in steps.values() if x["decision"] == "blocked"),
+            "asked": sum(1 for x in steps.values() if x["decision"] == "asked"),
+            "allowed": sum(1 for x in steps.values() if x.get("allowed")),
+            "untrusted": sum(1 for e in entries if e.get("event") in ("untrusted", "injection"))}   # an injection came in too
 
 SAID = ("typed", "command", "queued", "answer")    # what you said, as opposed to what the agent added
 
@@ -79,7 +114,7 @@ class Pricer:
         r, checked, _ = pricemod.rates(c.model, self.prices)
         if not checked:
             self.unchecked.add(c.model or "unknown model")
-        return r
+        return pricemod.for_prompt(r, c.usage.context)      # a long prompt may cost more (Haiku 5.5, GPT over 272K)
 
     def cost(self, c: Call) -> dict:
         return pricemod.cost(c.usage, self.rates(c))
@@ -120,7 +155,7 @@ def call_label(c: Call) -> str:
     return "thought, wrote nothing visible"
 
 
-def sent_parts(c: Call, r: dict, setup_tokens: int, carried_max: int | None) -> list[dict]:
+def sent_parts(c: Call, r: dict, setup_tokens: int, carried_max: int | None, cache_known: bool = True) -> list[dict]:
     """What was sent, by what it is: fixed setup (step 0) + earlier conversation (step 1) + new (step 2) = the call's
     context, exactly. Earlier conversation is what the previous call of this thread sent and wrote, minus the setup,
     whether it came from the cache or not (after a pause the cache expires and it is sent again at full price).
@@ -142,8 +177,11 @@ def sent_parts(c: Call, r: dict, setup_tokens: int, carried_max: int | None) -> 
         parts.append({"what": "fixed setup (instructions, tools, skills: step 0)", "tokens": setup,
                       "usd": price(setup, s_cr), "estimated": False})
     # the newest piece (the last reply and tool results) is always written to the cache on this call, not read:
-    # only call it an expired cache when most of the earlier conversation missed it
-    expired = carried > 2000 and h_cr < carried / 2
+    # only call it an expired cache when most of the earlier conversation missed it, and the chat was not compacted
+    # (a context under 40% of the last call is a compaction: its new summary always misses the cache)
+    compacted = carried_max > 20000 and u.context < carried_max * 0.4
+    # (a log that records no cache reads, Cursor without its usage export, cannot show an expired cache at all)
+    expired = cache_known and carried > 2000 and h_cr < carried / 2 and not compacted
     parts.append({"what": "earlier conversation" + (" (sent again at full price: the cache had expired)" if expired else ""),
                   "tokens": carried, "usd": price(carried, h_cr), "estimated": False})
     parts.append({"what": "new input (sent for the first time)", "tokens": new, "usd": price(new, n_cr),
@@ -175,18 +213,29 @@ def written_parts(c: Call, r: dict) -> list[dict]:
     return parts
 
 
+def checked_day(as_of: str) -> str:
+    """'2026-10-29' -> '29 Oct 2026': the day the price list was checked, said so it is not read as the report's date."""
+    try:
+        d = datetime.strptime(as_of, "%Y-%m-%d")
+    except ValueError:
+        return as_of
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+
 def money_label(exact: bool, as_of: str, subscription: bool, tokens_exact: bool = True) -> tuple[str, str]:
     """(long label, short label)"""
+    day = checked_day(as_of)
     if not tokens_exact:
         return ("estimate: this log keeps no token counts, so tokens are estimated from the size of the text, at "
-                "API prices as of %s%s" % (as_of, "; your plan is not billed per token" if subscription else ""),
+                "API prices checked %s%s" % (day, "; your plan is not billed per token" if subscription else ""),
                 "estimate")
     if subscription:
-        return ("API-equivalent: what these tokens would cost at API prices (as of %s). Your plan is not billed per "
-                "token." % as_of, "API-equivalent")
+        return ("API-equivalent: what these tokens would cost at API prices (checked %s). Your plan is not billed per "
+                "token." % day, "API-equivalent")
     if exact:
-        return ("exact, at the API price list as of %s" % as_of, "exact (API prices %s)" % as_of)
-    return ("estimate: at least one model has no checked price (prices as of %s)" % as_of, "estimate")
+        # the token counts are exact; the dollars are those tokens at the list prices, so the label names the prices
+        return ("at the API price list, checked %s" % day, "at API prices checked %s" % day)
+    return ("estimate: at least one model has no checked price (prices checked %s)" % day, "estimate")
 
 
 def analyse(s: Session, prices: dict, subscription: bool = False, engines: list | None = None) -> dict:
@@ -219,7 +268,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         total = sum(cc.values())
         pv = prev_of.get(c.agent)
         prev_setup = min(setup_tokens, pv.usage.context) if pv is not None and c.agent == "main" else 0
-        sp = sent_parts(c, r, setup_tokens, None if pv is None else pv.usage.context - prev_setup + pv.usage.output)
+        sp = sent_parts(c, r, setup_tokens, None if pv is None else pv.usage.context - prev_setup + pv.usage.output,
+                        cache_known=s.tokens_exact)      # estimated tokens (Cursor, VS Code Copilot Chat): cache unknown
         prev_of[c.agent] = c
         sp_by = {"setup": sum(x["tokens"] for x in sp if x["what"].startswith("fixed setup")),
                  "history": sum(x["tokens"] for x in sp if x["what"].startswith("earlier conversation")),
@@ -230,10 +280,15 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "ts": iso(c.ts_first), "end": iso(c.ts_last), "time": hhmm(c.ts_first),
             "category": "reviewer" if id(c) in reviewer_calls else category(c, c.msg_id == first_id and c.agent == "main",
                                                                          c.msg_id == last_id and c.agent == "main"),
-            "label": call_label(c),
-            "actions": [{"label": a.label, "kind": a.kind, "result_tokens": tok(a.result_chars), "tool": a.tool,
+            "label": _hide_keys(call_label(c)),
+            "actions": [{"id": a.id, "label": _hide_keys(a.label), "kind": a.kind, "result_tokens": tok(a.result_chars), "tool": a.tool,
                          "secs": round(secs(a.ts, a.result_ts), 1) if a.ts and a.result_ts else None,
-                         "error": a.is_error} for a in c.actions],
+                         "error": a.is_error, "risks": [r for r in WATCH if r in a.risks],
+                         **({"allowed": a.allowed} if a.allowed else {}),
+                         **({"after": list(a.chain_from)} if a.chain_from else {}),
+                         # the whole command or path (a reviewer reads all of it), key-shaped values hidden
+                         **({"where": _hide_keys(clean_cmd(a.target.replace("\n", " · "), s.cwd, 300))}
+                            if a.target else {})} for a in c.actions],
             "usage": {"input": c.usage.fresh_input, "cache_write_5m": c.usage.cache_write_5m,
                       "cache_write_1h": c.usage.cache_write_1h, "cache_read": c.usage.cache_read,
                       "output": c.usage.output, "thinking": c.usage.thinking},
@@ -255,7 +310,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         for i, c in enumerate(t.calls):
             items = []
             if prev is not None:
-                items += [{"what": f"result of: {a.label}", "tokens": tok(a.result_chars)}
+                items += [{"what": _hide_keys(f"result of: {a.label}"), "tokens": tok(a.result_chars)}
                           for a in prev.actions if a.result_chars]
             for e in t.events:
                 if i == 0:
@@ -344,10 +399,19 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     split_known = s.agent != "claude-code" or all(c.usage.write_split_known for c in s.all_calls)
     exact = not P.unchecked and s.tokens_exact and split_known
     long_label, short_label = money_label(exact, as_of, subscription, s.tokens_exact)
-    if not exact and long_label.startswith("exact"):
+    if not exact and long_label.startswith("at the API"):
         long_label, short_label = ("estimate: this log does not say which cache writes were kept 5 minutes or 1 hour "
                                    "(they cost 1.25x and 2x the input price), so all are priced at 5 minutes "
-                                   "(prices as of %s)" % as_of, "estimate")
+                                   "(prices checked %s)" % checked_day(as_of), "estimate")
+    own = prices.get("own") or []
+    if own:
+        # your own prices: the dollars are not the list prices, so the label must not say they are
+        mine = "your own prices (%s; the list prices checked %s for any model they leave out)" % (
+            ", ".join(own), checked_day(as_of))
+        if exact and not subscription:
+            long_label, short_label = "at " + mine, "at your own prices"
+        else:
+            long_label += "; with " + mine
     reasons = []      # why the total is not exact, biggest first
     if not s.tokens_exact:
         reasons.append("This log keeps no token counts, so tokens are estimated from the size of the text.")
@@ -366,19 +430,29 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         "tool": "sessioncost",
         "meta": {
             "version": __version__, "title": plain(s.title), "agent": s.agent, "agent_label": {"claude-code": "Claude Code", "codex": "Codex", "antigravity": "Antigravity",
-                                                       "cursor": "Cursor"}.get(s.agent, s.agent),
+                                                       "cursor": "Cursor", "copilot": "Copilot CLI",
+                                                       "copilot-vscode": "Copilot Chat (VS Code)"}.get(s.agent, s.agent),
             "agent_version": s.agent_version, "model": s.model,
             "models": sorted({c.model for c in s.all_calls if c.model}), "session_id": s.session_id,
             "project": _folder(s.cwd), "started": iso(s.started), "ended": iso(s.ended),
+            # when this report was built, and whether auto mode rebuilds it after each answer (the page says so)
+            "made_at": iso(datetime.now().astimezone()), "auto": bool(guardmod._read(guardmod.home() / "config.json", {}).get("auto")),
             "date": s.started.astimezone().strftime("%d %b %Y") if s.started else "",
             # the file each agent reads at the start of every chat (Cursor: AGENTS.md in the project root; a plain
             # file in .cursor/rules is ignored, those need Cursor's .mdc format)
             "rules_file": {"claude-code": "CLAUDE.md", "codex": "AGENTS.md", "cursor": "AGENTS.md",
-                           "antigravity": "GEMINI.md"}.get(s.agent, "the agent's instruction file"),
+                           "antigravity": "GEMINI.md", "copilot": ".github/copilot-instructions.md",
+                           "copilot-vscode": ".github/copilot-instructions.md"}.get(
+                               s.agent, "the agent's instruction file"),
             # which recommended rules are already in the instruction files (read here, never sent)
             "rules_check": rules.check(s.agent, s.cwd),
         },
-        "money": {"label": long_label, "short": short_label, "as_of": as_of, "exact": exact,
+        "money": {"label": long_label, "short": short_label, "as_of": as_of, "day": checked_day(as_of), "exact": exact,
+                  "own": own,
+                  "range": cursor_range(s, P) if not s.tokens_exact else None,
+                  # a usage export was used but did not cover every turn (a later turn, or an older export)
+                  "export_partial": s.agent == "cursor" and not s.tokens_exact and
+                                    any(n.startswith("Tokens from Cursor's usage export") for n in s.notes),
                   "subscription": subscription, "unchecked_models": sorted(P.unchecked), "why": why,
                   "tokens_exact": s.tokens_exact, "write_split_known": split_known,
                   "own_cost_usd": s.own_cost_usd,
@@ -407,6 +481,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
                      "calls": len(h.calls), "usd": sum(by_obj[id(c)]["usd"] for c in h.calls),
                      "tokens": sum(c.usage.context + c.usage.output for c in h.calls)} for h in s.helpers],
         "notes": list(s.notes),
+        "chapters": chapters(s, turn_rows, P),
+        "top_files": top_files(s),
     }
 
     # ---- fixes: built-in detectors + any engine plugged in (see fixes.py)
@@ -425,13 +501,224 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
                 tr["fixes"].append(f.id)
     # risky steps (risks.py): not a cost, shown above the fixes, whether or not the fix engine is used
     tried = [(c, a) for c in s.all_calls for a in c.actions if "skips_commit_checks" in a.risks]
+    out["agents"] = agents(s, by_obj, total_usd)
+    # the watch list (risks.py): how many steps carry each mark, main chat and helpers
+    out["watch"] = {w: sum(1 for c in s.all_calls for a in c.actions if w in a.risks) for w in WATCH}
+    out["watch_meta"] = {"severity": SEVERITY, "allow_file": ALLOW_FILE, "allow_rules": len(read_allow(s.cwd)),
+                         "allowed": sum(len(a.allowed) for c in s.all_calls for a in c.actions), "never": sorted(NEVER)}
+    out["guard"] = guard_summary(s.session_id)
     out["warnings"] = [{"id": "hook-bypass", "title": "Your agent tried to switch off the commit checks",
                         "times": [hhmm(a.ts or c.ts_first) for c, a in tried],
                         "refused": sum(1 for _, a in tried if a.is_error or {"blocked", "rejected"} & set(a.result_flags)),
                         "how": "Never switch off the commit checks (no SKIP=, no --no-verify). If a check fails, fix "
                                "the cause or tell me which check and why."}] if tried else []
-    out["summary"] = summarymod.build(s, out)      # what a deeper-fix check would receive: no content (summary.py)
+    untested = fixmod.untested_edits(s)
+    if untested:
+        out["warnings"].append(untested)
+    # the private fix engine's input: built only when that engine is plugged in, and absent from public installs
+    if os.environ.get("SESSIONCOST_ENGINE"):
+        try:
+            from .private import summary as summarymod
+            out["summary"] = summarymod.build(s, out)
+        except ImportError:
+            pass
     return out
+
+
+DID = [("read", "read", "reads"), ("write", "file written", "files written"), ("edit", "edit", "edits"),
+       ("search", "search", "searches"), ("web", "web lookup", "web lookups"), ("command", "command", "commands"),
+       ("helper", "step with a helper", "steps with helpers"), ("question", "question to you", "questions to you")]
+
+
+def agents(s: Session, by_obj: dict, total_usd: float) -> list[dict]:
+    """Who did the work: the main agent, then each helper, with why it ran, what it did, what it cost and which
+    fixes point at its calls. A helper that failed to start is listed too, with no calls."""
+    fixes_of: dict[str, list[str]] = {}
+    for f in s.fixes:
+        for agent in dict.fromkeys(a for a, _ in f.calls):
+            fixes_of.setdefault(agent, []).append(f.id)
+
+    def row(name: str, why: str, kind: str, calls: list[Call], agent: str) -> dict:
+        kinds: dict[str, int] = {}
+        for a in (a for c in calls for a in c.actions):
+            kinds[a.kind] = kinds.get(a.kind, 0) + 1
+        did = [f"{kinds[k]} {one if kinds[k] == 1 else many}"
+               for k, one, many in sorted((d for d in DID if kinds.get(d[0])), key=lambda d: -kinds[d[0]])]
+        usd = sum(by_obj[id(c)]["usd"] for c in calls)
+        return {"name": name, "why": why, "kind": kind, "calls": len(calls),
+                "sent": sum(c.usage.context for c in calls), "output": sum(c.usage.output for c in calls),
+                "usd": usd, "share": usd / total_usd if total_usd else 0.0,
+                "turns": sorted({c.turn for c in calls}), "did": did[:4], "fixes": fixes_of.get(agent, [])}
+
+    out = [row("Main agent", "your chat with it", "main", s.calls, "main")]
+    for h in s.helpers:
+        agent = h.calls[0].agent if h.calls else f"helper:{h.id}"
+        woke = sorted({c.turn for c in h.calls} - {h.turn})
+        why = (f"started by the helper “{h.parent}” in turn {h.turn}" if h.parent else f"started in turn {h.turn}") + (
+            f", woken again in turn{'s' if len(woke) > 1 else ''} {', '.join(map(str, woke))}" if woke else "")
+        out.append(dict(row(h.description or h.id, why, "reviewer" if h.agent_type == "reviewer" else "helper",
+                            h.calls, agent), parent=h.parent))
+    names = {h.description for h in s.helpers}
+    for c in s.calls:                    # asked for, but never ran: no calls of its own to show
+        for a in c.actions:
+            if a.kind == "helper" and a.is_error and a.label.startswith("started a helper") and a.target not in names:
+                names.add(a.target)
+                out.append(dict(row(a.target or "a helper", f"asked for in turn {c.turn}; it did not start",
+                                    "failed", [], ""), turns=[c.turn]))
+    return out
+
+
+REUSE_GAP_S = 300       # the low end of a Cursor range: a call this soon after the last one re-read its conversation
+
+
+def cursor_range(s: Session, P: Pricer) -> dict | None:
+    """Cursor records no cache reads, so its cost can only be a range: low if each call that came within 5 minutes of
+    the one before re-read that call's conversation from the cache, high if nothing was re-read (the estimate as it
+    stands). The usage export gives the real number."""
+    low = 0.0
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
+        prev = None
+        for c in calls:
+            u, reuse = c.usage, 0
+            if prev is not None and c.ts_first and (prev.ts_last or prev.ts_first) and \
+                    (c.ts_first - (prev.ts_last or prev.ts_first)).total_seconds() <= REUSE_GAP_S:
+                reuse = min(prev.usage.context, u.context)
+            alt = Usage(fresh_input=u.context - reuse, cache_read=reuse, output=u.output, thinking=u.thinking) \
+                if reuse else u
+            low += sum(pricemod.cost(alt, P.rates(c)).values())
+            prev = c
+    high = sum(P.total(c) for c in s.all_calls)
+    return {"low": low, "high": high} if low < high else None
+
+
+CHAPTER_MIN_TURNS = 6    # a shorter chat is one task
+CHAPTER_MAX = 6
+CHAPTER_SIDE = 4         # each side of a split keeps at least this many turns
+CHAPTER_SMALL = 0.12     # a stage under this share of the tokens is not split further
+# how sure each sign of a new task is (fixes.task_starts); an hour away adds 0.5
+CHAPTER_STRENGTH = (("min break", 3.0), ("after a git commit", 2.5), ("a new command", 2.0), ("a new skill", 1.5))
+
+
+def _chapter_strength(why: str, waited_s: float) -> float:
+    s = next((v for k, v in CHAPTER_STRENGTH if k in why), 1.0)
+    return s + (0.5 if waited_s >= 3600 else 0.0)
+
+
+def _chapter_name(ts) -> str:
+    """Its /command, else its first real message (short replies like "Go" are skipped)."""
+    first = next((t for t in ts if t.n > 0), None)
+    if first is not None and first.kind == "command" and first.text.strip():
+        return first.text.split()[0]
+    for t in ts:
+        if t.n > 0 and t.kind == "typed":
+            words = plain(t.text).split()
+            if len(words) >= 4:
+                text = " ".join(words)
+                return text if len(text) <= 56 else text[:55].rstrip() + "…"
+    return ""
+
+
+def _base(path: str) -> str:
+    return re.split(r"[\\/]", path.strip().rstrip("\\/"))[-1] if path else ""
+
+
+def chapters(s: Session, turn_rows: list[dict], P: Pricer) -> list[dict]:
+    """The chat in 2-6 stages of useful size, split where a new task likely began (fixes.task_starts: a long break, a
+    commit, a /command, a new skill). Again and again the biggest stage is split at a strong sign near its middle, with
+    at least CHAPTER_SIDE turns on each side (taking the earliest commits instead let one stage hold 97% of a chat).
+    Each is named from its /command or first real message, and its main file."""
+    if len([t for t in s.turns if t.n > 0]) < CHAPTER_MIN_TURNS:
+        return []
+    rows = {r["n"]: r for r in turn_rows}
+    ns = sorted(rows)
+    weight = {n: rows[n]["sent"] + rows[n]["helper_sent"] for n in ns}
+    total = sum(weight.values()) or 1
+    signs = {t.n: (why, _chapter_strength(why, t.waited_s)) for t, why in fixmod.task_starts(s)}
+    bounds: list[int] = []
+
+    def spans():
+        edges = [ns[0]] + sorted(bounds) + [ns[-1] + 1]
+        return [(edges[i], edges[i + 1] - 1) for i in range(len(edges) - 1)]
+
+    while len(bounds) < CHAPTER_MAX - 1:
+        best = None
+        for lo, hi in spans():
+            inside = [n for n in ns if lo <= n <= hi]
+            w = sum(weight[n] for n in inside)
+            if w < total * CHAPTER_SMALL:
+                continue
+            for n, (why, strength) in signs.items():
+                if n in bounds or not lo < n <= hi:
+                    continue
+                left = [m for m in inside if m < n]
+                if len(left) < CHAPTER_SIDE or len(inside) - len(left) < CHAPTER_SIDE:
+                    continue
+                share = sum(weight[m] for m in left) / (w or 1)
+                score = strength - 4 * abs(share - 0.5) + 2 * w / total    # a strong sign, near the middle, of a big stage
+                if best is None or score > best[0]:
+                    best = (score, n)
+        if best is None:
+            break
+        bounds.append(best[1])
+    if not bounds:
+        return []
+    helper_calls = s.helper_calls
+    out = []
+    for lo, hi in spans():
+        ts = [t for t in s.turns if lo <= t.n <= hi]
+        rs = [rows[t.n] for t in ts if t.n in rows]
+        hc = [c for c in helper_calls if lo <= c.turn <= hi]
+        files: dict[str, int] = {}
+        for t in ts:
+            for c in t.calls:
+                for a in c.actions:
+                    if a.kind in ("write", "edit") and a.target:
+                        f = _base(a.target.splitlines()[0])
+                        files[f] = files.get(f, 0) + 1
+        main_file = max(files, key=files.get) if files else ""
+        title = _chapter_name(ts) or (f"work on {main_file}" if main_file else f"turns {lo}–{hi}")
+        helpers = []
+        for h in s.helpers:
+            mine = [c for c in h.calls if lo <= c.turn <= hi]
+            if mine:
+                helpers.append({"name": h.description or h.id, "calls": len(mine),
+                                "sent_tokens": sum(c.usage.context for c in mine),
+                                "usd": sum(P.total(c) for c in mine),
+                                "first_turn": min(c.turn for c in mine), "started": lo <= h.turn <= hi,
+                                "parent": h.parent})
+        out.append({"title": title, "main_file": main_file, "start_turn": lo or min(1, hi), "end_turn": hi,
+                    "helpers": helpers, "why": signs[lo][0] if lo in signs else "",
+                    "calls": sum(len(r["calls"]) for r in rs) + len(hc),
+                    "sent_tokens": sum(r["sent"] + r["helper_sent"] for r in rs),
+                    "output_tokens": sum(r["written"] for r in rs) + sum(c.usage.output for c in hc),
+                    "usd": sum(r["usd"] + r["helper_usd"] for r in rs)})
+    return out
+
+
+TOP_FILES = 5
+
+
+def top_files(s: Session) -> list[dict]:
+    """The files that weighed most: what each read brought in, and what each write or edit put out, times the later
+    calls of that thread that carried it. A compacted chat drops some of it, so this is the most each one cost."""
+    by: dict[str, dict] = {}
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
+        for i, c in enumerate(calls):
+            later = len(calls) - i - 1
+            for a in c.actions:
+                if a.kind not in ("read", "write", "edit") or not a.target:
+                    continue
+                f = a.target.splitlines()[0]
+                t = tok(a.result_chars if a.kind == "read" else a.written_chars)
+                d = by.setdefault(f, {"path": f, "tokens": 0, "reads": 0, "writes": 0})
+                d["tokens"] += t * later
+                d["reads" if a.kind == "read" else "writes"] += 1
+    rows = sorted((d for d in by.values() if d["tokens"] > 0), key=lambda d: -d["tokens"])[:TOP_FILES]
+    names = [_base(d["path"]) for d in rows]
+    for d, n in zip(rows, names):        # the same name in two folders: add the folder
+        parts = re.split(r"[\\/]", d.pop("path").strip())
+        d["name"] = "/".join(parts[-2:]) if names.count(n) > 1 and len(parts) > 1 else n
+    return rows
 
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")

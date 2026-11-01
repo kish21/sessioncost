@@ -1,0 +1,13 @@
+{
+  "name": "sessioncost",
+  "version": "0.6.0-rc.1",
+  "description": "See how many tokens each turn of your coding-agent chat sends, why, and what to cut. Runs the SessionCost Python tool (installs it once, privately).",
+  "license": "MIT",
+  "author": "kish21",
+  "homepage": "https://github.com/kish21/sessioncost",
+  "repository": { "type": "git", "url": "git+https://github.com/kish21/sessioncost.git" },
+  "keywords": ["claude-code", "codex", "cursor", "antigravity", "copilot", "tokens", "cost"],
+  "bin": { "sessioncost": "bin/sessioncost.js" },
+  "files": ["bin/", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" }
+}

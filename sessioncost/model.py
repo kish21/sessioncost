@@ -65,6 +65,8 @@ class Action:
     result_hash: str = ""        # fingerprint of the result (to spot an unchanged re-read); the text is not kept
     result_flags: list[str] = field(default_factory=list)   # yes/no facts about the result text (textflags.py)
     risks: list[str] = field(default_factory=list)   # risky steps (risks.py), e.g. skips_commit_checks
+    allowed: list[str] = field(default_factory=list)   # watch marks the project's .sessioncost-allow expects
+    chain_from: tuple | None = None   # after_untrusted: (agent, n) of the call that brought the untrusted content in
     result_guessed: bool = False  # the log kept no result text (Cursor reads): size and fingerprint are a guess
     is_error: bool = False
     ts: datetime | None = None
@@ -118,6 +120,7 @@ class Helper:
     agent_type: str
     calls: list[Call] = field(default_factory=list)
     turn: int = 0                # the main turn it ran in
+    parent: str = ""             # the helper that started it ("" = the main agent)
 
 
 @dataclass

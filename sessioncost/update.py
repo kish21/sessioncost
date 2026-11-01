@@ -15,6 +15,7 @@ Nothing is read or sent from your sessions; the commands only fetch SessionCost 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PUBLIC_ZIP = "https://github.com/kish21/sessioncost/archive/refs/heads/main.zip"   # what the installers use
+NPX_HOME = "/.sessioncost/npm/"    # where `npx sessioncost` keeps its own Python environment (npm/bin/sessioncost.js)
 WINDOWS = sys.platform == "win32"
 
 
@@ -51,7 +53,9 @@ def plan(home: Path | None = None, exe: str | None = None, here: Path | None = N
     steps: list[Step] = []
     in_plugin = "/plugins/cache/" in here_s                    # this run is a plugin's own bundled copy
     if not in_plugin:
-        if "/uv/tools/sessioncost/" in Path(exe).as_posix().lower() and which("uv"):
+        if NPX_HOME in Path(exe).as_posix().lower():          # npx's own environment: npx installs the new one
+            steps.append(Step("Update SessionCost (run with npx): run `npx sessioncost@latest` once"))
+        elif "/uv/tools/sessioncost/" in Path(exe).as_posix().lower() and which("uv"):
             steps.append(Step("Update SessionCost (installed with the install line)",
                               [which("uv"), "pip", "install", "--quiet", "--python", exe, "--reinstall-package",
                                "sessioncost", PUBLIC_ZIP]))
@@ -82,6 +86,105 @@ def plan(home: Path | None = None, exe: str | None = None, here: Path | None = N
     if not in_plugin:
         steps.append(Step("Refresh /sessioncost in each agent", [exe, "-m", "sessioncost", "setup"]))
     return steps
+
+
+SKILL_VERSION = re.compile(r"\(SessionCost ([^\s)]+)\)")   # the skill's description names its version
+PROBE = ("import os, sys, sessioncost as s; print(sys.executable); print(s.__version__); "
+         "print(os.path.dirname(s.__file__))")       # the version it reports itself, as `sessioncost --version` does
+
+
+def _json_version(f: Path) -> str | None:
+    try:
+        return json.loads(f.read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _probe(argv: list[str]) -> list[str] | None:
+    """Another program's output lines, or None when it fails or takes too long (Store Python starts in ~2 s). Run from
+    the temp folder: a project folder holding sessioncost itself would be found first."""
+    import tempfile
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=15, cwd=tempfile.gettempdir())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [x.strip() for x in r.stdout.splitlines() if x.strip()] if r.returncode == 0 else None
+
+
+def copies(home: Path | None = None, exe: str | None = None, here: Path | None = None, which=shutil.which,
+           probe=_probe) -> list[tuple[str, str, str]]:
+    """Every copy of SessionCost found on this computer: (what, version, where). The first is the one running."""
+    from . import __version__
+    from .cli import SKILL_HOMES
+    home = home or Path.home()
+    exe = exe or sys.executable
+    here = here or Path(__file__).resolve().parent
+    found = [("This copy (running now)", __version__, str(here))]
+    same = lambda a, b: Path(a).resolve() == Path(b).resolve()
+    python = which("python")                       # the terminal's own Python, when it is not this one
+    if python and (out := probe([python, "-c", PROBE])) and len(out) == 3 and not same(out[2], here):
+        found.append(("Terminal (python)", out[1], out[0]))
+    cmd = which("sessioncost")                     # a sessioncost command on the PATH from another Python
+    if cmd and not same(Path(cmd).parent, Path(exe).parent) and not same(Path(cmd).parent, Path(exe).parent / "Scripts"):
+        if (out := probe([cmd, "--version"])) and out[0].startswith("sessioncost "):
+            found.append(("Terminal (sessioncost)", out[0].split()[-1], cmd))
+    for key in _plugin_keys(home):
+        try:
+            entries = json.loads((home / ".claude" / "plugins" / "installed_plugins.json")
+                                 .read_text(encoding="utf-8"))["plugins"][key]
+        except (OSError, ValueError, KeyError):
+            entries = []
+        for e in entries or [{}]:
+            found.append(("Claude Code plugin", e.get("version") or "?", e.get("installPath") or key))
+    for d in sorted((home / ".codex" / "plugins" / "cache").glob("*/sessioncost/*")):
+        if d.is_dir():
+            found.append(("Codex plugin", _json_version(d / ".codex-plugin" / "plugin.json") or d.name, str(d)))
+    cursor = home / ".cursor" / "plugins"
+    for f in sorted(cursor.glob("**/sessioncost/**/.cursor-plugin/plugin.json")) if cursor.is_dir() else []:
+        if (v := _json_version(f)) and not any(c[0] == "Cursor plugin" and c[1] == v for c in found):
+            found.append(("Cursor plugin", v, str(f.parent.parent)))
+    for agent, folder, sub in SKILL_HOMES:         # the /sessioncost skill `setup` wrote into each agent
+        f = home / folder / sub / "sessioncost" / "SKILL.md"
+        try:
+            m = SKILL_VERSION.search(f.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        found.append((f"{agent} /sessioncost", m.group(1) if m else "?", str(f)))
+    # a plugin's folder holding the running copy is that copy, not another one
+    return found[:1] + [c for c in found[1:] if not (same(c[2], here) or same(c[2], here.parent))]
+
+
+def kind(here: Path) -> str:
+    """What the running copy is, in the user's words."""
+    p = here.as_posix().lower()
+    for folder, name in ((".claude", "Claude Code plugin"), (".codex", "Codex plugin"), (".cursor", "Cursor plugin")):
+        if f"/{folder}/plugins/" in p:
+            return name
+    return "npx" if NPX_HOME in p else "Python package"
+
+
+def show_versions(every: bool = False) -> int:
+    """This copy only, by default: in a chat, the other agents' copies are noise (owner 2026-10-31). --all lists
+    every copy."""
+    here = Path(__file__).resolve().parent
+    found = copies(here=here)
+    if not every:
+        others = found[1:]
+        print(f"SessionCost {found[0][1]} ({kind(here)}): {found[0][2]}")
+        if others:
+            differ = sum(v != found[0][1] for _, v, _ in others)
+            print(f"{len(others)} other {'copy' if len(others) == 1 else 'copies'} on this computer"
+                  f"{f', {differ} on another version' if differ else ''}. All of them: sessioncost version --all")
+        return 0
+    print("SessionCost on this computer:")
+    width = max(len(w) for w, _, _ in found)
+    for what, v, where in found:
+        print(f"  {what:{width}}  {v:14}  {where}")
+    other = [w for w, v, _ in found[1:] if v != found[0][1]]
+    if other:
+        print(f"\nNot the same version as this copy: {', '.join(other)}. `sessioncost update` updates them "
+              "(a plugin can also be updated in its agent).")
+    return 0
 
 
 def run(dry_run: bool = False) -> int:

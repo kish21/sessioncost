@@ -12,8 +12,11 @@ What it holds (checked on the 2026 builds):
 
 Cursor does not keep token counts on this machine (every `tokenCount` is 0), so tokens are ESTIMATED: each call is
 rebuilt from the messages, its size from the text it carried (characters / 4), scaled so the last call matches
-the context size Cursor recorded. Exact numbers come from Cursor's usage export (a CSV from the dashboard), which
-`apply_usage_csv` spreads over the turns it covers.
+the context size Cursor recorded. File reads usually keep only `{"totalLinesInFile": N}`, so a repeat of the same
+file, the same part and the same length is only a likely repeat. Cache hits are not in this file: an estimate
+shows none, and exact numbers come from Cursor's usage export (a CSV from the dashboard), which `apply_usage_csv`
+spreads over the turns it covers. A user message can also carry attached rules, files and folders; their size is
+counted and their text is not kept.
 """
 from __future__ import annotations
 
@@ -34,7 +37,6 @@ from .codex import _command, _name
 
 USER, AGENT = 1, 2
 SETUP_IDS = {"system_prompt", "tools", "rules", "skills", "mcp", "subagents"}
-CACHE_GAP_S = 300          # a call within 5 minutes of the previous one is assumed to re-read it from the cache
 
 
 def state_db() -> Path:
@@ -122,7 +124,9 @@ def describe(name: str, p: dict) -> tuple[str, str, str]:
     base = re.sub(r"_v\d+$", "", name)
     if base in ("read_file",):
         return "read", f"read `{_name(f)}`", f
-    if base in ("edit_file", "search_replace", "apply_patch", "write"):
+    if base == "write":
+        return "write", f"wrote `{_name(f)}`", f
+    if base in ("edit_file", "search_replace", "apply_patch"):
         return "edit", f"edited `{_name(f)}`", f
     if base == "delete_file":
         return "edit", f"deleted `{_name(f)}`", f
@@ -258,17 +262,70 @@ def _estimate(calls: list[Call], sizes: list[dict], setup_tokens: int, last_cont
         cut = cut if cut > 0 else None
     elif last_context and conv[-1] > 0 and last_context > setup_tokens:
         scale = max(1.0, (last_context - setup_tokens) / conv[-1])
-    prev_ctx, prev_ts = 0, None
     for i, (c, s, cv) in enumerate(zip(calls, sizes, conv)):
         part = summary_tokens + (cv - conv[cut]) if cut is not None and i >= cut else cv * scale
         ctx = int(setup_tokens + part)
-        gap = (c.ts_first - prev_ts).total_seconds() if c.ts_first and prev_ts else None
-        cached = min(prev_ctx, ctx) if prev_ctx and gap is not None and gap <= CACHE_GAP_S and i != cut else 0
+        # Cursor does not record cache hits in state.vscdb. A 5-minute gap is Claude's cache, not Cursor's,
+        # so an estimate shows no re-read. A usage export fills the real cache numbers in later.
         out = max(1, s["out"] // 4)
         think = c.thinking_chars // 4
-        c.usage = Usage(fresh_input=ctx - cached, cache_read=cached, output=out, thinking=min(think, out))
-        prev_ctx, prev_ts = ctx, c.ts_last or c.ts_first
+        c.usage = Usage(fresh_input=ctx, cache_read=0, output=out, thinking=min(think, out))
     return scale, cut
+
+
+def _path_of(item) -> str:
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return ""
+    uri = item.get("uri")
+    if isinstance(uri, dict):
+        return str(uri.get("fsPath") or uri.get("path") or "")
+    return str(item.get("path") or item.get("relativeWorkspacePath") or uri or "")
+
+
+def _pills(b: dict) -> tuple[int, list[tuple[str, str, int]]]:
+    """Context Cursor attached to one user message: (extra characters, events).
+
+    Each event is (label, short text, characters). Rule and file bodies are counted for the
+    size estimate and are not kept.
+    """
+    events: list[tuple[str, str, int]] = []
+    rules = [r for r in b.get("cursorRules") or [] if isinstance(r, dict)]
+    if rules:
+        chars = sum(len(str(r.get("body") or "")) for r in rules)
+        globbed = sum(1 for r in rules if r.get("isFromGlob"))
+        always = len(rules) - globbed
+        bits = []
+        if always:
+            bits.append(f"{always} always on")
+        if globbed:
+            bits.append(f"{globbed} only for matching files")
+        names = ", ".join(short(str(r.get("name") or "a rule"), 40) for r in rules[:4])
+        events.append((f"Cursor attached rules ({', '.join(bits)})", names, chars))
+    ctx = b.get("context") if isinstance(b.get("context"), dict) else {}
+    files = list(ctx.get("fileSelections") or []) + list(b.get("attachedCodeChunks") or [])
+    if files:
+        names, chars = [], 0
+        for item in files:
+            path = _path_of(item)
+            names.append(_name(path) or "a file")
+            body = ""
+            if isinstance(item, dict):
+                body = str(item.get("content") or item.get("text") or "")
+            chars += len(body or path)
+        events.append((f"you attached {len(files)} file" + ("s" if len(files) != 1 else ""),
+                       ", ".join(names[:4]), chars))
+    folders = list(ctx.get("folderSelections") or []) + list(b.get("attachedFolders") or [])
+    if folders:
+        names, chars = [], 0
+        for item in folders:
+            path = _path_of(item)
+            names.append(_name(path) or "a folder")
+            chars += len(path)
+        events.append((f"you attached {len(folders)} folder" + ("s" if len(folders) != 1 else ""),
+                       ", ".join(names[:4]), chars))
+    return sum(chars for _, _, chars in events), events
 
 
 class CursorReader:
@@ -289,14 +346,24 @@ class CursorReader:
                 s.notes.append("Cursor had not yet saved how big this chat's setup (Step 0) is, so Step 0 is taken "
                                f"from your latest Cursor chat that has it (“{short(borrowed, 60)}”). "
                                "Run SessionCost again after the chat to get its own.")
-            for hid in d.get("subagentComposerIds") or []:
+            # helpers, and the helpers they started in turn (each read once; `parent` is who started it)
+            queue = [(hid, "") for key in ("subagentComposerIds", "subComposerIds") for hid in d.get(key) or []]
+            seen = {d.get("composerId")}
+            while queue:
+                hid, parent = queue.pop(0)
+                if not hid or hid in seen:
+                    continue
+                seen.add(hid)
                 hd = _value(con, f"composerData:{hid}")
-                if hd:
-                    hd, _ = _with_setup(con, hd)
-                    hs, hb = self._chat(con, hd, "helper:" + hid[:12])
-                    if hb.calls:
-                        s.helpers.append(Helper(id=hid, description=short(hd.get("name") or "helper", 90),
-                                                agent_type="helper", calls=hb.calls))
+                if not hd:
+                    continue
+                hd, _ = _with_setup(con, hd)
+                hs, hb = self._chat(con, hd, "helper:" + hid[:12])
+                name = short(hd.get("name") or "helper", 90)
+                if hb.calls:
+                    s.helpers.append(Helper(id=hid, description=name, agent_type="helper", calls=hb.calls,
+                                            parent=parent))
+                queue += [(x, name) for key in ("subagentComposerIds", "subComposerIds") for x in hd.get(key) or []]
         finally:
             con.close()
         from .claude import _turn_at
@@ -314,7 +381,7 @@ class CursorReader:
         bubbles = {}
         for k, v in con.execute("select key, value from cursorDiskKV where key like ?", (f"bubbleId:{cid}:%",)):
             try:
-                bubbles[k.rsplit(":", 1)[-1]] = json.loads(v)
+                bubbles[k.removeprefix(f"bubbleId:{cid}:")] = json.loads(v)   # ids can hold ':' (".../s:0", ".../t:call-...")
             except (ValueError, TypeError):
                 continue
         order = [h.get("bubbleId") for h in d.get("fullConversationHeadersOnly") or [] if isinstance(h, dict)]
@@ -341,6 +408,10 @@ class CursorReader:
                 t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind=said_kind(text), text=short(text, 300) or "(no text)", ts=when,
                          waited_s=waited if turns else 0.0)
                 t.events.append(Event(t.kind, "you ran a command" if t.kind == "command" else "you typed", short(text, 300), len(text), when))
+                extra, pills = _pills(b)
+                builder.history += extra
+                for label, shown, chars in pills:
+                    t.events.append(Event("instructions", label, shown, chars, when))
                 turns.append(t)
             elif b.get("type") == AGENT:
                 c = builder.agent_msg(b, when)
@@ -371,7 +442,8 @@ class CursorReader:
         s.notes.append("Cursor does not keep token counts on this computer, so every token figure here is an "
                        "estimate from the size of the text"
                        + (f" (scaled ×{scale:.1f} to match the context size Cursor recorded)" if scale > 1.05 else "")
-                       + ". Add Cursor's usage export (--cursor-usage <file.csv>) for exact numbers.")
+                       + ". Cache re-reads are not in this log, so none are shown. "
+                       "Add Cursor's usage export (--cursor-usage <file.csv>) for exact numbers.")
         return s, builder
 
 
@@ -449,6 +521,18 @@ def _when(x: str) -> datetime | None:
     return w
 
 
+def is_usage_csv(path: str | Path) -> bool:
+    """Is this a Cursor usage export? Only its first line is read: a date column, a model column, and Cursor's own
+    names for the input columns (another provider's usage file has other names)."""
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            head = [h.strip().lower() for h in next(csv.reader(f), [])]
+    except (OSError, UnicodeDecodeError):
+        return False
+    return any(n in head for n in COLUMNS["date"]) and "model" in head and \
+        any(n in head for n in ("input (w/ cache write)", "input (w/o cache write)", "input with cache write"))
+
+
 def read_usage_csv(path: str | Path) -> list[dict]:
     """Rows of Cursor's usage export as {when, model, write, plain, cache_read, output, cost}."""
     with open(path, encoding="utf-8-sig", newline="") as f:
@@ -485,7 +569,8 @@ def read_usage_csv(path: str | Path) -> list[dict]:
 
 def apply_usage_csv(s: Session, rows: list[dict], slack_s: float = 60.0) -> int:
     """Replace estimated tokens with Cursor's exact ones, turn by turn: each export row (one request) belongs to the
-    turn whose time span holds it; the turn's exact tokens are spread over its calls in proportion to the estimates.
+    turn whose time span holds it; the turn's exact tokens are spread over its calls, and those of the helpers that
+    worked in it, in proportion to the estimates.
     Returns the number of export rows used. Rows of other chats running at the same time cannot be told apart."""
     used = 0
     cost = 0.0
@@ -518,7 +603,9 @@ def apply_usage_csv(s: Session, rows: list[dict], slack_s: float = 60.0) -> int:
         if mine[0]["model"]:
             for c in t.calls:
                 c.model = mine[0]["model"]
-        _spread(t.calls, tot)
+        # the export has no chat or helper id: a helper working in this turn is in these rows too, so the turn's
+        # exact tokens are shared with its helpers rather than added on top of their estimates
+        _spread(t.calls + [c for h in s.helpers for c in h.calls if c.turn == t.n], tot)
     if used:
         s.tokens_exact = len(owner) == len(spans)      # every turn got its exact numbers
         s.notes = [n for n in s.notes if not n.startswith("Cursor does not keep token counts")]

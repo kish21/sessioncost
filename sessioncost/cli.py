@@ -11,10 +11,11 @@ from pathlib import Path
 from . import __version__, locate, prices as pricemod, readers, report
 from .analyse import analyse
 from .readers import cursor
+from .readers.antigravity import antigravity_homes
 
-# Our hosted fix engine (the deeper fixes). Nothing goes there unless you press the button in the report.
-DEFAULT_ENGINE_URL = "https://sessioncost-engine.onrender.com"
 REPORTS = Path.home() / ".sessioncost" / "reports"
+DOWNLOADS = Path.home() / "Downloads"      # where a browser saves Cursor's usage export (tests point it elsewhere)
+DOWNLOADS_DAYS = 60                        # an export older than this cannot hold a recent chat
 
 
 def money(x: float) -> str:
@@ -61,18 +62,35 @@ def summary(a: dict, path: Path | None) -> str:
                      f"saves {money(f['saving_usd'])} (measured from this session)")
     else:
         lines.append("Top fix: none of the built-in checks fired")
-    lines.append(f"Cost: {money(t['usd'])} {mo['short']}")
+    if mo.get("range") and mo.get("export_partial"):
+        lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate. The usage export covered "
+                     "only part of this chat; export a newer one (cursor.com/settings, Usage tab) for the turns after it")
+    elif mo.get("range") and a["meta"]["agent"] != "cursor":
+        lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate, API-equivalent. "
+                     f"{a['meta']['agent_label']} records few token counts and nothing about the cache, so most "
+                     "tokens are estimated from the size of the text")
+    elif mo.get("range"):
+        lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate. Cursor does not record "
+                     "how much was re-read from the cache; its usage export gives the exact cost (cursor.com/settings, "
+                     "Usage tab, export the CSV, then run this again: it is found in Downloads)")
+    else:      # tokens first and exact; the money is an estimate of the bill
+        how = mo["short"] if mo["short"].startswith("estimate") else f"{mo['short']} estimate" if mo.get("subscription") \
+            else f"estimate {mo['short']}"
+        exact = "tokens are exact" if mo.get("tokens_exact", True) else "tokens estimated from the text size"
+        lines.append(f"Cost: about {money(t['usd'])} ({how}; {exact})")
     if path:
         lines.append(f"Report: {path}")
     return "\n".join(lines)
 
 
 OLD_REPORTS_HINT = 10      # past this many older reports, the summary says how to delete them (it never asks)
+GUARD_PAGE = "guard.html"  # the guard report across every chat: rewritten with each report, never an "old report"
 
 
 def old_reports(keep: Path | None, folder: Path = REPORTS) -> list[Path]:
     """Every saved report except the one to keep (the current one; by default the newest)."""
-    files = sorted(folder.glob("*.html"), key=lambda f: f.stat().st_mtime, reverse=True) if folder.is_dir() else []
+    files = sorted((f for f in folder.glob("*.html") if f.name != GUARD_PAGE), key=lambda f: f.stat().st_mtime,
+                   reverse=True) if folder.is_dir() else []
     keep = keep or (files[0] if files else None)
     return [f for f in files if keep is None or f.resolve() != keep.resolve()]
 
@@ -89,14 +107,39 @@ def cmd_clean(folder: Path = REPORTS) -> int:
     freed = sum(f.stat().st_size for f in old)
     for f in old:
         f.unlink()
-    kept = sorted(folder.glob("*.html"))
+    kept = sorted(f for f in folder.glob("*.html") if f.name != GUARD_PAGE)
     print(f"Deleted {plural(len(old), 'older report')} ({size(freed)})." +
           (f" Kept the latest: {kept[0]}" if kept else ""))
     return 0
 
 
+def downloaded_usage(s, folder: Path | None = None) -> tuple[Path, int] | None:
+    """A Cursor usage export in the Downloads folder that covers this chat: (file, rows used). Read on this computer
+    only. Files are told by their columns, not their name (Cursor does not publish one); newest first."""
+    import time
+    folder = folder or DOWNLOADS
+    try:
+        files = sorted((f for f in folder.glob("*.csv") if time.time() - f.stat().st_mtime < DOWNLOADS_DAYS * 86400),
+                       key=lambda f: f.stat().st_mtime, reverse=True)[:20]
+    except OSError:
+        return None
+    for f in files:
+        if not cursor.is_usage_csv(f):
+            continue
+        try:
+            used = cursor.apply_usage_csv(s, cursor.read_usage_csv(f))
+        except (OSError, ValueError):
+            continue
+        if used:
+            return f, used
+    return None
+
+
 def build(path, args) -> tuple[dict, Path | None]:
     s = readers.read(path)
+    if s.agent == "cursor" and not args.cursor_usage and (found := downloaded_usage(s)):
+        print(f"sessioncost: used Cursor's usage export from Downloads: {found[0].name} ({found[1]} requests matched "
+              "this chat)")
     if args.cursor_usage:
         if s.agent != "cursor":
             print("sessioncost: --cursor-usage is for Cursor chats; ignored")
@@ -105,21 +148,48 @@ def build(path, args) -> tuple[dict, Path | None]:
             print(f"sessioncost: {used} requests from the usage export matched this chat" if used else
                   "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
     a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
-    # where "Find deeper fixes" may send the summary: only when you press the button in the report. "off" hides it.
-    url = (getattr(args, "engine_url", None) or os.environ.get("SESSIONCOST_ENGINE_URL") or DEFAULT_ENGINE_URL).strip()
-    a["meta"]["engine_url"] = "" if url.lower() in ("off", "none", "no", "0") else url
+    a["guard_all"] = guard_totals(s.cwd)
     out = None
-    args.extra = []
     if not args.json:
         REPORTS.mkdir(parents=True, exist_ok=True)
-        design = getattr(args, "design", "new") or "new"
         out = REPORTS / f"{s.session_id}.html"
-        out.write_text(report.render(a, "board" if design == "new" else "classic"), encoding="utf-8")
-        if design == "both":            # the new design next to the old one, to compare them
-            new = REPORTS / f"{s.session_id}-new.html"
-            new.write_text(report.render(a, "board"), encoding="utf-8")
-            args.extra.append(new)
+        out.write_text(report.render(a), encoding="utf-8")
+        if a["guard_all"]:                 # the report's "Open the full guard report" opens this page, next to it
+            try:
+                from .guard_report import write as write_guard_report
+                write_guard_report(out=REPORTS / GUARD_PAGE)
+            except OSError:
+                pass
     return a, out
+
+
+def guard_totals(cwd: str | None) -> dict | None:
+    """The guarded chats of this chat's project, by name, as counts and reasons, plus how many chats and projects
+    were guarded on this computer in all (numbers only: a chat's report may be shared, so no other project's name or
+    any command). None when the guard has never been on here."""
+    import collections
+    from .guard import WHY
+    from .guard_report import collect
+    from .risks import SEVERITY
+    try:
+        r = collect()
+    except OSError:
+        return None
+    if not r["chats"]:
+        return None
+    same = lambda p: bool(p) and bool(cwd) and os.path.normcase(os.path.normpath(p)) == os.path.normcase(os.path.normpath(cwd))
+    mine = [c for c in r["chats"] if same(c["cwd"])]
+    ids = {c["id"] for c in mine}
+    reasons = {"blocked": collections.Counter(), "asked": collections.Counter()}
+    for st in r["steps"]:
+        if st["chat"] in ids:
+            reasons[st["decision"]].update(st["marks"])
+    return {"project": os.path.basename(str(cwd or "").rstrip("\\/")) or "this project",
+            "chats": len(mine), "intact": sum(c["intact"] for c in mine),
+            **{k: sum(c[k] for c in mine) for k in ("checked", "blocked", "asked", "allowed", "injections")},
+            "reasons": {d: [[WHY.get(m, m), n] for m, n in reasons[d].most_common(6) if SEVERITY.get(m) != "info"]
+                        for d in reasons},
+            "all_chats": len(r["chats"]), "all_projects": len({c["project"] for c in r["chats"]})}
 
 
 SKILL = Path(__file__).parent / "skill" / "SKILL.md"
@@ -198,7 +268,7 @@ def cmd_list(args) -> int:
     loose: list = []
     found = locate.sessions(args.project, unlinked=loose)
     if not found and not loose:
-        print(f"No Claude Code, Codex, Antigravity or Cursor sessions found for {args.project or Path.cwd()}")
+        print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()}")
         return 1
     P = pricemod.load(args.prices)
 
@@ -232,28 +302,35 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["guard"]:      # `sessioncost guard on|off|start|auto on|...`: the live guard's own commands
+        from . import guard
+        return guard.main(argv[1:])
+    if argv[:1] == ["auto"] and argv[1:2] in (["on"], ["off"]):   # each chat's report after each answer (on by default)
+        from . import guard
+        print(guard.command(f"reports-{argv[1]}", os.getcwd()))
+        return 0
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "
-                    "Local: reads log files; sends nothing unless you press 'Send the summary to the fix engine' in the report.")
+                    "Local: reads log files on this computer and sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|start|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
+    ap.add_argument("--brief", action="store_true", help="print only the report's path, not the summary (for agents: "
+                                                         "text in a chat is re-sent with every later message)")
     ap.add_argument("--json", action="store_true", help="print the full model as JSON instead of a report")
+    ap.add_argument("--sarif", metavar="FILE", help="also write the steps worth a look and the live guard's decisions "
+                                                     "as SARIF 2.1.0 (for security tools)")
     ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
     ap.add_argument("--subscription", action="store_true",
                     help="you are on a subscription plan (Claude Pro/Max, ChatGPT): label money as API-equivalent, not billed")
     ap.add_argument("--cursor-usage", metavar="CSV",
                     help="Cursor only: your usage export from the Cursor dashboard, for exact token counts")
     ap.add_argument("--limit", type=int, default=10, help="list: how many sessions (default 10)")
-    ap.add_argument("--design", choices=["new", "classic", "both"], default="new",
-                    help="report design: new (the session board, the default), classic (the turn list), or both side by side")
-    ap.add_argument("--engine-url", metavar="URL",
-                    help="the fix engine offered under 'Find deeper fixes' (or set SESSIONCOST_ENGINE_URL; default: "
-                         f"{DEFAULT_ENGINE_URL}; 'off' hides the button). The summary is sent only when you "
-                         "press the button in the report")
     ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
+    ap.add_argument("--all", action="store_true", help="version: list every copy on this computer, not only this one")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     args = ap.parse_args(argv)
 
@@ -264,6 +341,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.target == "update":
         from . import update
         return update.run(dry_run=args.dry_run)
+    if args.target == "version":
+        from . import update
+        return update.show_versions(every=args.all)
     if args.target == "list":
         return cmd_list(args)
     if args.target == "last":
@@ -275,10 +355,11 @@ def main(argv: list[str] | None = None) -> int:
                   "`sessioncost list` shows the others.")
             found = loose
         if not found:
-            print(f"No Claude Code, Codex, Antigravity or Cursor sessions found for {args.project or Path.cwd()} "
+            from .readers.copilot import copilot_home
+            print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()} "
                   f"(looked in {locate.claude_home() / 'projects'}, {locate.codex_home() / 'sessions'} and "
-                  f"{locate.codex_home() / 'archived_sessions'}, {locate.antigravity_home() / 'conversations'}, "
-                  "and Cursor's chats)")
+                  f"{locate.codex_home() / 'archived_sessions'}, {copilot_home() / 'session-state'}, "
+                  f"{', '.join(str(h / 'conversations') for h in antigravity_homes())}, and Cursor's chats)")
             return 1
         path = found[0][1]
     else:
@@ -294,17 +375,18 @@ def main(argv: list[str] | None = None) -> int:
     except (readers.NotSupported, ValueError) as e:
         print(f"sessioncost: {e}")
         return 2
+    if args.sarif:
+        from . import sarif
+        Path(args.sarif).write_text(json.dumps(sarif.build(a, path), indent=1, ensure_ascii=False), encoding="utf-8")
     if args.json:
         print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
         return 0
-    print(summary(a, out))
-    for x in args.extra:
-        print(f"New design: {x}")
-    old = [f for f in old_reports(out) if f not in args.extra] if out else []
+    print(f"Report: {out}" if args.brief else summary(a, out))
+    if args.sarif:
+        print(f"SARIF: {args.sarif}")
+    old = old_reports(out) if out else []
     if len(old) > OLD_REPORTS_HINT:
         print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
     if out and not args.no_open:
         webbrowser.open(out.resolve().as_uri())
-        for x in args.extra:
-            webbrowser.open(x.resolve().as_uri())
     return 0

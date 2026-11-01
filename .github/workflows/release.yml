@@ -1,0 +1,53 @@
+# Signed release: builds SessionCost on GitHub's servers, signs where every file was built (build provenance), and,
+# only when you tick "publish", uploads it to PyPI with no stored token (trusted publishing). It never runs on its
+# own: start it from the Actions tab (Run workflow). Actions pinned to exact commits. Steps: docs/RELEASING.md.
+name: Signed release
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also publish to PyPI (needs the trusted publisher set up on PyPI and your approval)"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write          # to sign the provenance
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the wheel and the source package
+        run: |
+          python3 -m pip install --user build==1.6.1
+          python3 -m build
+          ls -l dist
+      - name: Sign where they were built
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: "dist/*"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+  pypi:
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi               # set "Required reviewers" on this environment: nothing is published without your click
+      url: https://pypi.org/p/sessioncost
+    permissions:
+      id-token: write          # trusted publishing: PyPI checks this workflow, no password or token is stored
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

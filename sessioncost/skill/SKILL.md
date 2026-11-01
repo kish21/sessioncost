@@ -6,52 +6,40 @@ description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS co
 # SessionCost: where did this session's tokens go?
 
 Run the local `sessioncost` tool on the current session. It reads the session's log on this machine (Claude Code,
-Codex, Antigravity or Cursor), writes an HTML report and prints a short summary. It uses no AI model and sends
-nothing unless the user presses "Send the summary to the fix engine" in the report.
+Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and sends nothing anywhere.
 
 ## Steps
 
 1. Run this from the project folder of the current session (one command, nothing else):
 
    ```
-   {{RUN}} last
+   {{RUN}} last --brief
    ```
 
-   If that fails because the program is missing, try `sessioncost last`. If that fails too, tell the user
+   If that fails because the program is missing, try `sessioncost last --brief`. If that fails too, tell the user
    SessionCost is not installed and to install it from https://github.com/kish21/sessioncost#install, then stop. Do
    not run an installer yourself.
 
-2. Show the user the printed summary exactly as printed, in a code block. Do not reword or recompute it.
+2. It prints `Report: <path>`. Reply with only: "The full report: <path>" (the path as a clickable link, on its own
+   line), then "(if it did not open by itself, click the path)". Add no summary: the report has every number, and
+   text in this chat is re-sent with every later message. Do not say it is open (some agents, Cursor for example,
+   cannot open a browser) and do not offer to open it. Only if the user says it did not open, open the file with the
+   system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
 
-3. The tool tries to open the report in the browser, but some agents (Cursor, for example) run commands where no
-   browser can open, so do not say it is open. Add one line: "The full report: <path>" with the path from the summary
-   as a clickable link (on its own, so the user can click it), then: "(if it did not open by itself, click the
-   path)". Do not offer to open it. Only if the user says it did not open, open the file with the system's default
-   opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).
+   Only if the user asks for the numbers in the chat, run it again without `--brief` and show the printed summary
+   exactly as printed, in a code block.
 
-## Deleting old reports
+## Old reports, updates
 
-Each session keeps one report in `~/.sessioncost/reports/`. If the summary ends with an "Old reports: ..." line, show
-it as printed and do not ask anything about it. Only when the user asks to delete or clean old reports (for example
-"/sessioncost clean"), run (with the same fallbacks as step 1):
-
-```
-{{RUN}} clean
-```
-
-It deletes every saved report except the latest and prints what it freed. Show that line.
-
-## Updating SessionCost
-
-Only when the user asks to update SessionCost (for example "/sessioncost update"), run (with the same fallbacks as
-step 1):
-
-```
-{{RUN}} update
-```
-
-It updates every copy on this computer (the program, and the Claude Code, Codex or Cursor plugin) and prints each
-step. Show its output as printed, then tell the user to restart the agent.
+- An "Old reports: ..." line: show it as printed and ask nothing. Only when the user asks to delete or clean old
+  reports (for example "/sessioncost clean"), run `{{RUN}} clean` and show the line it prints.
+- Only when the user asks to update SessionCost (for example "/sessioncost update"), run `{{RUN}} update`, show its
+  output as printed, then tell the user to restart the agent.
+- Only when the user asks which version they have (for example "/sessioncost version"), run `{{RUN}} version` and
+  show its output as printed, adding no advice of your own (add `--all` only when they ask for every copy).
+- Only when the user asks to turn the report after each answer on or off (for example "/sessioncost auto off"), run
+  `{{RUN}} auto on` or `{{RUN}} auto off` and show the line it prints. It is on by default.
+- All four take the same fallbacks as step 1.
 
 ## Never
 

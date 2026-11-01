@@ -1,7 +1,7 @@
 # Security
 
 SessionCost runs on your computer and reads your agent's session logs. It calls no AI model, and it sends nothing
-unless you press "Send the summary to the fix engine" in a report (see Private in the README).
+anywhere.
 
 ## Reporting a problem
 

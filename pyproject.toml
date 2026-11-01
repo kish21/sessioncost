@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sessioncost"
-version = "0.5.15"
+version = "0.6.0-rc.1"
 description = "See how many tokens each turn of your coding-agent chat sends, why, and what to cut. Cost goes down with it."
 readme = "README.md"
 license = "MIT"
@@ -24,4 +24,4 @@ sessioncost = "sessioncost.cli:main"
 packages = ["sessioncost", "sessioncost.readers", "sessioncost.skill"]
 
 [tool.setuptools.package-data]
-sessioncost = ["prices.json", "report_template.html", "report_board.html", "skill/SKILL.md", "fonts/*"]
+sessioncost = ["prices.json", "report_board.html", "skill/SKILL.md"]

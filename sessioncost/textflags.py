@@ -8,6 +8,20 @@ is never kept.
 
 Only the start and end of a result are looked at, where agents put these notices, so a file that merely mentions
 the words (like this one) does not count.
+
+Signs of a prompt injection are looked for in the whole result (up to SCAN characters): text written to steer the
+agent rather than inform it. Like the others, only the flag leaves: the text is never kept.
+
+    injection   "ignore previous instructions", "you are now…", "new instructions:", fake <system> tags,
+                "do not tell the user", "IMPORTANT for the AI/assistant/agent"
+    hidden_text characters a person cannot see: Unicode tag characters, bidirectional overrides, or several
+                zero-width characters (a lone one, as in an emoji, does not count)
+    secret_value a value shaped like a key or token (an API key, a GitHub token, a private key): it reached the
+                model and the chat's log
+
+Text that speaks to the agent reading it (a note to whoever reads it, an assistant among them, or a line opening with
+AI agents and a colon) is not an injection sign on its own, but the live guard treats what follows it as after
+untrusted content (addresses_agent).
 """
 from __future__ import annotations
 
@@ -31,11 +45,54 @@ PATTERNS = {
 }
 
 
+SCAN = 400_000
+_INJECTION = re.compile(
+    r"\b(?:ignore|disregard|forget|override)\s+(?:(?:all|any|the|your|of\s+the)\s+)*(?:previous|prior|above|earlier|preceding|"
+    r"system|original)\s+(?:instructions?|prompts?|rules|messages?|directions|guidelines)\b|"
+    r"\byou\s+are\s+now\s+(?:a|an|in|the)\s|\bnew\s+(?:system\s+)?instructions?\s*:|"
+    r"<\s*/?\s*(?:system|im_start|im_end)\s*>|\bBEGIN\s+(?:SYSTEM|ADMIN|DEVELOPER)\s+(?:PROMPT|INSTRUCTIONS?|MESSAGE)\b|"
+    r"\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|show|mention\s+(?:this\s+)?to)\s+the\s+user\b|"
+    r"\b(?:IMPORTANT|URGENT|ATTENTION)\b[\s:!-]{0,4}(?:to|for)\s+(?:the\s+)?(?:AI|assistant|agent|model|LLM|Claude)\b", re.I)
+_HIDDEN_ALWAYS = re.compile("[\U000E0000-\U000E007F‪-‮⁦-⁩]")
+_ZERO_WIDTH = re.compile("[​‌⁠⁡⁢⁣⁤]|(?<=.)﻿", re.S)
+
+
+def injection_signs(txt: str) -> list[str]:
+    """Yes/no signs that a result tries to steer the agent (see the module notes)."""
+    if not txt:
+        return []
+    t = txt[:SCAN]
+    out = []
+    if _INJECTION.search(t):
+        out.append("injection")
+    if _HIDDEN_ALWAYS.search(t) or len(_ZERO_WIDTH.findall(t)) >= 3:
+        out.append("hidden_text")
+    return out
+
+
+_TO_AGENT = re.compile(
+    r"\b(?:whoever|anyone)\s+(?:who\s+)?(?:reads?|reading|sees?)\s+(?:this|these)\b|"
+    r"\bif\s+you\s+are\s+an?\s+(?:AI|assistant|agent|LLM|(?:large\s+)?language\s+model|bot)\b|"
+    r"\b(?:including|especially)\s+(?:an?|any)\s+(?:AI|assistant|agent|LLM|coding\s+agent)\b|"
+    r"\b(?:dear|attention|note\s+to)\s+(?:the\s+|any\s+|all\s+)?(?:AI|assistants?|agents?|LLMs?)\b|"
+    r"^\W*(?:AI\s+agents?|AI\s+assistants?|coding\s+agents?)\s*[:,]", re.I | re.M)
+
+
+def addresses_agent(txt: str) -> bool:
+    """Text written to the agent reading it, not to a person (see the module notes)."""
+    return bool(txt) and bool(_TO_AGENT.search(txt[:SCAN]))
+
+
+def secret_value(txt: str) -> bool:
+    from .risks import _SECRET_VALUE
+    return bool(txt) and bool(_SECRET_VALUE.search(txt[:SCAN]))
+
+
 def text_flags(txt: str) -> list[str]:
     if not txt:
         return []
     head, tail = txt[:HEAD], txt[-TAIL:]
-    out = []
+    out = injection_signs(txt) + (["secret_value"] if secret_value(txt) else [])
     for name, p in PATTERNS.items():
         if p.search(head) or (name == "truncated" and p.search(tail)):
             out.append(name)

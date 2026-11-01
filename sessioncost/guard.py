@@ -1648,5 +1648,31 @@ def setup(agent: str) -> str:
     return f"SessionCost guard: added to {p} (your other hooks kept; the old file is next to it).{note}"
 
 
+def _hooks_file(agent: str) -> Path:
+    if agent == "codex":
+        return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "hooks.json"
+    if agent == "cursor":
+        return Path.home() / ".cursor" / "hooks.json"
+    if agent == "antigravity":
+        return Path.home() / ".gemini" / "config" / "hooks.json"
+    from .readers.copilot import copilot_home
+    return copilot_home() / "hooks" / "sessioncost-guard.json"
+
+
+def refresh() -> list[str]:
+    """Write the guard's hooks again for each agent that already has them, so an update (and `sessioncost setup`)
+    replaces hook commands an older version wrote. Returns the agents refreshed."""
+    done = []
+    for agent in ("codex", "cursor", "antigravity", "copilot"):
+        try:
+            text = _hooks_file(agent).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "sessioncost" in text.lower() and " hook " in text:
+            setup(agent)
+            done.append(agent)
+    return done
+
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -2,7 +2,7 @@
   "name": "sessioncost",
   "displayName": "SessionCost",
   "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
-  "version": "0.6.0-rc.3",
+  "version": "0.6.0-rc.4",
   "author": {
     "name": "kish21"
   },

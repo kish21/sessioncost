@@ -275,6 +275,9 @@ def cmd_setup() -> int:
                   "claude plugin marketplace add kish21/sessioncost")
         else:
             print(f"{agent:12} /sessioncost and /livesession added ({dest.parent.parent})")
+    from . import guard
+    for agent in guard.refresh():           # hooks an older version wrote get this version's commands
+        print(f"{agent.capitalize():12} live guard hooks brought up to date")
     print("\nRestart the agent if it is open, then type /sessioncost in a chat. /livesession turns the live guard on.")
     return 0
 

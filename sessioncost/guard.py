@@ -549,7 +549,7 @@ WHY = {"pipe_to_shell": "runs a script straight from the internet", "encoded_com
        "staged_script": "writes or runs a script file with a never-list step in it",
        "guard_tamper": "would change or switch off the guard or the rules you set",
        "unlisted": "not in the project's allow list (allow-list mode)",
-       "wipe": "deletes the whole disk or the home folder", "privilege": "raises its own rights (sudo, runas, open permissions)"}
+       "wipe": "deletes the whole disk or the home folder", "privilege": "raises its own rights or changes the computer itself (sudo, accounts, services, the machine's settings)"}
 
 # the never rules alone, on the raw command: what still runs when the full check fails (fail closed for these)
 _RAW_NEVER = None

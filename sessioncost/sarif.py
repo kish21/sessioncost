@@ -21,7 +21,7 @@ TEXT = {
     "after_untrusted": "A risky step taken right after untrusted content came in",
     "guardrails": "Changed the agent's own rules, settings or memory", "mcp_action": "An MCP tool that changes or sends something",
     "secrets": "Touched a secrets file or key", "skips_commit_checks": "Tried to switch off the commit checks",
-    "wipe": "Deleted the whole disk or the home folder", "privilege": "Raised its own rights (sudo, runas, open permissions)",
+    "wipe": "Deleted the whole disk or the home folder", "privilege": "Raised its own rights or changed the computer itself (sudo, accounts, services, the machine's settings)",
     "git_push": "Pushed with git", "deletes": "Deleted files", "installs": "Installed or fetched packages",
     "outside_project": "Changed a file outside the project", "network": "Used the network",
     "inline_script": "Ran code written into the command",

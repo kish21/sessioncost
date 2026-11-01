@@ -10,10 +10,14 @@ The watch list (shown in the report's Sky, never sent anywhere): steps worth a l
 outside_project  changed a file outside the project folder (the system temp folder is fine: agents keep scratch
                  files there)
 network          reached outside this computer: a web tool, an MCP or publishing tool, curl / wget / ssh / gh,
-                 git clone / fetch / pull, a web address in a command
+                 git clone / fetch / pull, a DNS look-up, an email, a web address in a command
 inline_script    ran code written into the command itself: a heredoc (<<EOF), python -c, node -e
-secrets          touched a secrets file or key: .env, ~/.ssh, id_rsa, .pem / .key, credentials, .npmrc / .pypirc
-deletes          deleted files: rm, del, Remove-Item, rmdir, git clean, git reset --hard
+secrets          touched a secrets file or key: .env, ~/.ssh, id_rsa, .pem / .key, credentials, .npmrc / .pypirc,
+                 .git-credentials, GitHub CLI / Docker / Kubernetes / Azure / Google Cloud logins, Terraform state,
+                 a browser's cookies or saved passwords; or printed a stored login (cmdkey /list, gh auth token)
+deletes          deleted files or work: rm, del, Remove-Item, rmdir, git clean, git reset --hard, git checkout -- /
+                 restore / stash drop, emptying a file, moving one out of the project, docker prune, kubectl delete,
+                 terraform destroy, a database client dropping or deleting data
 git_push         pushed with git
 installs         installed or fetched packages to run: pip / uv / npm / yarn / pnpm / apt / brew / winget, npx, uvx
 guardrails       changed the agent's own rules or checks: CLAUDE.md / AGENTS.md / GEMINI.md, .claude/settings, .mcp.json,
@@ -28,8 +32,11 @@ force_push       rewrote shared history: git push --force / -f / --force-with-le
 persistence      set itself up to run again later: crontab, schtasks /create, Register-ScheduledTask, a Run key, a
                  startup folder, systemctl enable, launchctl load, a shell start-up file (~/.bashrc, $PROFILE)
 security_off     switched off a security tool: Defender, the firewall, SELinux, Gatekeeper
-wipe             deleted the whole disk or the home folder: rm -rf / or ~ or $HOME, Remove-Item on a drive or $env:USERPROFILE
-privilege        raised its own rights: sudo / su / runas, chmod 777, icacls /grant Everyone, Set-ExecutionPolicy Bypass
+wipe             deleted the whole disk or the home folder: rm -rf / or ~ or $HOME, Remove-Item on a drive or $env:USERPROFILE,
+                 format, diskpart, mkfs, dd onto a disk
+privilege        raised its own rights or changed the computer itself: sudo / su / runas, chmod 777, icacls /grant
+                 Everyone, an execution policy bypass, user accounts and admin groups, services, the machine's registry
+                 or PATH, shutting down, a container with the host's rights, rundll32 / regsvr32 / mshta / wscript
 guard_tamper     tried to change or switch off the SessionCost guard or the rules you set: its settings, log or folder
                  (~/.sessioncost/guard), the project's .sessioncost-allow, `guard off`, SESSIONCOST_GUARD_DIR,
                  Claude Code's disableAllHooks, or an installed plugin (~/.claude/plugins). Reading them is fine. Only
@@ -116,15 +123,40 @@ _OUTWARD_TOOLS = {"webfetch", "websearch", "artifact", "senduserfile", "pushnoti
                   "remotetrigger", "sendmessage", "web_search", "web_fetch", "read_url_content", "search_web"}
 _SEND_ONLY = {"senduserfile", "pushnotification", "sendmessage", "remotetrigger"}   # network out, nothing comes back in
 _NET_CMD = re.compile(r"(?:^|[\s;&|(`])(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|ssh|scp|sftp|rsync|ftp|"
-                      r"gh\s+\w+|git\s+(?:-c\s+\S+\s+)*(?:clone|fetch|pull))\b|https?://", re.I)
+                      r"gh\s+\w+|git\s+(?:-c\s+\S+\s+)*(?:clone|fetch|pull)|nslookup|dig|Resolve-DnsName|"
+                      r"Send-MailMessage|sendmail|mail\s+-s)\b|https?://", re.I)
 _INLINE = re.compile(r"<<-?\s*['\"]?[A-Za-z_]\w*|@['\"][ \t]*$|"
                      r"(?:^|[\s;&|(\\/])(?:python3?|py|node|ruby|perl|php)(?:\.exe)?\s+(?:-[a-zA-Z]+\s+)*-[ce]\s",
                      re.I | re.M)
 _SECRET = re.compile(r"(?:^|[\\/\s'\"`=@])\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(?:\.[\w.-]+)?(?:$|[\s'\"`;|&)])|[\\/]\.ssh(?:[\\/]|$)|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|"
                      r"\.(?:pem|key|p12|pfx)(?:$|[\s'\"`;|&)])|[\\/]\.aws[\\/]credentials|\bcredentials\.json\b|"
-                     r"(?:^|[\\/\s'\"`])\.(?:npmrc|pypirc|netrc)\b|\bsecrets?\.(?:json|ya?ml|toml|env)\b", re.I)
+                     r"(?:^|[\\/\s'\"`])\.(?:npmrc|pypirc|netrc)\b|\bsecrets?\.(?:json|ya?ml|toml|env)\b|"
+                     # the other places tools keep logins (2026-11-01): git, GitHub CLI, Docker, Kubernetes, Azure,
+                     # Google Cloud, Terraform state, a browser's saved cookies and passwords
+                     r"(?:^|[\\/\s'\"`=~])\.(?:git-credentials|kube[\\/]config|docker[\\/]config\.json)\b|"
+                     r"[\\/]gh[\\/]hosts\.ya?ml\b|[\\/]\.azure[\\/](?:accessTokens\.json|msal_token_cache)|"
+                     r"\bapplication_default_credentials\.json\b|[\\/]gcloud[\\/](?:credentials|access_tokens)\.db\b|"
+                     r"\.tfstate(?:\.backup)?\b|[\\/](?:Cookies|Login Data|cookies\.sqlite|logins\.json|key4\.db)['\"]?(?:$|[\s'\"`;|&)])",
+                     re.I)
+# commands that print a stored login: Windows Credential Manager, the macOS keychain, git's and GitHub CLI's helpers
+_SECRET_CMD = re.compile(r"\bcmdkey(?:\.exe)?\s+/list\b|\bvaultcmd\b|\bsecurity\s+(?:find-(?:generic|internet)-password|dump-keychain)\b|"
+                         r"\bgit(?:\.exe)?\s+credential(?:-\w+)?\s+(?:fill|get)\b|\bgh(?:\.exe)?\s+auth\s+token\b|"
+                         r"\bGet-StoredCredential\b", re.I)
 _DELETE = re.compile(r"(?:^|[\s;&|(`])(?:rm|del|erase|rmdir|rd|Remove-Item|ri)\s|"
-                     r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*(?:clean\s+(?:-\w+\s+)*-\w*f\w*|reset\s+--hard|branch\s+-D)\b", re.I)
+                     r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*(?:clean\s+(?:-\w+\s+)*-\w*f\w*|reset\s+--hard|branch\s+-D|"
+                     # throwing away uncommitted work: checkout of paths, restore (not --staged), dropping stashes
+                     r"checkout\s+(?:\S+\s+)?--\s+\S|checkout\s+\.(?=\s|$)|restore\s+(?![^\n;&|]*--staged)\S|stash\s+(?:drop|clear))|"
+                     # containers, clusters and infrastructure
+                     r"\bdocker(?:\.exe)?\s+(?:(?:system|image|volume|container|network|builder)\s+prune|rm|rmi)\b|"
+                     r"\bkubectl(?:\.exe)?\s+delete\b|\bhelm\s+(?:uninstall|delete)\b|\bterraform(?:\.exe)?\s+destroy\b|"
+                     r"\bterraform(?:\.exe)?\s+apply\b[^\n;&|]*\s-destroy\b|"
+                     # emptying a file
+                     r"\b(?:Clear-Content|clc)\s|\btruncate\s+(?:-\w+\s+)*-s\s*0\b", re.I | re.M)
+# a database client running a statement that drops or deletes data (psql -c "DROP TABLE users")
+_DB_CLIENT = re.compile(r"\b(?:psql|mysql|mariadb|sqlite3|sqlcmd|mongosh|mongo|redis-cli|duckdb|clickhouse-client)(?:\.exe)?\b", re.I)
+_DB_WIPE = re.compile(r"\bflushall\b|\bflushdb\b|\bdropDatabase\(|\.drop\(\)|\.deleteMany\(", re.I)
+# moving a file out of the project removes it from there: mv app/x.py /tmp/ asks like a delete
+_MOVE = re.compile(r"^\s*(?:mv|move|Move-Item|mi)\s+(.+?)\s*$", re.I)
 _PUSH = re.compile(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*push\b", re.I)
 # Windows names count too: .\.venv\Scripts\pip.exe install (Antigravity, 2026-11-01), npm.cmd install
 _INSTALL = re.compile(r"\b(?:pip3?(?:\.exe)?|uv(?:\.exe)?\s+pip|python3?(?:\.exe)?\s+-m\s+pip)\s+install\b|"
@@ -286,11 +318,25 @@ def _downloads_then_runs(t: str) -> bool:
 # deleting the whole disk or the home folder
 _WIPE = re.compile(r"(?:^|[;&|(]\s*)(?:sudo\s+)?rm\s+(?:-\w+\s+)*(?:--no-preserve-root\s+)?['\"]?(?:/\*?|~/?\*?|\$HOME/?\*?|\$\{HOME\}/?)['\"]?(?=\s*(?:$|[;&|)]))|"
                    r"\b(?:Remove-Item|rm|ri|del|rd|rmdir)\b[^;&|\n]*?\s['\"]?(?:[A-Za-z]:\\?\*?|~|\$HOME|\$env:USERPROFILE|%USERPROFILE%|\$env:HOMEDRIVE\\?)['\"]?"
-                   r"(?=\s*(?:$|[;&|)]|\s-))", re.I | re.M)
+                   r"(?=\s*(?:$|[;&|)]|\s-))|"
+                   # formatting or overwriting a whole disk
+                   r"(?:^|[;&|(]\s*)format(?:\.com)?\s+[A-Za-z]:|\bdiskpart\b|\bmkfs(?:\.\w+)?\s|\bdd\s+[^\n;&|]*\bof=/dev/(?!null\b)|"
+                   r"\b(?:Format-Volume|Clear-Disk|Initialize-Disk)\b", re.I | re.M)
 # raising the agent's own rights: sudo / su / runas, opening permissions to everyone, lifting PowerShell's script policy
 _PRIVILEGE = re.compile(r"(?:^|[;&|(]\s*)(?:sudo|su|doas|runas|gsudo)\b|\bStart-Process\b[^\n]*-Verb\s+RunAs\b|"
                         r"\bchmod\s+(?:-\w+\s+)*(?:0?777|a\+rwx|o\+w)\b|\bicacls\b[^\n]*/grant\s+(?:Everyone|\*S-1-1-0)|"
-                        r"\bSet-ExecutionPolicy\b[^\n]*\b(?:Unrestricted|Bypass)\b", re.I | re.M)
+                        r"\bSet-ExecutionPolicy\b[^\n]*\b(?:Unrestricted|Bypass)\b|"
+                        r"\s-(?:ExecutionPolicy|ep|exec)\s+(?:Bypass|Unrestricted)\b|"
+                        # changing the computer itself (2026-11-01): accounts, services, the machine's registry and
+                        # PATH, shutting it down, a container with the host's rights, Windows tools that run hidden code
+                        r"\bnet(?:\.exe)?\s+(?:user\s+\S+[^\n;&|]*\s/add\b|localgroup\s+administrators\b)|"
+                        r"\b(?:New-LocalUser|Add-LocalGroupMember)\b|\buseradd\b|\busermod\s+[^\n]*-aG?\s*(?:sudo|wheel|admin)\b|"
+                        r"\bsc(?:\.exe)?\s+(?:create|config|delete)\b|\b(?:New-Service|Set-Service)\b|"
+                        r"\breg(?:\.exe)?\s+(?:add|delete|import)\s+(?:HKLM|HKEY_LOCAL_MACHINE)\b|"
+                        r"\b(?:Set|New|Remove)-ItemProperty\b[^\n]*\bHKLM:|\bsetx(?:\.exe)?\s+(?:PATH\b|[^\n]*\s/M\b)|"
+                        r"(?:^|[;&|(]\s*)(?:shutdown(?:\.exe)?\s|reboot\b|halt\b|poweroff\b)|\b(?:Stop-Computer|Restart-Computer)\b|"
+                        r"\bdocker(?:\.exe)?\s+run\b[^\n;&|]*(?:--privileged\b|-v\s+['\"]?/:/|--pid[= ]host\b)|"
+                        r"\b(?:rundll32|regsvr32|mshta|wscript|cscript)(?:\.exe)?\s", re.I | re.M)
 _SEC_OFF = re.compile(r"\bSet-MpPreference\b[^\n]*-Disable\w*\s+\$?(?:true|1)\b|\bAdd-MpPreference\b[^\n]*-Exclusion|"
                       r"\bnetsh\s+(?:adv)?firewall\b[^\n]*\bstate\s+off\b|\bufw\s+disable\b|\bsetenforce\s+0\b|"
                       r"\bspctl\s+--master-disable\b|\bsystemctl\s+(?:stop|disable)\s+(?:firewalld|apparmor|auditd)\b", re.I)
@@ -388,6 +434,29 @@ def _inside(path: str, folder: str) -> bool:
     return p == f or p.startswith(f.rstrip("\\/") + os.sep)
 
 
+# a command that reads or copies the files it names: a quoted name there is a path, not prose
+_READ_VERB = re.compile(r"^\s*(?:&\s*)?(?:cat|type|Get-Content|gc|more|less|head|tail|copy|cp|Copy-Item|cpi|xcopy|robocopy|"
+                        r"Select-String|sls|findstr|grep|rg|sqlite3|certutil|base64|xxd|od|strings|scp|curl)(?:\.exe)?\s", re.I)
+
+
+def _quoted_secret(part: str) -> bool:
+    """Get-Content "C:\\My Project\\.env": a secrets path in quotes (it has a space) given to a command that reads it."""
+    return bool(_READ_VERB.match(part)) and any(_SECRET.search(f" {q.group(0)[1:-1]} ") for q in _QUOTED.finditer(part))
+
+
+def _moves_out(t: str, cwd: str) -> bool:
+    """mv / Move-Item whose destination (the last word) is outside the project, the temp folder included."""
+    for part in _parts(t):
+        m = _MOVE.match(part)
+        words = m and [w for w in m.group(1).split() if not w.startswith("-")]
+        if words and len(words) >= 2 and cwd:
+            dest = words[-1].strip("'\"`")
+            full = dest if os.path.isabs(_norm(dest)) or dest.startswith("~") else os.path.join(cwd, dest)
+            if not _inside(full, cwd):
+                return True
+    return False
+
+
 def _outside(path: str, cwd: str) -> bool:
     """A file changed outside the project folder (relative paths are inside it; the temp folder is fine)."""
     if not path or not cwd or not (os.path.isabs(_norm(path)) or path.startswith("~")):
@@ -412,6 +481,7 @@ def watch_marks(a, cwd: str) -> list[str]:
     if a.kind == "command":                               # a part that opens or sends the file, not one that lists it
         hit = not _NAMES_ONLY.fullmatch(t.strip()) and (      # names only, no values: not a secret read
             any(_SECRET.search(p) and not _LOOK_ONLY.search(p) for p in _parts(_no_prose(t))) or
+            any(_quoted_secret(p) for p in _parts(t)) or
             bool(_INLINE.search(full) and _RUNS_BODY.search(t) and _reads_secret(full)))
     else:
         hit = a.kind != "search" and bool(_SECRET.search(t))      # a search pattern that mentions .env reads no secret
@@ -420,7 +490,8 @@ def watch_marks(a, cwd: str) -> list[str]:
         out.append("secrets")
     if tool.startswith("mcp__"):
         out += _mcp_marks(tool.split("__")[-1], full, cwd)
-    if a.kind == "command" and _DELETE.search(t):
+    if a.kind == "command" and (_DELETE.search(t) or _moves_out(t, cwd) or
+                                (_DB_CLIENT.search(t) and (_SQL_DESTROY.search(full) or _DB_WIPE.search(full)))):
         out.append("deletes")
     if a.kind == "command" and _PUSH.search(t):
         out.append("git_push")
@@ -443,6 +514,8 @@ def watch_marks(a, cwd: str) -> list[str]:
         if "secrets" not in out and (_SECRET_VAR.search(t) or (_INLINE.search(full) and _PRINTS_KEY.search(full)) or
                                      (_FILE_API.search(full) and _SECRET.search(_QUOTED.sub(lambda m: " " + m.group(0)[1:-1] + " ", full)))):
             out.append("secrets")       # python -c "print(os.environ['X_SECRET'])", [IO.File]::ReadAllText('.env')
+        if "secrets" not in out and _SECRET_CMD.search(t):
+            out.append("secrets")       # cmdkey /list, gh auth token: a stored login printed
         if _RC_FILE.search(t) and _WRITES.search(_QUIET.sub(" ", t)) and "persistence" not in out:
             out.append("persistence")
         if _direct(t):

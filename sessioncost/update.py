@@ -127,7 +127,9 @@ def copies(home: Path | None = None, exe: str | None = None, here: Path | None =
     cmd = which("sessioncost")                     # a sessioncost command on the PATH from another Python
     if cmd and not same(Path(cmd).parent, Path(exe).parent) and not same(Path(cmd).parent, Path(exe).parent / "Scripts"):
         if (out := probe([cmd, "--version"])) and out[0].startswith("sessioncost "):
-            found.append(("Terminal (sessioncost)", out[0].split()[-1], cmd))
+            # inside `npx sessioncost`, npm puts its own launcher first on the PATH: not a copy you can type later
+            npx = "_npx" in Path(cmd).parts
+            found.append(("npx launcher (temporary)" if npx else "Terminal (sessioncost)", out[0].split()[-1], cmd))
     for key in _plugin_keys(home):
         try:
             entries = json.loads((home / ".claude" / "plugins" / "installed_plugins.json")
@@ -143,7 +145,7 @@ def copies(home: Path | None = None, exe: str | None = None, here: Path | None =
     for f in sorted(cursor.glob("**/sessioncost/**/.cursor-plugin/plugin.json")) if cursor.is_dir() else []:
         if (v := _json_version(f)) and not any(c[0] == "Cursor plugin" and c[1] == v for c in found):
             found.append(("Cursor plugin", v, str(f.parent.parent)))
-    for agent, folder, sub in SKILL_HOMES:         # the /sessioncost skill `setup` wrote into each agent
+    for agent, folder, sub, _ in SKILL_HOMES:      # the /sessioncost skill `setup` wrote into each agent
         f = home / folder / sub / "sessioncost" / "SKILL.md"
         try:
             m = SKILL_VERSION.search(f.read_text(encoding="utf-8", errors="replace"))

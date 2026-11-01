@@ -193,11 +193,12 @@ def guard_totals(cwd: str | None) -> dict | None:
 
 
 SKILL = Path(__file__).parent / "skill" / "SKILL.md"
-SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it)
-    ("Claude Code", ".claude", "skills"),
-    ("Codex", ".codex", "skills"),
-    ("Antigravity", ".gemini", "config/skills"),
-    ("Cursor", ".cursor", "skills"),
+LIVE_SKILL = Path(__file__).parent / "skill" / "livesession.md"
+SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it, its name for `guard setup`)
+    ("Claude Code", ".claude", "skills", None),         # its guard comes with the plugin only
+    ("Codex", ".codex", "skills", "codex"),
+    ("Antigravity", ".gemini", "config/skills", "antigravity"),
+    ("Cursor", ".cursor", "skills", "cursor"),
 ]
 
 
@@ -224,31 +225,40 @@ def plugin_installed(folder: str, home: Path) -> bool:
 
 
 def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
-    """Add the /sessioncost skill to every agent installed for this user. Returns (agent, skill file written), with
-    None for an agent whose SessionCost plugin already provides /sessioncost."""
+    """Add the /sessioncost skill to every agent installed for this user, and /livesession where `guard setup` can give
+    that agent the guard. Returns (agent, the /sessioncost skill file written), with None for an agent whose
+    SessionCost plugin already provides both."""
     home = home or Path.home()
-    # The skill names this exact Python, so it runs even when no 'python' or 'sessioncost' is on the PATH.
+    # The skills name this exact Python, so they run even when no 'python' or 'sessioncost' is on the PATH.
     exe = Path(sys.executable).as_posix()
     run = f'"{exe}" -m sessioncost' if " " in exe else f"{exe} -m sessioncost"
-    text = SKILL.read_text(encoding="utf-8").replace("{{RUN}}", run).replace("{{VERSION}}", __version__)
+    fill = lambda f: f.read_text(encoding="utf-8").replace("{{RUN}}", run).replace("{{VERSION}}", __version__)
+    text, live = fill(SKILL), fill(LIVE_SKILL)
     if " " in exe:
         text = text.replace("   If that fails because", "   In PowerShell, put `& ` in front of the quoted path. If that fails because")
+        live = live.replace("     Add ` strict`", "     In PowerShell, put `& ` in front of the quoted path. Add ` strict`")
     done = []
-    for agent, folder, sub in SKILL_HOMES:
+    for agent, folder, sub, guard_name in SKILL_HOMES:
         if not (home / folder).is_dir():
             continue
-        dest = home / folder / sub / "sessioncost" / "SKILL.md"
+        skills = {"sessioncost": text}
+        if guard_name:
+            skills["livesession"] = live.replace("{{AGENT}}", agent).replace("{{SETUP}}", guard_name)
         if plugin_installed(folder, home):
-            # Two /sessioncost in one agent confuse people: remove a copy an earlier setup wrote, add none.
-            if dest.is_file() and "name: sessioncost" in dest.read_text(encoding="utf-8", errors="replace"):
-                dest.unlink()
-                if not any(dest.parent.iterdir()):
-                    dest.parent.rmdir()
+            # Two /sessioncost in one agent confuse people: remove copies an earlier setup wrote, add none.
+            for name in skills:
+                dest = home / folder / sub / name / "SKILL.md"
+                if dest.is_file() and f"name: {name}" in dest.read_text(encoding="utf-8", errors="replace"):
+                    dest.unlink()
+                    if not any(dest.parent.iterdir()):
+                        dest.parent.rmdir()
             done.append((agent, None))
             continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(text, encoding="utf-8")
-        done.append((agent, dest))
+        for name, body in skills.items():
+            dest = home / folder / sub / name / "SKILL.md"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(body, encoding="utf-8")
+        done.append((agent, home / folder / sub / "sessioncost" / "SKILL.md"))
     return done
 
 
@@ -258,9 +268,14 @@ def cmd_setup() -> int:
         print("No Claude Code, Codex, Antigravity or Cursor folder found for this user; nothing to set up.")
         return 1
     for agent, dest in done:
-        print(f"{agent:12} /sessioncost added ({dest})" if dest else
-              f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
-    print("\nRestart the agent if it is open, then type /sessioncost in a chat.")
+        if not dest:
+            print(f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
+        elif agent == "Claude Code":
+            print(f"{agent:12} /sessioncost added ({dest}). The live guard comes with the Claude Code plugin: "
+                  "claude plugin marketplace add kish21/sessioncost")
+        else:
+            print(f"{agent:12} /sessioncost and /livesession added ({dest.parent.parent})")
+    print("\nRestart the agent if it is open, then type /sessioncost in a chat. /livesession turns the live guard on.")
     return 0
 
 

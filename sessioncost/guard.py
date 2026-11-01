@@ -1575,6 +1575,13 @@ def _launch(event: str, agent: str) -> str:
     return f'"{sys.executable}" {run} hook {event} {agent}'
 
 
+def _backup(p: Path) -> None:
+    """Keep the user's file as it was before the first setup: a later setup (/livesession runs it again) keeps that copy."""
+    old = p.with_name(p.name + ".before-sessioncost")
+    if p.exists() and not old.exists():
+        old.write_bytes(p.read_bytes())
+
+
 def setup(agent: str) -> str:
     """Add the guard's hooks to Codex's or Cursor's hooks.json, keeping every other hook (a backup is kept)."""
     if agent == "codex":
@@ -1592,8 +1599,7 @@ def setup(agent: str) -> str:
         p = Path.home() / ".gemini" / "config" / "hooks.json"
         run = lambda e: [{"type": "command", "command": _launch(e, "antigravity"), "timeout": 10}]
         have = _read(p, {}) if p.exists() else {}
-        if p.exists():
-            (p.with_name(p.name + ".before-sessioncost")).write_bytes(p.read_bytes())
+        _backup(p)
         have["sessioncost-guard"] = {"enabled": True, "SessionStart": run("session-start"), "PreInvocation": run("invocation"),
                                      "PreToolUse": [{"matcher": "*", "hooks": run("pre")}],
                                      "PostToolUse": [{"matcher": "*", "hooks": run("post")}], "Stop": run("stop")}
@@ -1613,8 +1619,7 @@ def setup(agent: str) -> str:
     else:
         return "SessionCost guard: setup is for codex, cursor, antigravity or copilot (Claude Code gets the guard with the plugin)."
     have = _read(p, {}) if p.exists() else {}
-    if p.exists():
-        (p.with_name(p.name + ".before-sessioncost")).write_bytes(p.read_bytes())
+    _backup(p)
     hooks = have.get("hooks") if isinstance(have.get("hooks"), dict) else {}
     mine = lambda entry: "sessioncost" in json.dumps(entry).lower() and " hook " in json.dumps(entry)
     for ev, entries in ours.items():

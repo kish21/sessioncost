@@ -4,7 +4,8 @@
 // The first run makes a private Python environment in ~/.sessioncost/npm/venv and installs this exact version of
 // SessionCost there (from PyPI; from the folder around this one when it sits in a SessionCost source tree, as in a
 // test build). Later runs only start it. With uv on the PATH, uv makes the environment and fetches Python itself
-// when none is installed; without it, a Python 3.10 or newer on the PATH is used. The environment stays: `setup` and
+// when none is installed; without it, a Python 3.10 or newer on the PATH is used; with neither, uv is installed
+// first (its own installer from astral.sh). The environment stays: `setup` and
 // the guard write the path of the Python they run with into each agent's settings.
 // Nothing here reads or sends your sessions; the install only fetches SessionCost itself.
 "use strict";
@@ -71,6 +72,22 @@ function findPython(which = onPath, runner = run) {
   return null;
 }
 
+// Neither uv nor Python here: run uv's own installer (as install.ps1 / install.sh do) and return the uv it put in
+// place, or null. uv then fetches Python by itself, so a computer with only Node.js works.
+function fetchUv(runner = run, env = process.env, exists = (f) => fs.existsSync(f), homedir = os.homedir()) {
+  const cmd = WINDOWS
+    ? ["powershell", ["-NoProfile", "-ExecutionPolicy", "ByPass", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"]]
+    : ["sh", ["-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"]];
+  const r = runner(cmd[0], cmd[1], INSTALL_MS);
+  if (!r.ok) return null;
+  const name = WINDOWS ? "uv.exe" : "uv";
+  const dirs = [env.UV_INSTALL_DIR, env.XDG_BIN_HOME, path.join(homedir, ".local", "bin")].filter(Boolean);
+  for (const d of dirs) {
+    if (exists(path.join(d, name))) return path.join(d, name);
+  }
+  return null;
+}
+
 // The steps that make the environment and install SessionCost into it: [[command, args], ...], or null.
 function installSteps(venv, what, which = onPath, runner = run) {
   const py = venvPython(venv);
@@ -95,11 +112,16 @@ function main(argv = process.argv.slice(2), env = process.env) {
   let have = "";
   try { have = fs.readFileSync(stamp, "utf8").trim(); } catch (e) { /* first run */ }
   if (have !== want || !fs.existsSync(py)) {
-    const steps = installSteps(venv, what);
+    let steps = installSteps(venv, what);
     if (!steps) {
-      console.error("SessionCost runs on Python. Install uv (https://docs.astral.sh/uv/getting-started/installation/), " +
-                    "which fetches Python by itself, or Python 3.10 or newer (https://www.python.org/downloads/), " +
-                    "then run npx sessioncost again.");
+      console.error("SessionCost runs on Python, and this computer has neither Python nor uv: installing uv " +
+                    "(https://docs.astral.sh/uv/), which fetches Python by itself …");
+      const uv = fetchUv();
+      if (uv) steps = installSteps(venv, what, (n) => (n === "uv" ? uv : null));
+    }
+    if (!steps) {
+      console.error("uv could not be installed. Install uv (https://docs.astral.sh/uv/getting-started/installation/) " +
+                    "or Python 3.10 or newer (https://www.python.org/downloads/), then run npx sessioncost again.");
       return 1;
     }
     console.error(`SessionCost ${VERSION}: installing once into ${venv} …`);
@@ -125,6 +147,6 @@ function main(argv = process.argv.slice(2), env = process.env) {
   return r.status === null ? 1 : r.status;
 }
 
-module.exports = { spec, findPython, installSteps, venvPython, home, main, VERSION };
+module.exports = { spec, findPython, fetchUv, installSteps, venvPython, home, main, VERSION };
 
 if (require.main === module) process.exitCode = main();

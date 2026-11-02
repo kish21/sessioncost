@@ -1606,7 +1606,7 @@ def command(arg: str, cwd: str, strict: bool = False) -> str:
         strict = strict or bool(have.get("on") and have.get("strict"))     # turning it on again never lowers strict
         _write(cfg, {**have, "on": True, "strict": strict})
         return (f"SessionCost guard: on{' (strict)' if strict else ''} for every chat, this one included, until you type "
-                "/livesession off (or run `sessioncost guard off`). Claude Code, and each agent you ran `guard setup` for.")
+                "/livesession off (or run `sessioncost guard off`). Every agent `sessioncost setup` gave the guard.")
     if arg == "off":
         _write(cfg, {**keep, "on": False})
         for p in home().glob("*.state.json"):

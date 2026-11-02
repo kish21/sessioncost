@@ -23,9 +23,10 @@ and writes every decision to a log the SessionCost report reads. It has one swit
      ```
 
      Add ` strict` after `guard on` for "/livesession strict" (untrusted content then counts for the whole chat, and
-     files from node_modules, vendor or site-packages count as untrusted). The first command adds the guard's hooks to
-     {{AGENT}} and keeps the user's other hooks; running it again does no harm. Then tell the user to restart
-     {{AGENT}}: the guard checks steps from the next start on.
+     files from node_modules, vendor or site-packages count as untrusted). The first command makes sure the guard's
+     hooks are in {{AGENT}} (`sessioncost setup` normally put them there already) and keeps the user's other hooks;
+     running it again does no harm. The switch is one for every agent: each agent setup gave the guard is now
+     guarded too. Only if {{AGENT}} was installed after SessionCost's setup, tell the user to restart it once.
    - "/livesession off": you cannot turn the guard off (it blocks that, on purpose: only the user changes it). Tell
      the user to type this in a terminal themselves: `{{RUN}} guard off`.
 

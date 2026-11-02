@@ -272,9 +272,21 @@ def cmd_setup() -> int:
             print(f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
         else:
             print(f"{agent:12} /sessioncost and /livesession added ({dest.parent.parent})")
+    # The guard goes into every agent now, not at its first /livesession: the switch is one for all agents, so turning
+    # it on in one guards them all (owner 2026-11-02). Off, the hooks only look at the switch and let each step pass.
     from . import guard
-    for agent in guard.refresh():           # hooks an older version wrote get this version's commands
-        print(f"{agent.capitalize():12} live guard hooks brought up to date")
+    from .readers.copilot import copilot_home
+    names = {a: g for a, _, _, g in SKILL_HOMES}
+    ready = [(a, names[a]) for a, dest in done if dest]
+    if copilot_home().is_dir():
+        ready.append(("Copilot", "copilot"))
+    for agent, name in ready:
+        guard.setup(name)
+        print(f"{agent:12} live guard ready (off until you type /livesession in any agent)"
+              + ("; Codex asks you once to trust new hooks: type /hooks there" if name == "codex" else ""))
+    for name in guard.refresh():            # hooks an older version wrote get this version's commands
+        if name not in {n for _, n in ready}:
+            print(f"{name.capitalize():12} live guard hooks brought up to date")
     print("\nRestart the agent if it is open, then type /sessioncost in a chat. /livesession turns the live guard on.")
     return 0
 

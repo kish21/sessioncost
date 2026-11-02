@@ -195,7 +195,7 @@ def guard_totals(cwd: str | None) -> dict | None:
 SKILL = Path(__file__).parent / "skill" / "SKILL.md"
 LIVE_SKILL = Path(__file__).parent / "skill" / "livesession.md"
 SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it, its name for `guard setup`)
-    ("Claude Code", ".claude", "skills", None),         # its guard comes with the plugin only
+    ("Claude Code", ".claude", "skills", "claude"),
     ("Codex", ".codex", "skills", "codex"),
     ("Antigravity", ".gemini", "config/skills", "antigravity"),
     ("Cursor", ".cursor", "skills", "cursor"),
@@ -225,8 +225,8 @@ def plugin_installed(folder: str, home: Path) -> bool:
 
 
 def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
-    """Add the /sessioncost skill to every agent installed for this user, and /livesession where `guard setup` can give
-    that agent the guard. Returns (agent, the /sessioncost skill file written), with None for an agent whose
+    """Add the /sessioncost and /livesession skills to every agent installed for this user (/livesession runs that
+    agent's `guard setup`). Returns (agent, the /sessioncost skill file written), with None for an agent whose
     SessionCost plugin already provides both."""
     home = home or Path.home()
     # The skills name this exact Python, so they run even when no 'python' or 'sessioncost' is on the PATH.
@@ -270,9 +270,6 @@ def cmd_setup() -> int:
     for agent, dest in done:
         if not dest:
             print(f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
-        elif agent == "Claude Code":
-            print(f"{agent:12} /sessioncost added ({dest}). The live guard comes with the Claude Code plugin: "
-                  "claude plugin marketplace add kish21/sessioncost")
         else:
             print(f"{agent:12} /sessioncost and /livesession added ({dest.parent.parent})")
     from . import guard

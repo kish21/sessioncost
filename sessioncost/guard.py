@@ -1665,7 +1665,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-# ---- putting the guard into Codex, Cursor, Antigravity and Copilot CLI (Claude Code gets it with the plugin) ----
+# ---- putting the guard into Claude Code, Codex, Cursor, Antigravity and Copilot CLI ----
+# Claude Code: the plugin brings the hooks; without it (npm or Python install) `guard setup claude` writes them into
+# ~/.claude/settings.json, so every way of installing gives both /sessioncost and /livesession.
 def _path_arg(p: str) -> str:
     """A path for a hook command, quoted only when it must be: Antigravity hands the command to cmd.exe with every `"`
     escaped as `\\"`, which cmd cannot read. A Windows path with spaces gets its short (8.3) form when there is one."""
@@ -1685,6 +1687,9 @@ def _path_arg(p: str) -> str:
 def _launch(event: str, agent: str) -> str:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
+    if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
+        run = f'"{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
+        return f'"{Path(sys.executable).as_posix()}" {run} hook {event} claude'
     run = _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
     return f'{_path_arg(sys.executable)} {run} hook {event} {agent}'
 
@@ -1697,8 +1702,21 @@ def _backup(p: Path) -> None:
 
 
 def setup(agent: str) -> str:
-    """Add the guard's hooks to Codex's or Cursor's hooks.json, keeping every other hook (a backup is kept)."""
-    if agent == "codex":
+    """Add the guard's hooks to the agent's hooks file, keeping every other hook (a backup is kept)."""
+    if agent == "claude":
+        from .cli import claude_plugin_installed
+        p = Path.home() / ".claude" / "settings.json"
+        plugin = claude_plugin_installed(Path.home())     # its hooks already run: ours too would check each step twice
+        ours = {} if plugin else {
+            ev: [{"hooks": [{"type": "command", "command": _launch(e, "claude"), "timeout": 10}]}]
+            for ev, e in (("SessionStart", "session-start"), ("UserPromptSubmit", "prompt"), ("PreToolUse", "pre"),
+                          ("PostToolUse", "post"), ("PostToolUseFailure", "fail"), ("Stop", "stop"), ("SessionEnd", "end"))}
+        if plugin:
+            if not p.exists() or "sessioncost" not in p.read_text(encoding="utf-8", errors="replace").lower():
+                return "SessionCost guard: Claude Code has the SessionCost plugin, which brings the guard; nothing added."
+            ours = {ev: [] for ev in ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                                      "PostToolUseFailure", "Stop", "SessionEnd")}
+    elif agent == "codex":
         p = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "hooks.json"
         ours = {ev: [{**({"matcher": ".*"} if ev in ("PreToolUse", "PostToolUse") else {}),
                       "hooks": [{"type": "command", "command": _launch(e, "codex"), "timeout": 10}]}]
@@ -1731,15 +1749,23 @@ def setup(agent: str) -> str:
                 "Restart Copilot CLI. The guard is on when `sessioncost guard on` is set. A check that takes longer "
                 "than 10 s lets the step run (Copilot's rule), so a very slow computer weakens it.")
     else:
-        return "SessionCost guard: setup is for codex, cursor, antigravity or copilot (Claude Code gets the guard with the plugin)."
+        return "SessionCost guard: setup is for claude, codex, cursor, antigravity or copilot."
     have = _read(p, {}) if p.exists() else {}
     _backup(p)
     hooks = have.get("hooks") if isinstance(have.get("hooks"), dict) else {}
     mine = lambda entry: "sessioncost" in json.dumps(entry).lower() and " hook " in json.dumps(entry)
     for ev, entries in ours.items():
         hooks[ev] = [x for x in (hooks.get(ev) or []) if not mine(x)] + entries
+        if not hooks[ev]:
+            del hooks[ev]
     out = {**have, "hooks": hooks, **({"version": have.get("version", 1)} if agent == "cursor" else {})}
     _write(p, out)
+    if agent == "claude":
+        if not ours or not any(ours.values()):
+            return (f"SessionCost guard: Claude Code has the SessionCost plugin, which brings the guard; the copy in {p} "
+                    "was taken out so steps are not checked twice.")
+        return (f"SessionCost guard: added to {p} (your other hooks and settings kept; the old file is next to it). "
+                "Restart Claude Code: the guard checks steps from the next chat on.")
     note = (" Codex asks you to review new hooks: run /hooks in Codex once and trust them." if agent == "codex" else
             " Restart Cursor. The guard is on when `sessioncost guard on` is set (Cursor's hooks cannot read "
             "/livesession: switch it in a terminal).")
@@ -1747,6 +1773,8 @@ def setup(agent: str) -> str:
 
 
 def _hooks_file(agent: str) -> Path:
+    if agent == "claude":
+        return Path.home() / ".claude" / "settings.json"
     if agent == "codex":
         return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "hooks.json"
     if agent == "cursor":
@@ -1761,7 +1789,7 @@ def refresh() -> list[str]:
     """Write the guard's hooks again for each agent that already has them, so an update (and `sessioncost setup`)
     replaces hook commands an older version wrote. Returns the agents refreshed."""
     done = []
-    for agent in ("codex", "cursor", "antigravity", "copilot"):
+    for agent in ("claude", "codex", "cursor", "antigravity", "copilot"):
         try:
             text = _hooks_file(agent).read_text(encoding="utf-8", errors="replace")
         except OSError:

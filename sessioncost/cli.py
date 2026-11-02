@@ -277,7 +277,8 @@ def cmd_setup() -> int:
     from . import guard
     from .readers.copilot import copilot_home
     names = {a: g for a, _, _, g in SKILL_HOMES}
-    ready = [(a, names[a]) for a, dest in done if dest]
+    # an agent's plugin brings the commands; only Claude Code's brings the guard's hooks too
+    ready = [(a, names[a]) for a, dest in done if dest or a != "Claude Code"]
     if copilot_home().is_dir():
         ready.append(("Copilot", "copilot"))
     for agent, name in ready:

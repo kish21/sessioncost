@@ -1,7 +1,7 @@
 {
   "name": "sessioncost",
   "description": "See how many tokens each turn of this chat sends, why, and what to cut. Type /sessioncost.",
-  "version": "0.5.15",
+  "version": "1.0.0",
   "author": {
     "name": "kish21"
   },
@@ -13,5 +13,6 @@
     "usage",
     "session"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "hooks": "./hooks/codex.json"
 }

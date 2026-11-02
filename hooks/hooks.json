@@ -1,0 +1,27 @@
+{
+  "description": "SessionCost guard: off until you type /livesession or run `sessioncost guard on` (one switch, every chat, until /livesession off); then it checks each tool step before it runs. Local, no AI model. status.ts pins a status line while it is on.",
+  "modules": ["./status.ts"],
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" session-start", "timeout": 10}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" prompt", "timeout": 10}]}
+    ],
+    "PreToolUse": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" pre", "timeout": 10}]}
+    ],
+    "PostToolUse": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" post", "timeout": 10}]}
+    ],
+    "PostToolUseFailure": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" fail", "timeout": 10}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" stop", "timeout": 10}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\" end", "timeout": 10}]}
+    ]
+  }
+}

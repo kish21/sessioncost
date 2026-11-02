@@ -27,9 +27,13 @@ def _merge(base: dict, extra: dict) -> dict:
 
 def load(extra_file: str | None = None, user_file: Path | None = USER_FILE) -> dict:
     prices = json.loads((HERE / "prices.json").read_text(encoding="utf-8"))
+    own = []          # your own price files merged in, named on the money line so it is not read as the list prices
     for f in (user_file, Path(extra_file).expanduser() if extra_file else None):
         if f and Path(f).is_file():
             prices = _merge(prices, json.loads(Path(f).read_text(encoding="utf-8")))
+            own.append(Path(f).name)
+    if own:
+        prices["own"] = own
     return prices
 
 
@@ -50,6 +54,15 @@ def rates(model: str, prices: dict) -> tuple[dict, bool, str]:
     key = "default-openai" if re.match(r"(gpt|codex|o\d)", m) else "default-gemini" if m.startswith("gemini") else ""
     key = key if key in table else "default"
     return table[key], False, key
+
+
+def for_prompt(r: dict, prompt_tokens: int) -> dict:
+    """The rates for a call whose prompt (everything it sent: new, written and re-read) is this long: a model priced by
+    prompt length has an "over" entry, {"above": N, <rates>}, used when the prompt is over N tokens."""
+    over = r.get("over")
+    if not over or prompt_tokens <= over["above"]:
+        return r
+    return {**r, **{k: v for k, v in over.items() if k != "above"}}
 
 
 def cost(u: Usage, r: dict) -> dict:

@@ -1,1 +1,3 @@
 *.sh text eol=lf
+# npx runs this on Mac and Linux: a CRLF after "#!/usr/bin/env node" breaks it
+npm/bin/*.js text eol=lf

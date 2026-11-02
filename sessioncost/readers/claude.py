@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ..textflags import fingerprint, text_flags
 from ..model import Action, Added, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage
+from ._util import clean_cmd
 
 # Text the harness puts into a `user` row. Never shown as something the user typed.
 TAGS = {
@@ -128,7 +129,6 @@ KINDS = {
     "AskUserQuestion": "question", "ExitPlanMode": "question",
     "Skill": "skill", "TodoWrite": "plan", "TaskCreate": "plan", "TaskUpdate": "plan",
 }
-WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 
 
 def ts(s) -> datetime | None:
@@ -185,8 +185,7 @@ def _merge_usage(a: Usage, b: Usage) -> None:
 
 
 def _command_text(cmd: str) -> str:
-    cmd = re.sub(r'^\s*cd\s+("[^"]*"|\'[^\']*\'|\S+)\s*(&&|;)\s*', "", cmd.strip())
-    return short(cmd.splitlines()[0] if cmd else "", 80)
+    return clean_cmd(cmd)
 
 
 def describe(tool: str, inp: dict) -> tuple[str, str, str]:
@@ -220,8 +219,8 @@ def describe(tool: str, inp: dict) -> tuple[str, str, str]:
         return kind, f"loaded the skill `{inp.get('skill', '')}`", str(inp.get("skill") or "")
     if kind == "plan":
         return kind, "updated its to-do list", ""
-    if tool.startswith("mcp__"):
-        return "other", f"used {tool.split('__')[-1]} ({tool.split('__')[1]})", ""
+    if tool.startswith("mcp__"):          # the arguments, so the watch list can check them (a key in a body, a path)
+        return "other", f"used {tool.split('__')[-1]} ({tool.split('__')[1]})", json.dumps(inp, ensure_ascii=False)[:4000]
     return kind, f"used {tool}", ""
 
 

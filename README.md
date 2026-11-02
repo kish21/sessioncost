@@ -4,156 +4,74 @@
 
 [![PyPI](https://img.shields.io/pypi/v/sessioncost)](https://pypi.org/project/sessioncost/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Works with](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%C2%B7%20Antigravity-1f6f78) [![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dkish21%252Fsessioncost%26metric%3Dtrust)](https://hol.org/registry/plugins/kish21%2Fsessioncost)
 
-![Every turn of a chat on one path; tap a turn to see the calls inside it](https://raw.githubusercontent.com/kish21/sessioncost/main/media/path.gif)
+![Every turn of a chat on one path; tap a turn to see the calls inside it](https://github.com/kish21/sessioncost/releases/download/media/path.gif)
 
 Every message you send makes the agent send the **whole chat again**. SessionCost shows each turn on one path,
 the calls inside it, and the fixes that would have sent less, measured from your own chat.
 
-▶ **[Watch the 1-minute video tour on YouTube](https://youtu.be/TYfaJuEWr7U)** · <sub>pictures use a made-up demo chat</sub>
+**Tokens: exact**, from the agent's own log. **Money: an estimate** at list prices; your bill may differ (plan,
+contract rates, batch, cloud provider). Cursor and Copilot Chat keep no token counts, so for them tokens are estimated
+from the size of the text.
+
+📖 **[Help and guides](https://kish21.github.io/sessioncost-help/)** · ▶ **[Take the report tour](https://kish21.github.io/sessioncost-help/report/tour/)** · **[1-minute video](https://youtu.be/TYfaJuEWr7U)** · <sub>pictures use a made-up demo chat</sub>
 
 ## Install
 
-Pick the way that suits you. Each one adds `/sessioncost` to every agent on your computer: **Claude Code, Codex,
-Cursor and Antigravity**.
+One line adds `/sessioncost` to every agent on your computer: **Claude Code, Codex, Cursor and Antigravity**. It needs
+neither Python nor Git. Open a terminal, paste the line for your computer, and press Enter:
 
-### 1. Not technical? One line, nothing else needed
-
-1. Open a terminal. **Windows:** press the Windows key, type `powershell`, press Enter. **Mac:** press Cmd + Space,
-   type `terminal`, press Enter.
-2. Paste the line for your computer and press Enter:
-
-   | Windows | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
-   |---|---|
-   | **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
-
-3. Wait about a minute. It ends with `/sessioncost added` for each agent it found.
-
-### 2. Use the command line? Install from PyPI
-
-Needs Python 3.10 or newer.
-
-```
-python -m pip install -U sessioncost     # -U also updates an older copy
-python -m sessioncost setup              # adds /sessioncost to your agents
-```
-
-On Mac or Linux use `python3` if `python` is not found. `python -m` works even when Windows cannot find the
-`sessioncost` command (common with the Microsoft Store Python). Prefer isolated tools? `pipx install sessioncost` or
-`uv tool install sessioncost`, then `sessioncost setup`.
-
-### 3. Prefer plugins? Add it from your agent's plugin list
-
-Plugins need Python 3.10 or newer on the computer (way 1 does not).
-
-| Agent | How |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
 |---|---|
-| **Claude Code** | In a chat: `/plugin marketplace add kish21/sessioncost`, then `/plugin install sessioncost@sessioncost`. Or type `/plugin`, open **Marketplaces**, add `kish21/sessioncost`, and install **sessioncost** from the **Plugins** tab. (Needs Git.) |
-| **Codex** | First, in a terminal: `codex plugin marketplace add kish21/sessioncost`. Then **Codex app:** open **Customize → Plugins**, choose **sessioncost**, click **Install plugin**. **Codex CLI:** type `/plugins`, pick **sessioncost**, install it. Start a new chat afterwards. |
-| **Cursor** | Open **Customize → Plugins**, choose **From GitHub Repository** (or **Add Marketplace**), paste `https://github.com/kish21/sessioncost`, then install **sessioncost** and restart Cursor. If no plugin shows up (some Cursor versions import a repo without listing its plugins), use way 1. |
-| **Antigravity** | With the Antigravity command line: `agy plugin install https://github.com/kish21/sessioncost`, then start a new chat. In the Antigravity app, use way 1 (it adds `/sessioncost` to Antigravity directly). |
+| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
 
-Use one way per agent: with the plugin installed, you don't need the copy from way 1 or 2 in that agent.
+It ends with `/sessioncost added` for each agent it found. Then restart your agent.
 
-### Staying up to date
+Prefer PyPI (`python -m pip install -U sessioncost`, then `python -m sessioncost setup`), npm (`npx sessioncost`,
+then `npx sessioncost setup`) or your agent's plugin list
+(Claude Code: `/plugin marketplace add kish21/sessioncost`)? Every way, step by step:
+**[Install SessionCost](https://kish21.github.io/sessioncost-help/start/install/)**.
 
-Not every agent updates a plugin by itself. The simple way: type `/sessioncost update` in a chat, or run
-`sessioncost update` in a terminal (`python -m sessioncost update` on Windows). It updates every copy of SessionCost on
-the computer, each the right way, and tells you what it did.
+## Use it
 
-| Agent | New versions |
-|---|---|
-| **Claude Code** | Once: `/plugin` → **Marketplaces** → sessioncost → **Enable auto-update**. From then on each new version arrives by itself. |
-| **Codex** | Codex looks for a new version when it starts. To be sure: `codex plugin marketplace upgrade`. |
-| **Cursor** | **Customize** → the marketplace with SessionCost → **Refresh**. |
-| **Antigravity**, and way 1 or 2 | `sessioncost update`, or paste the install line again. |
+Open any chat and type **`/sessioncost`** (or ask: "run sessioncost"). The report opens in your browser.
 
-### Then, in your agent
-
-Restart the agent, open any chat, and type **`/sessioncost`** (or ask: "run sessioncost"). The report opens in
-your browser.
-
-| Agent | Where `/sessioncost` is added |
-|---|---|
-| Claude Code | `~/.claude/skills/sessioncost` (or the plugin) |
-| Codex (CLI, IDE, app) | `~/.codex/skills/sessioncost` |
-| Cursor | `~/.cursor/skills/sessioncost` |
-| Antigravity | `~/.gemini/config/skills/sessioncost` |
-
-Installed another agent later? Run `sessioncost setup` again (or paste the line from way 1 again).
-
-![/sessioncost in a Claude Code chat](https://raw.githubusercontent.com/kish21/sessioncost/main/media/chat.png)
-
-## What you get
+![/sessioncost in a Claude Code chat](https://github.com/kish21/sessioncost/releases/download/media/chat.png)
 
 **How much was sent, and how much the fixes would cut**
 
-![9.9M tokens sent, 5.4M with the fixes, and the three biggest fixes](https://raw.githubusercontent.com/kish21/sessioncost/main/media/answer.png)
+![9.9M tokens sent, 5.4M with the fixes, and the three biggest fixes](https://github.com/kish21/sessioncost/releases/download/media/answer.png)
 
-**What to fix**: each fix with its saving and the rule to paste to your agent. Tick "I did this" and it stops
-repeating.
+**What to fix**: each fix with its saving and the rule to paste to your agent.
 
-![Recommended rules and fix cards](https://raw.githubusercontent.com/kish21/sessioncost/main/media/fixes.png)
+![Recommended rules and fix cards](https://github.com/kish21/sessioncost/releases/download/media/fixes.png)
 
-**Deeper fixes**: one button checks 30 more patterns, from a catalog built on 200+ real agent sessions.
+New to the report? **[Your first report](https://kish21.github.io/sessioncost-help/start/first-report/)** walks
+through it in five minutes, and every section of the report has a **?** that opens its help page.
 
-![After the deeper fixes: 9.9M tokens sent, 2.8M with all 16 fixes](https://raw.githubusercontent.com/kish21/sessioncost/main/media/with-deeper.png)
+## Commands
+
+| In a chat | What it does |
+|---|---|
+| `/sessioncost` | Builds the report of this chat and gives you its link |
+| `/sessioncost clean` | Deletes old reports, keeps the latest |
+| `/sessioncost update` | Updates SessionCost, then restart your agent |
+| `/sessioncost version` | Shows which SessionCost version this agent uses |
+| `/livesession` | Claude Code: [the guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) checks each step before it runs, blocks the dangerous ones and asks before the risky ones, in every chat until `/livesession off` |
+
+Terminal commands, report options and the guard's settings:
+**[Commands](https://kish21.github.io/sessioncost-help/reference/commands/)**.
 
 ## Private
 
 - Reads your agent's log on your computer. No AI model is called.
-- Nothing is sent unless you press **Send the summary to the fix engine**, and then only numbers and yes/no marks,
-  never your chat, code or file names. The report shows the exact summary first.
-- Don't want the button? `sessioncost --engine-url off`.
+- Nothing is sent anywhere: the report is one file on your computer.
+
+More: **[Privacy and security](https://kish21.github.io/sessioncost-help/reference/privacy/)**.
 
 ## More
 
-<details>
-<summary>Which agents, and how exact</summary>
-
-| Agent | Tokens |
-|---|---|
-| Claude Code | exact, from its log |
-| Codex | exact, from its log |
-| Antigravity | exact, from its log |
-| Cursor | estimated from text size; exact with your usage export (`--cursor-usage file.csv`) |
-</details>
-
-<details>
-<summary>Use it from a terminal</summary>
-
-```
-sessioncost                 # the newest chat of this folder's project
-sessioncost list            # recent chats
-sessioncost 3f2a9c1e        # one chat, by the start of its id
-sessioncost setup           # add /sessioncost to your agents again
-sessioncost clean           # delete old reports, keep the latest
-```
-
-Options: `--no-open`, `--json`, `--subscription` (money as API-equivalent on Pro/Max plans), `--design classic`,
-`--engine-url off`.
-</details>
-
-<details>
-<summary>Update, or fix a problem</summary>
-
-- **Update:** `/sessioncost update` in a chat (or `sessioncost update`), then restart your agent. Pasting the install
-  line again works too.
-- **`/sessioncost` does nothing:** restart the agent after installing.
-- **"sessioncost is not recognized"** (Windows): use `python -m sessioncost` instead of `sessioncost`.
-- **Windows says scripts are disabled:** run
-  `powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 | iex"`.
-- **Updated with pip:** `python -m pip install -U sessioncost`, then `python -m sessioncost setup`. **Plugin:** `/plugin` →
-  **Marketplaces** → sessioncost → **Update**, then restart Claude Code (or turn on **Enable auto-update** there once).
-- **"git not found" when adding the plugin:** use way 1 instead; it needs neither Git nor Python.
-- **The deeper fixes take a while:** the engine sleeps when idle; the first check can take up to a minute.
-</details>
-
-<details>
-<summary>How the money is counted</summary>
-
-Each kind of token is priced on its own: new input, written to the cache, re-read from the cache (about a tenth of
-the price), and output. Prices are the public API's, dated in the report; override them in
-`~/.sessioncost/prices.json`. On a subscription, `--subscription` labels the money as API-equivalent.
-</details>
+- [Which agents, and how exact](https://kish21.github.io/sessioncost-help/reference/agents/)
+- [How the money is counted](https://kish21.github.io/sessioncost-help/reference/money/)
+- [Fix a problem](https://kish21.github.io/sessioncost-help/help/fix-a-problem/), including updating
 
 _MIT license · made by [kish21](https://github.com/kish21)_

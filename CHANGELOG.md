@@ -1,5 +1,9 @@
 # What's new
 
+## 1.0.0
+
+- New features and fixes.
+
 ## 0.5.15
 
 - **A fix filter no longer fades a whole opened turn:** with "Show me on the board" on, the fix's own calls stay

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ..textflags import fingerprint, text_flags
 from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage, said_kind
+from ._util import clean_cmd
 from .claude import _rows, _turn_at, short, ts
 
 CALL_ITEMS = ("function_call", "custom_tool_call", "local_shell_call", "web_search_call", "tool_search_call")
@@ -103,7 +104,7 @@ def _command(tool: str, cmd: str) -> tuple[str, str, str]:
         return "read", f"read `{_name(f)}`" + (f" ({m.group(0)})" if (m := re.search(r"\d+,\d+p", cmd)) else ""), f
     if files:
         return "read", _read_label(files), "\n".join(files)
-    first = short(cmd.strip().splitlines()[0] if cmd.strip() else "", 80)
+    first = clean_cmd(cmd)
     return "command", f"ran `{first}`" if first else f"used {tool}", cmd
 
 

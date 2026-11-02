@@ -1,4 +1,8 @@
-"""Finding Claude Code, Codex, Antigravity and Cursor sessions on this machine.
+"""Finding Claude Code, Codex, Copilot CLI, Antigravity and Cursor sessions on this machine.
+
+Copilot CLI keeps one folder per session under $COPILOT_HOME/session-state (COPILOT_HOME defaults to ~/.copilot):
+<id>/events.jsonl, and workspace.yaml whose `cwd:` is the project. Copilot Chat in VS Code keeps one file per chat in
+<VS Code user folder>/workspaceStorage/<hash>/chatSessions; workspace.json in <hash> names the project folder.
 
 Codex keeps every thread under $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl (CODEX_HOME defaults to
 ~/.codex), and moves an archived one to $CODEX_HOME/archived_sessions; both are searched, at any depth, so a new
@@ -6,8 +10,9 @@ folder layout does not hide them. The project is the `cwd` (or one of the `runti
 file's `session_meta` row. Helper threads (a parent thread id, or a `subagent` source) are read with their main
 session, never listed on their own.
 
-Antigravity keeps one SQLite file per conversation under ~/.gemini/antigravity-ide/conversations (or
-$ANTIGRAVITY_HOME/conversations); the project is the workspace stored inside it.
+Antigravity keeps one SQLite file per conversation under ~/.gemini/antigravity/conversations (older builds:
+~/.gemini/antigravity-ide/conversations; or $ANTIGRAVITY_HOME/conversations); the project is the workspace stored
+inside it.
 
 Cursor keeps every chat in one SQLite file (see readers/cursor.py for where); a chat stands in for a session file
 as a `CursorChat`. Helper chats are read with the chat that started them, never listed on their own. Which folder
@@ -43,7 +48,10 @@ def codex_home() -> Path:
 
 
 def session_id(path: Path) -> str:
-    """The id a user types: a Claude Code file is named by it; a Codex file ends with it."""
+    """The id a user types: a Claude Code file is named by it; a Codex file ends with it; a Copilot CLI session is
+    the folder its events.jsonl sits in."""
+    if path.name == "events.jsonl":
+        return path.parent.name
     m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", path.stem)
     return m.group(1) if m and path.stem.startswith("rollout-") else path.stem   # (a CursorChat's stem is its id)
 
@@ -153,35 +161,81 @@ def codex_sessions(project: str | Path | None = None, home: Path | None = None,
     return out
 
 
+def copilot_sessions(project: str | Path | None = None, home: Path | None = None,
+                     unlinked: list | None = None) -> list[Path]:
+    """Copilot CLI sessions whose folder (workspace.yaml `cwd`) is the project. Sessions that name none go to
+    `unlinked`."""
+    from .readers.copilot import copilot_home, is_copilot, workspace_cwd
+    root = (home or copilot_home()) / "session-state"
+    want = project or os.getcwd()
+    out = []
+    for f in sorted(root.glob("*/events.jsonl")) if root.is_dir() else []:
+        if not is_copilot(f):
+            continue
+        cwd = workspace_cwd(f.parent)
+        if cwd and _same_dir(cwd, want):
+            out.append(f)
+        elif not cwd and unlinked is not None:
+            unlinked.append(f)
+    return out
+
+
+def vscode_chats(project: str | Path | None = None, homes: list[Path] | None = None) -> list[tuple[datetime, Path]]:
+    """VS Code Copilot Chat sessions whose workspace folder is the project, with the time each file last changed (the
+    edits carry no timestamp of their own). Chats with no message in them are left out."""
+    from .readers.vscode_chat import folder_of, replay, vscode_homes
+    want = project or os.getcwd()
+    out = []
+    for home in homes if homes is not None else vscode_homes():
+        for d in sorted((home / "workspaceStorage").glob("*/chatSessions")) if (home / "workspaceStorage").is_dir() else []:
+            files = sorted(d.glob("*.json")) + sorted(d.glob("*.jsonl"))
+            if not files or not _same_dir(folder_of(files[0]) or "\0", want):
+                continue
+            for f in files:
+                try:
+                    if not any(isinstance(q, dict) and (q.get("message") or {}).get("text")
+                               for q in replay(f).get("requests") or []):
+                        continue
+                except (OSError, ValueError, AttributeError):
+                    continue
+                out.append((datetime.fromtimestamp(f.stat().st_mtime).astimezone(), f))
+    return out
+
+
 def antigravity_home() -> Path:
-    base = os.environ.get("ANTIGRAVITY_HOME")
-    return Path(base).expanduser() if base else Path.home() / ".gemini" / "antigravity-ide"
+    from .readers.antigravity import antigravity_home as home
+    return home()
 
 
 def antigravity_sessions(project: str | Path | None = None,
                          home: Path | None = None) -> list[tuple[datetime | None, Path]]:
-    """Antigravity conversations whose workspace is the project, with the time of their last step."""
-    from .readers import _pb
-    from .readers.antigravity import _ts, connect, workspace
-    root = (home or antigravity_home()) / "conversations"
-    if not root.is_dir():
-        return []
+    """Antigravity conversations whose workspace is the project, with the time of their last step. Both the current
+    folder and the older one are read; a conversation in both counts once (the newer copy). Helper conversations
+    (nothing typed by you) are read with the conversation that started them, never listed on their own."""
+    from .readers.antigravity import _ts, antigravity_homes, connect, is_helper, workspace
     want = project or os.getcwd()
-    out = []
-    for p in root.glob("*.db"):
-        try:
-            con = connect(p)
-            try:
-                ws = workspace(con)
-                if not ws or not _same_dir(ws, want):
-                    continue
-                row = con.execute("select metadata from steps order by idx desc limit 1").fetchone()
-            finally:
-                con.close()
-        except Exception:   # a locked or half-written file must not break the list
+    best: dict[str, tuple[datetime | None, Path]] = {}
+    for base in [home] if home else antigravity_homes():
+        root = base / "conversations"
+        if not root.is_dir():
             continue
-        out.append((_ts(row[0], 1) if row else None, p))
-    return out
+        for p in root.glob("*.db"):
+            try:
+                con = connect(p)
+                try:
+                    ws = workspace(con)
+                    if not ws or not _same_dir(ws, want) or is_helper(con):
+                        continue
+                    row = con.execute("select metadata from steps order by idx desc limit 1").fetchone()
+                finally:
+                    con.close()
+            except Exception:   # a locked or half-written file must not break the list
+                continue
+            ts = _ts(row[0], 1) if row else None
+            old = best.get(p.stem)
+            if old is None or (ts and (old[0] is None or ts > old[0])):
+                best[p.stem] = (ts, p)
+    return list(best.values())
 
 
 def cursor_home() -> Path:
@@ -285,13 +339,16 @@ def cursor_sessions(project: str | Path | None = None, db: Path | None = None, h
 
 def sessions(project: str | Path | None = None, home: Path | None = None, codex: Path | None = None,
              antigravity: Path | None = None, cursor: Path | None = None, cursor_dir: Path | None = None,
-             unlinked: list | None = None) -> list[tuple[datetime, Path]]:
-    """Main sessions of a project (Claude Code, Codex, Antigravity, Cursor), newest first. Sessions that name no
-    folder at all are added to `unlinked` (newest first), when a list is given."""
+             unlinked: list | None = None, copilot: Path | None = None,
+             vscode: list[Path] | None = None) -> list[tuple[datetime, Path]]:
+    """Main sessions of a project (Claude Code, Codex, Copilot CLI, VS Code Copilot Chat, Antigravity, Cursor), newest
+    first. Sessions that name no folder at all are added to `unlinked` (newest first), when a list is given."""
     d = project_dir(project, home)
     found = [(last_stamp(p), p) for p in d.glob("*.jsonl")] if d is not None else []
     codex_loose: list[Path] = []
     found += [(last_stamp(p, types=None), p) for p in codex_sessions(project, codex, codex_loose)]
+    found += [(last_stamp(p, types=None), p) for p in copilot_sessions(project, copilot, codex_loose)]
+    found += vscode_chats(project, vscode)
     loose = [(last_stamp(p, types=None), p) for p in codex_loose]
     found += antigravity_sessions(project, antigravity)
     found += cursor_sessions(project, cursor, cursor_dir, loose)

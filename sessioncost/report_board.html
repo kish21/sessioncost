@@ -3097,8 +3097,8 @@ if (PHONE()) $('keybox').open = false;
   (function guardSection(){
     const GA = D.guard_all, GUARD = D.guard || null, n = x => (x || 0).toLocaleString();   // (the page's own GUARD is set further down)
     const howOn = `<div class="gon"><p><b>Turn the guard on</b> to have each risky step checked before it runs:</p>
-      <p>Claude Code: type <code>/livesession</code> in any chat, or run <code>sessioncost guard on</code>: every chat is guarded until <code>/livesession off</code>.
-      Codex, Cursor, Antigravity, Copilot: <code>sessioncost guard setup codex</code> (or <code>cursor</code>, <code>antigravity</code>, <code>copilot</code>), then <code>sessioncost guard on</code>.</p></div>`;
+      <p>Type <code>/livesession</code> in any agent's chat, or run <code>sessioncost guard on</code>: every chat is guarded until <code>/livesession off</code>,
+      in Claude Code, Codex, Cursor, Antigravity and Copilot alike (your install set the guard up in each). Installed an agent later? Run <code>sessioncost setup</code> again.</p></div>`;
     if (!GA){
       $('guardHead').textContent = 'the guard has not been used yet';
       $('guardBody').innerHTML = `<p>The live guard has not been used on this computer yet, so there is nothing to report.</p>${howOn}`;
@@ -3323,7 +3323,7 @@ function drawRules(){
       <pre><code>${esc(ownText)}</code></pre><p class="muted">${own.note} <a href="${own.docs}" target="_blank" rel="noopener">${esc(own.name)}'s docs</a></p>`
     : `<p class="muted">${esc(own.name)}'s own settings have no rule for these steps (<a href="${own.docs}" target="_blank" rel="noopener">its docs</a>).</p>`;
   const guardLine = claude ? '' : GUARD_SETUP[M.agent]
-    ? `<p class="muted"><b>To have every step checked:</b> run <code>sessioncost guard setup ${GUARD_SETUP[M.agent]}</code>, then <code>sessioncost guard on</code>: the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
+    ? `<p class="muted"><b>To have every step checked:</b> type <code>/livesession</code> in any agent (or run <code>sessioncost guard on</code>): the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
     : `<p class="muted">The SessionCost guard does not run in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent || 'this agent')} yet: these rules are all there is.</p>`;
   box.innerHTML = ownBlock + `<p><b>Rules that would have stopped these</b> <span class="muted">· ${claude ? 'paste into .claude/settings.json (Claude Code enforces them)' : 'paste into your rules file (the agent reads them; nothing enforces them)'}</span></p>
     ${claude ? `<pre><code>${esc(json)}</code></pre><p class="muted">ask = Claude Code asks you first · deny = never. A deny wins over any allow.</p>` : ''}

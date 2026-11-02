@@ -199,7 +199,17 @@ SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it
     ("Codex", ".codex", "skills", "codex"),
     ("Antigravity", ".gemini", "config/skills", "antigravity"),
     ("Cursor", ".cursor", "skills", "cursor"),
+    ("Copilot", ".copilot", "skills", "copilot"),     # VS Code's Copilot Chat and Copilot CLI both read ~/.copilot/skills
 ]
+
+
+def agent_installed(folder: str, home: Path) -> bool:
+    """The agent is on this computer. Copilot Chat in VS Code makes no ~/.copilot folder of its own, so its extension
+    counts too (owner 2026-11-02: a laptop with only VS Code and Copilot got nothing from setup)."""
+    if (home / folder).is_dir():
+        return True
+    return folder == ".copilot" and any(any((home / ext / "extensions").glob("github.copilot*"))
+                                        for ext in (".vscode", ".vscode-insiders"))
 
 
 def claude_plugin_installed(home: Path) -> bool:
@@ -239,7 +249,7 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
         live = live.replace("     Add ` strict`", "     In PowerShell, put `& ` in front of the quoted path. Add ` strict`")
     done = []
     for agent, folder, sub, guard_name in SKILL_HOMES:
-        if not (home / folder).is_dir():
+        if not agent_installed(folder, home):
             continue
         skills = {"sessioncost": text}
         if guard_name:
@@ -265,7 +275,8 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
 def cmd_setup() -> int:
     done = setup()
     if not done:
-        print("No Claude Code, Codex, Antigravity or Cursor folder found for this user; nothing to set up.")
+        print("No Claude Code, Codex, Antigravity, Cursor or GitHub Copilot found for this user; nothing to set up. "
+              "Install your agent, then run setup again.")
         return 1
     for agent, dest in done:
         if not dest:
@@ -275,12 +286,9 @@ def cmd_setup() -> int:
     # The guard goes into every agent now, not at its first /livesession: the switch is one for all agents, so turning
     # it on in one guards them all (owner 2026-11-02). Off, the hooks only look at the switch and let each step pass.
     from . import guard
-    from .readers.copilot import copilot_home
     names = {a: g for a, _, _, g in SKILL_HOMES}
     # an agent's plugin brings the commands; only Claude Code's brings the guard's hooks too
     ready = [(a, names[a]) for a, dest in done if dest or a != "Claude Code"]
-    if copilot_home().is_dir():
-        ready.append(("Copilot", "copilot"))
     for agent, name in ready:
         guard.setup(name)
         print(f"{agent:12} live guard ready (off until you type /livesession in any agent)"

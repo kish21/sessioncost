@@ -213,12 +213,20 @@ def agent_installed(folder: str, home: Path) -> bool:
 
 
 def claude_plugin_installed(home: Path) -> bool:
-    """True when Claude Code has the SessionCost plugin, which brings its own /sessioncost."""
+    """True when Claude Code has the SessionCost plugin for every folder, which brings its own /sessioncost. A plugin
+    installed for one folder only (scope "local" or "project": owner 2026-11-02, from Manage Plugins) or switched off
+    in ~/.claude/settings.json leaves every other chat without it."""
     try:
         plugins = json.loads((home / ".claude" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return any(k.startswith("sessioncost@") for k in (plugins.get("plugins") or {}))
+    try:
+        enabled = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8")).get("enabledPlugins") or {}
+    except (OSError, ValueError, AttributeError):
+        enabled = {}
+    return any(k.startswith("sessioncost@") and enabled.get(k) is not False
+               and any((e or {}).get("scope", "user") == "user" for e in (v if isinstance(v, list) else [v]))
+               for k, v in (plugins.get("plugins") or {}).items())
 
 
 def plugin_installed(folder: str, home: Path) -> bool:

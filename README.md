@@ -28,7 +28,8 @@ It ends with `/sessioncost added` for each agent it found. Then restart your age
 
 Prefer PyPI (`python -m pip install -U sessioncost`, then `python -m sessioncost setup`), npm (`npx sessioncost`,
 then `npx sessioncost setup`) or your agent's plugin list
-(Claude Code: `/plugin marketplace add kish21/sessioncost`)? Every way, step by step:
+(Claude Code: `claude plugin install sessioncost --marketplace kish21/sessioncost --scope user`; `--scope user` =
+every folder, not one)? Every way, step by step:
 **[Install SessionCost](https://kish21.github.io/sessioncost-help/start/install/)**.
 
 ## Use it

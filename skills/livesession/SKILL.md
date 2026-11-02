@@ -44,9 +44,12 @@ guard's hook reads that message before you do and has already switched it. A lin
      no harm. If it says "added", tell the user to restart the agent once: the guard checks steps from then on. In
      Codex, also tell them to type `/hooks` once and trust SessionCost's hooks.
 
-3. "/livesession off": you cannot turn the guard off (it blocks that, on purpose: only the user changes it). Tell the
-   user to type this themselves in a terminal: `python "<plugin folder>/guard.py" off` (with the real folder). In
-   Claude Code they can type it in the chat with `!` in front.
+3. "/livesession off", or any other way of asking to turn the guard off: you cannot turn it off (it blocks that, on
+   purpose: only the user changes it). Tell the user to send `/livesession off` as their own message, on its own:
+   the guard's hook switches it before you see it. Only if no SessionCost line follows (the hooks are not running),
+   tell them to type this in a terminal (PowerShell, Terminal), not in the chat: `python "<plugin folder>/guard.py"
+   off` (with the real folder). Never tell them to type `!` in the chat: in VS Code it reaches you as a message and
+   runs nothing (owner 2026-11-02).
 
 ## While the guard is on
 

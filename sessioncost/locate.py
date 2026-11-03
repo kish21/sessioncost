@@ -101,7 +101,7 @@ def last_stamp(path: Path, tail_bytes: int = 262144, types=("user", "assistant")
 def _same_dir(a: str | Path, b: str | Path) -> bool:
     try:
         return os.path.normcase(str(Path(a).expanduser().resolve())) ==             os.path.normcase(str(Path(b).expanduser().resolve()))
-    except OSError:
+    except (OSError, ValueError):                       # ValueError: a "\0" in the path (macOS/Linux)
         return False
 
 
@@ -189,7 +189,8 @@ def vscode_chats(project: str | Path | None = None, homes: list[Path] | None = N
     for home in homes if homes is not None else vscode_homes():
         for d in sorted((home / "workspaceStorage").glob("*/chatSessions")) if (home / "workspaceStorage").is_dir() else []:
             files = sorted(d.glob("*.json")) + sorted(d.glob("*.jsonl"))
-            if not files or not _same_dir(folder_of(files[0]) or "\0", want):
+            folder = folder_of(files[0]) if files else ""
+            if not folder or not _same_dir(folder, want):     # no folder: a multi-folder or empty window
                 continue
             for f in files:
                 try:

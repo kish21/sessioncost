@@ -79,7 +79,7 @@ def summary(a: dict, path: Path | None) -> str:
         exact = "tokens are exact" if mo.get("tokens_exact", True) else "tokens estimated from the text size"
         lines.append(f"Cost: about {money(t['usd'])} ({how}; {exact})")
     if path:
-        lines.append(f"Report: {path}")
+        lines.append(f"Report: {Path(path).as_posix()}")     # a chat's markdown eats "\." in C:\Users\me\.sessioncost
     return "\n".join(lines)
 
 
@@ -425,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
         return 0
-    print(f"Report: {out}" if args.brief else summary(a, out))
+    print(f"Report: {Path(out).as_posix()}" if args.brief else summary(a, out))
     if args.sarif:
         print(f"SARIF: {args.sarif}")
     old = old_reports(out) if out else []

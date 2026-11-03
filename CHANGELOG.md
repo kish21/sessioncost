@@ -1,6 +1,6 @@
 # What's new
 
-## Unreleased
+## 1.0.4
 
 - New features and fixes.
 

@@ -347,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] == ["guard"]:      # `sessioncost guard on|off|start|auto on|...`: the live guard's own commands
+    if argv[:1] == ["guard"]:      # `sessioncost guard on|off|auto on|...` (start = on, kept for old notes): the live guard's own commands
         from . import guard
         return guard.main(argv[1:])
     if argv[:1] == ["auto"] and argv[1:2] in (["on"], ["off"]):   # each chat's report after each answer (on by default)
@@ -359,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local: reads log files on this computer and sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|start|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'list', 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'setup' (add /sessioncost to your agents),'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--brief", action="store_true", help="print only the report's path, not the summary (for agents: "
@@ -373,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cursor-usage", metavar="CSV",
                     help="Cursor only: your usage export from the Cursor dashboard, for exact token counts")
     ap.add_argument("--limit", type=int, default=10, help="list: how many sessions (default 10)")
+    ap.add_argument("--port", type=int, default=0, help="serve: the port on this computer (default: a free one)")
     ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
     ap.add_argument("--all", action="store_true", help="version: list every copy on this computer, not only this one")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
@@ -390,30 +391,12 @@ def main(argv: list[str] | None = None) -> int:
         return update.show_versions(every=args.all)
     if args.target == "list":
         return cmd_list(args)
-    if args.target == "last":
-        loose: list = []
-        found = locate.sessions(args.project, unlinked=loose)
-        if not found and loose:
-            print(f"sessioncost: no session is recorded for {args.project or Path.cwd()}. Showing the newest session "
-                  "whose folder the agent did not record; it may belong to another project. "
-                  "`sessioncost list` shows the others.")
-            found = loose
-        if not found:
-            from .readers.copilot import copilot_home
-            print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()} "
-                  f"(looked in {locate.claude_home() / 'projects'}, {locate.codex_home() / 'sessions'} and "
-                  f"{locate.codex_home() / 'archived_sessions'}, {copilot_home() / 'session-state'}, "
-                  f"{', '.join(str(h / 'conversations') for h in antigravity_homes())}, and Cursor's chats)")
-            return 1
-        path = found[0][1]
-    else:
-        path = Path(args.target).expanduser()
-        if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
-            loose = []
-            hits = [p for _, p in locate.sessions(args.project, unlinked=loose) + loose
-                    if locate.session_id(p).startswith(args.target)]
-            if len(hits) == 1:
-                path = hits[0]
+    if args.target == "serve":
+        from . import serve
+        return serve.run(args)
+    path = find_session(args)
+    if path is None:
+        return 1
     try:
         a, out = build(path, args)
     except (readers.NotSupported, ValueError) as e:
@@ -434,3 +417,33 @@ def main(argv: list[str] | None = None) -> int:
     if out and not args.no_open:
         webbrowser.open(out.resolve().as_uri())
     return 0
+
+
+def find_session(args, chat: str | None = None) -> Path | None:
+    """The chat's log file: 'last' = the newest session of the project, else a path or a session id's first
+    characters. None (and says why) when there is none."""
+    target = chat or args.target
+    if target == "last":
+        loose: list = []
+        found = locate.sessions(args.project, unlinked=loose)
+        if not found and loose:
+            print(f"sessioncost: no session is recorded for {args.project or Path.cwd()}. Showing the newest session "
+                  "whose folder the agent did not record; it may belong to another project. "
+                  "`sessioncost list` shows the others.")
+            found = loose
+        if not found:
+            from .readers.copilot import copilot_home
+            print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()} "
+                  f"(looked in {locate.claude_home() / 'projects'}, {locate.codex_home() / 'sessions'} and "
+                  f"{locate.codex_home() / 'archived_sessions'}, {copilot_home() / 'session-state'}, "
+                  f"{', '.join(str(h / 'conversations') for h in antigravity_homes())}, and Cursor's chats)")
+            return None
+        return found[0][1]
+    path = Path(target).expanduser()
+    if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
+        loose = []
+        hits = [p for _, p in locate.sessions(args.project, unlinked=loose) + loose
+                if locate.session_id(p).startswith(target)]
+        if len(hits) == 1:
+            path = hits[0]
+    return path

@@ -231,6 +231,18 @@ _TO_PLUGINS = re.compile(r">>?\s*['\"]?[^\s'\"]*[\\/]\.claude[\\/]+plugins[\\/]|
                          r"\b(?:cp|mv|tee|Copy-Item|Move-Item|Set-Content|Add-Content|Out-File|sed\s+-i)\b.*[\\/]\.claude[\\/]+plugins[\\/][^\s]*\s*$", re.I)
 _TAMPER_CMD = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove)\b|\bSESSIONCOST_GUARD_DIR\b|\bdisableAllHooks\b|"
                          r"^\s*hooks\s*=\s*false\b", re.I | re.M)      # (the last: Codex's [features] switch)
+# Written into a file: the switch-off words anywhere, and SESSIONCOST_GUARD_DIR only where the hooks read their
+# environment from (settings, shell start-up and .env files) or made permanent (setx). A test or script that hands
+# its own child process another guard folder cannot reach the real guard.
+_TAMPER_WRITE = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove)\b|\bdisableAllHooks\b|^\s*hooks\s*=\s*false\b|"
+                           r"\b(?:setx|SetEnvironmentVariable)\b[^\n]*\bSESSIONCOST_GUARD_DIR\b", re.I | re.M)
+_ENV_FILE = re.compile(r"(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|\.(?:bash|zsh)rc|\.(?:bash_)?profile|\.zprofile|\.zshenv|"
+                       r"[^\\/]*profile\.ps1|settings(?:\.local)?\.json|hooks\.json|config\.toml|environment)$", re.I)
+
+
+def tamper_write(target: str, written: str) -> bool:
+    return bool(_TAMPER_WRITE.search(written) or
+                (_ENV_FILE.search(target or "") and re.search(r"\bSESSIONCOST_GUARD_DIR\b", written)))
 _READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|grep|rg|findstr|Select-String|ls|dir|"
                         r"cd|pushd|Set-Location|sl|jq|"
                         r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b[^>|;&]*$", re.I)
@@ -238,11 +250,13 @@ _SINKS = {"guard_tamper", "wipe", "privilege", "guardrails", "secrets", "skips_c
           "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off"}
 _ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export\s+-p)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|Get-Item|gi|dir|ls)\s+env:(?![A-Za-z_])|"
                        r"\[Environment\]::GetEnvironmentVariables|/proc/[\w*]+/environ", re.I | re.M)
-_PIPE_SHELL = re.compile(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n;]*\|\s*(?:sudo\s+)?"
-                         r"(?:sh|bash|zsh|dash|python3?|node|iex|Invoke-Expression|pwsh|powershell)\b|"
+# python -c / -m and node -e / -p take their code from the line and read the download only as data (a JSON check)
+_RUNS_STDIN = (r"(?:sh|bash|zsh|dash|iex|Invoke-Expression|pwsh|powershell|"
+               r"(?:python3?|node)(?![\w.-])(?!(?:\s+-[A-Za-z]+)*?\s+-[cmep]\b))\b")
+_PIPE_SHELL = re.compile(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n;]*\|\s*(?:sudo\s+)?" + _RUNS_STDIN + "|"
                          r"\b(?:iex|Invoke-Expression)\b[^\n;]*\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b|"
                          r"\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)\b|"
-                         r"https?://[^\n;|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|python3?|node|iex|Invoke-Expression|pwsh|powershell)\b",
+                         r"https?://[^\n;|]*\|\s*(?:sudo\s+)?" + _RUNS_STDIN,
                          re.I)                         # (the last: any web address piped into a shell, whatever fetched it)
 _ENCODED = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*\s-e(?:c|n\w*)?\s+[A-Za-z0-9+/=]{16,}|"
                       r"\bbase64\s+(?:-d|--decode)\b[^\n;]*\|\s*(?:sh|bash|zsh|python3?|node)\b|\bFromBase64String\b[^\n]*\b(?:iex|Invoke-Expression)\b", re.I)

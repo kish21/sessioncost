@@ -394,7 +394,7 @@ def _git(cwd: str, *args: str) -> list[str]:
     import subprocess
     try:
         r = subprocess.run(["git", "-C", cwd or ".", *args], capture_output=True, text=True, timeout=3,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL, creationflags=0x08000000 if os.name == "nt" else 0)
     except (OSError, subprocess.SubprocessError):
         return []
     return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()] if r.returncode == 0 else []
@@ -515,9 +515,10 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     rules = risks.read_allow(cwd)
     marks = [m for m in risks.watch_marks(a, cwd) if m == "guard_tamper" or not risks._allowed(a, m, rules, cwd)]
     doc = re.search(r"\.(?:md|mdx|markdown|txt|rst|adoc|html?)\s*$", a.target or "", re.I)
-    if "guard_tamper" not in marks and not doc and risks._TAMPER_CMD.search(getattr(a, "written", "") or ""):
-        marks.append("guard_tamper")          # writing disableAllHooks or SESSIONCOST_GUARD_DIR into a file (a document
-                                              # that only mentions them runs nothing: help pages, notes, TESTING.md)
+    if "guard_tamper" not in marks and not doc and risks.tamper_write(a.target or "", getattr(a, "written", "") or ""):
+        marks.append("guard_tamper")          # writing disableAllHooks or guard off into a file, or the guard folder
+                                              # where the hooks read it (a document that only mentions them runs
+                                              # nothing: help pages, notes, TESTING.md)
     if "guard_tamper" in marks:               # the allow file cannot excuse changing the guard: it is what it protects
         return "deny", marks, ("SessionCost guard blocked this step: it would change or switch off the guard or the rules "
                                "the user set. Only the user changes those. Tell them what you wanted and why.")
@@ -1067,7 +1068,8 @@ def mcp_tools(conf: dict, cwd: str, wait: float | None = None) -> dict | None:
     finally:
         try:
             if win:
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=5)
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, timeout=5,
+                               creationflags=0x08000000)
             else:
                 os.killpg(p.pid, 9)
         except Exception:
@@ -1331,7 +1333,7 @@ def on_stop(inp: dict) -> dict | None:
     if st.get("asked_turn") or st.get("blocked_turn"):
         b, q = st.get("blocked_turn", 0), st.get("asked_turn", 0)
         parts = ([f"{b} blocked"] if b else []) + ([f"{q} asked you"] if q else [])
-        msgs.append(f"SessionCost guard, this turn: {', '.join(parts)}. /sessioncost shows them (the report's Sky page).")
+        msgs.append(f"SessionCost guard, this turn: {', '.join(parts)}. /sessioncost shows them (the report's Trace & risk map).")
     built = st.get("report_at")
     line = _auto_report(inp, st)
     if st.get("report_at") != built:
@@ -1689,7 +1691,13 @@ def _launch(event: str, agent: str) -> str:
     g = root / "guard.py"
     if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
         run = f'"{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
-        return f'"{Path(sys.executable).as_posix()}" {run} hook {event} claude'
+        exe = Path(sys.executable)
+        # python.exe flashes a console window on Windows at every hook; pythonw.exe opens none and still reads and
+        # answers through the pipes (Antigravity gets no answer from it, so only Claude Code uses it)
+        quiet = exe.with_name("pythonw.exe")
+        if os.name == "nt" and exe.name.lower() == "python.exe" and quiet.is_file():
+            exe = quiet
+        return f'"{exe.as_posix()}" {run} hook {event} claude'
     run = _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
     return f'{_path_arg(sys.executable)} {run} hook {event} {agent}'
 

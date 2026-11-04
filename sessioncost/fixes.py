@@ -1,6 +1,7 @@
 """Fixes: each one names what to change and a saving measured from this session's own calls.
 
-The open tool ships three simple detectors (BasicFixes). Every saving is the cost of the tokens or calls involved
+The open tool ships nine detectors (BasicFixes: unused tools, unused built-ins, repeated reads, repeated writes, error
+loops, helper polling, test reruns, confirm turns, long chats). Every saving is the cost of the tokens or calls involved
 in THIS session, priced like the rest of the report - nothing is projected or guessed.
 
 PLUG-IN POINT: a separate fix engine can add detectors without changing this repo. Set the environment variable

@@ -1103,7 +1103,7 @@ table.t tr.sum td{border-bottom:0;border-top:1.5px solid var(--ink-2);font-weigh
 <!-- the sidebar: what this session is, its key numbers, and the sections (it stays while you scroll) -->
 <nav class="side" id="side" aria-label="Report sections">
   <button type="button" class="navclose" id="navClose" aria-label="Close the sections">✕</button>
-  <div class="brand"><svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="11" width="5" height="10" rx="1" fill="var(--keep-2)"></rect><rect x="8.5" y="6" width="5" height="15" rx="1" fill="var(--keep)"></rect><rect x="16" y="1" width="5" height="20" rx="1" fill="var(--new)"></rect></svg><b>SessionCost</b><button type="button" class="pin" id="sidePin" aria-pressed="false" aria-label="Keep the sidebar open"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 1.8h4M7 1.8v4.4L4.4 9h7.2L9 6.2V1.8M8 9v5.2"/></svg></button></div>
+  <div class="brand"><svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="11" width="5" height="10" rx="1" fill="var(--keep-2)"></rect><rect x="8.5" y="6" width="5" height="15" rx="1" fill="var(--keep)"></rect><rect x="16" y="1" width="5" height="20" rx="1" fill="var(--new)"></rect></svg><b>SessionCost</b><span id="sideVer" class="muted" style="font-size:11.5px;font-weight:400"></span><button type="button" class="pin" id="sidePin" aria-pressed="false" aria-label="Keep the sidebar open"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M6 1.8h4M7 1.8v4.4L4.4 9h7.2L9 6.2V1.8M8 9v5.2"/></svg></button></div>
   <div class="sidemeta" id="sideMeta"></div>
   <ol class="sidenav" id="sideNav"></ol>
   <div class="sidekpi" id="sideKpi"></div>
@@ -1218,6 +1218,7 @@ table.t tr.sum td{border-bottom:0;border-top:1.5px solid var(--ink-2);font-weigh
     <div class="row spread"><h2 id="fixH">How to save</h2><span class="muted" style="font-size:13px" id="fixHead"></span></div>
     <div class="rulesbox" id="rulesbox"></div>
     <div class="fixlist" id="fixlist"></div>
+    <div class="rulesbox" id="fixVerify" hidden></div>
   </section>
 
   <!-- E: safety rules: the fix for the risky steps the Trace & risk map found (only when it found some) -->
@@ -1305,6 +1306,9 @@ const usd = x => { x = +x || 0; if (x === 0) return '$0'; if (x >= 100) return '
 const mins = m => { m = +m || 0; const r = Math.round(m); return r >= 60 ? Math.floor(r/60) + 'h ' + String(r % 60).padStart(2,'0') + 'm' : (m >= 10 ? Math.round(m) : +m.toFixed(1)) + ' min'; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+/* fixes applied with `sessioncost fix` in this project: what each saved since, from your own chats (or that it came back) */
+(() => { const v = D.fix_verify || [], el = $('fixVerify'); if (!el || !v.length) return; el.hidden = false;
+  el.innerHTML = `<h3>Fixed earlier with sessioncost fix (not counted above)</h3><ul class="rulelist">${v.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`; })();
 const plural = (n, w, ws) => `${n} ${n === 1 ? w : (ws || w + 's')}`;
 const smooth = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
 const sum = (xs, f) => xs.reduce((a, x) => a + (f ? f(x) : x), 0);
@@ -1329,8 +1333,8 @@ const part = (c, pre) => (c.sent.parts || []).find(x => x.what.startsWith(pre)) 
 const freshOf = c => Math.max(0, c.context - c.usage.cache_read);
 const inUsd = c => c.cost_by_class.input + c.cost_by_class.cache_write_5m + c.cost_by_class.cache_write_1h + c.cost_by_class.cache_read;
 /* fixes: Step 0 fixes apply to every call (no turns); the others name their turns and calls */
-const FIXES = D.fixes.map(f => ({...f, step0: !f.turns.length && !Object.keys(f.per_turn || {}).length,
-  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'unused-builtin': 'unused built-ins', 'repeated-reads': 're-read files', 'repeated-writes': 'rewritten files', 'error-loop': 'failed steps', 'helper-polling': 'checking on helpers', 'test-rerun': 'tests run again','confirm-turn': 'confirm stops', 'long-chat': 'new chat'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
+const FIXES = D.fixes.map(f => ({...f, step0: f.id !== 'model-choice' && !f.turns.length && !Object.keys(f.per_turn || {}).length,
+  basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'unused-builtin': 'unused built-ins', 'repeated-reads': 're-read files', 'repeated-writes': 'rewritten files', 'error-loop': 'failed steps', 'helper-polling': 'checking on helpers', 'test-rerun': 'tests run again','confirm-turn': 'confirm stops', 'long-chat': 'new chat', 'cache-break': 'expired cache', 'stale-context': 'old results', 'big-results': 'big results', 'startup-bloat': 'big Step 0', 'images': 'images', 'long-output': 'long replies', 'helper-rereads': 'helper re-reads', 'model-choice': 'cheaper model'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
   .sort((a, b) => b.saving_usd - a.saving_usd || b.saving_tokens - a.saving_tokens);     // money first: a cut of cheap cache re-reads must not look like the biggest win
 const FIX = Object.fromEntries(FIXES.map(f => [f.id, f]));
 const CALLFIX = {}; FIXES.forEach(f => (f.calls || []).forEach(i => { if (!f.step0) CALLFIX[i] = CALLFIX[i] || f.id; }));
@@ -1411,7 +1415,7 @@ const CURSOR = M.agent === 'cursor';
 const PLAN = ({'claude-code': 'Claude Pro or Max', 'codex': 'a ChatGPT plan', 'cursor': 'a Cursor plan', 'antigravity': 'a Google AI plan',
   'copilot': 'a GitHub Copilot plan', 'copilot-vscode': 'a GitHub Copilot plan'})[M.agent] || 'a monthly plan';
 const RULES_AT = ({'claude-code': 'CLAUDE.md in this project', 'codex': 'AGENTS.md in this project',
-  'cursor': 'AGENTS.md in this project', 'antigravity': 'GEMINI.md in this project',
+  'cursor': '.cursor/rules/sessioncost.mdc in this project', 'antigravity': 'GEMINI.md in this project',
   'copilot': '.github/copilot-instructions.md in this project',
   'copilot-vscode': '.github/copilot-instructions.md in this project'})[M.agent] || "this project's instruction file";
 const askFor = rule => `Please add this rule to ${RULES_AT} (create the file if it does not exist), then tell me it is done:\n\n${rule}`;
@@ -1428,6 +1432,10 @@ const RULES_DEFAULT = [     // the same list as rules.py, for a report made befo
   ['Make all the changes to one file in a single edit.', ['edits-spread']],
   ['Keep command output short: use head/tail or a quiet flag, or write long output to a file and read only the lines you need.', ['big-results']],
   ['Do not re-run a command when no file has changed since the last run. Read the first result.', ['re-run', 'test-rerun']],
+  ['Write long command or log output to a file and read only the lines you need, so the full output does not stay in the chat.', ['stale-context']],
+  ['When sharing a screenshot or image, crop it to the part that matters or describe it in words instead.', ['images']],
+  ['Keep replies concise: give the short answer first and detail only when asked.', ['long-output']],
+  ['When starting a helper agent, pass the relevant file excerpts or facts in its task prompt so it does not re-read files you already read.', ['helper-rereads']],
 ];
 const askForAll = rules => `Please add these rules to ${RULES_AT} (create the file if it does not exist; keep anything already in it), then tell me it is done:\n\n` + rules.map(r => '- ' + r).join('\n');
 /* Which rules to copy: only the ones this chat needed (a fix fired), never one already added, unless it was needed
@@ -1497,11 +1505,17 @@ $('top3H').textContent = FIXES.length ? `The ${FIXES.length >= 3 ? 3 : FIXES.len
 $('allFixes').textContent = FIXES.length > 3 ? `All ${FIXES.length} fixes ↓` : 'How to fix ↓';
 const amtLine = f => !f.saving_tokens ? `${usd(f.saving_usd)}<small>saved, no tokens cut</small>` : f.step0 ? `−${K(CALLS ? f.saving_tokens / CALLS : 0)}<small>per call · saves ${usd(f.saving_usd)}<br><span class="sep"> · </span>${K(f.saving_tokens)} in all, mostly cache</small>`
   : `−${K(f.saving_tokens)}<small>${pct(f.saving_tokens, SENT)} of the session<br><span class="sep"> · </span>saves ${usd(f.saving_usd)}</small>`;
+/* a fix `sessioncost fix` already applied in this project: say so on its card, so it does not read as a to-do */
+const fixedMark = f => { const at = (D.fix_done || {})[f.id]; if (!at) return '';
+  const day = new Date(at).toLocaleDateString(undefined, {day: 'numeric', month: 'short'});
+  return (Date.parse(M.started || '') || 0) < Date.parse(at)
+    ? `<span class="w" style="color:var(--keep)">✓ Fixed with sessioncost fix on ${esc(day)}; this chat started before that.</span>`
+    : `<span class="w" style="color:var(--bad, #b42318)">⚠ Fixed with sessioncost fix on ${esc(day)}, but it happened again in this chat.</span>`; };
 /* risks first (not a cost): e.g. the agent tried to switch off the commit checks */
 $('top3').insertAdjacentHTML('beforebegin', (D.warnings || []).map(w => `<p class="warnrow" role="alert"><b>⚠ ${esc(w.title)}</b> ${!w.times.length ? esc(w.why) : w.times.length === 1 ? 'at ' + esc(w.times[0]) : `${w.times.length} times (${w.times.map(esc).join(', ')})`}${w.refused ? `; ${w.refused === w.times.length ? (w.refused === 1 ? 'it was' : 'all were') : w.refused + ' were'} refused` : ''}. ${esc(w.note || 'Not a cost, but the checks are there to catch mistakes.')} A rule for ${esc(PASTE)}: <code>${esc(w.how)}</code></p>`).join(''));
 $('top3').innerHTML = (FIXES.length ? FIXES.slice(0, 3).map(f => `<article class="fixcard">
     <span class="amt">${amtLine(f)}</span>
-    <span class="t">${esc(f.title)}</span>
+    <span class="t">${esc(f.title)}</span>${fixedMark(f)}
     <span class="w">Where: <b>${fixWhere(f)}</b>. ${f.step0 ? 'Cheap cache re-reads, but on every call.' : ''}</span>
     <span class="acts">${f.step0 ? '<button type="button" class="link" data-s0="1">Show me Step 0</button>' : `<button type="button" class="link" data-show="${esc(f.id)}">Show me on the board</button>`}<button type="button" class="link" data-how="${esc(f.id)}">How to fix it ↓</button></span>
   </article>`).join('') : `<article class="fixcard"><span class="amt" style="color:var(--keep)">✓</span><span class="t">None of the basic checks fired</span><span class="w">No unused tools sent with every call, ${M.agent === 'cursor' ? 'no stop that only waited for a yes, and no part of a file read again with the same length and no edit in between (Cursor does not keep what a read returned, so that is the closest check).' : 'no unchanged file read twice, no stop that only waited for a yes.'}</span></article>`)
@@ -2446,7 +2460,9 @@ $('fixlist').innerHTML = FIXES.length ? FIXES.map((f, i) => {
     <p class="why">${esc(f.why)}</p>
     <div class="where"><span class="lbl">Where</span><div class="turnchips">${chips}</div></div>
     <details class="fxmore"><summary>Details${f.items && f.items.length ? ` (${f.items.length})` : ''}</summary><p class="paidline">${paidAs(f)}</p>${f.items && f.items.length ? `<ul>${f.items.map(x => `<li>${md(x)}</li>`).join('')}</ul>` : ''}</details>
-    ${f.how ? (f.paste ? `<div class="copybox rule">
+    ${f.sc_can && f.sc_can.length ? `<div class="copybox rule"><span class="lbl"><b>SessionCost can switch ${f.sc_can.length === 1 ? 'this' : 'these'} off for you:</b> ${esc(f.sc_can.join(', '))}. Type <code>/sessioncost fix</code> in the chat and answer yes; <code>/sessioncost fix --undo</code> puts it back.${f.how ? ' The rest you turn off yourself:' : ''}</span>
+          ${f.how ? `<ol class="steps2 do">${f.how.split('\n').filter(Boolean).map(x => `<li>${esc(x.replace(/^\d+\.\s*/, ''))}</li>`).join('')}</ol>` : ''}</div>`
+    : f.how ? (f.paste ? `<div class="copybox rule">
         <span class="lbl">A rule for ${esc(PASTE)} (how it works: see the rules box above)</span>
         <code>${esc(f.how)}</code>
         <div class="row"><button type="button" class="btn primary" data-copy="${esc(f.id)}" data-as="ask">Copy as a request</button><button type="button" class="link" data-copy="${esc(f.id)}" data-as="rule">Copy the rule only</button><span class="muted" style="font-size:12px">(to add it to ${esc(PASTE)} yourself)</span></div></div>`
@@ -2462,6 +2478,9 @@ $('fixlist').innerHTML = FIXES.length ? FIXES.map((f, i) => {
 const DONE_KEY = 'sessioncost-done';
 let DONE = {};
 try { DONE = JSON.parse(localStorage.getItem(DONE_KEY) || '{}') || {}; } catch (e) {}
+/* fixes `sessioncost fix` applied in this project count as done too (not saved in this browser: they come with the report) */
+const FIX_DONE = D.fix_done || {};
+Object.entries(FIX_DONE).forEach(([id, at]) => { if (!DONE[id] || Date.parse(DONE[id].at) > Date.parse(at)) DONE[id] = {at, by: 'fix'}; });
 const saveDone = () => { try { localStorage.setItem(DONE_KEY, JSON.stringify(DONE)); return true; } catch (e) { return false; } };
 const START = Date.parse(M.started || '') || 0;
 const doneDay = iso => new Date(iso).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'});
@@ -2530,7 +2549,7 @@ function paintDone(f){
     $('rulesbox').innerHTML = `<div class="row spread"><h3>Rules for your agent</h3><span class="src basic">${plural(needed.length, 'rule')} would have helped</span></div>
     <p class="muted" style="font-size:13px;max-width:none;margin:0">Rules go in ${esc(PASTE)}: ${esc(M.agent_label)} reads it at the start of every chat.</p>
     ${needed.length ? `<ul class="rulelist">${needed.map(li).join('')}</ul>` : ''}
-    ${n ? `<div class="rulesact"><button type="button" class="btn${isAdded(toCopy) ? '' : ' primary'}" data-copy-all="ask" data-set="needed">📋 Copy ${n} ${R1}</button>${tick('needed', toCopy)}<button type="button" class="link" data-copy-all="rules" data-set="needed" style="font-size:12.5px">or copy the plain text</button></div>
+    ${n ? `<div class="rulesact"><button type="button" class="btn" data-copy-cmd="sessioncost fix" title="Copy terminal command to apply all fixes with backup and undo">⚡ Copy "sessioncost fix"</button><button type="button" class="btn${isAdded(toCopy) ? '' : ' primary'}" data-copy-all="ask" data-set="needed">📋 Copy ${n} ${R1}</button>${tick('needed', toCopy)}<button type="button" class="link" data-copy-all="rules" data-set="needed" style="font-size:12.5px">or copy the plain text</button></div>
     <p class="muted" style="font-size:12.5px;max-width:none;margin:0">Paste into your chat with ${esc(M.agent_label)}: it adds ${them} to ${esc(PASTE)} for you. Then press <b>Mark as added</b>.</p>`
       : `<p style="font-size:13.5px;max-width:none">${needed.length ? 'The rules this chat needed are already in place; nothing to add.' : 'None of these problems showed up in this chat; nothing to add.'}</p>`}
     ${others.length ? `<div class="optrules"><button type="button" class="btn" data-others="1" aria-expanded="${othersOpen}">${plural(others.length, 'optional rule')} ${othersOpen ? '▴' : '▾'}</button><span class="muted" style="font-size:12.5px">${others.every(r => r.inFile) ? 'all already in your files' : `${others.filter(r => r.inFile).length} already in your files · they prevent other waste; this chat did not need them`}</span></div>
@@ -2552,6 +2571,13 @@ function paintDone(f){
       render(); FIXES.forEach(paintDone); return;
     }
     if (e.target.closest('[data-others]')){ othersOpen = !othersOpen; render(); return; }
+    const cmdBtn = e.target.closest('[data-copy-cmd]');
+    if (cmdBtn){
+      const text = cmdBtn.dataset.copyCmd, label = cmdBtn.textContent;
+      const done = ok => { cmdBtn.textContent = ok ? '✓ Copied command' : 'Select: ' + text; setTimeout(() => cmdBtn.textContent = label, 2200); };
+      try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); } catch (_) { done(false); }
+      return;
+    }
     const b = e.target.closest('[data-copy-all]'); if (!b) return;
     const list = sets[b.dataset.set].map(r => r.text), text = b.dataset.copyAll === 'ask' ? askForAll(list) : list.map(r => '- ' + r).join('\n'), label = b.textContent;
     const done = ok => { b.textContent = ok ? 'Copied: now paste it' : 'Could not copy here'; setTimeout(() => b.textContent = label, 2200); };
@@ -3057,6 +3083,7 @@ if (PHONE()) $('keybox').open = false;
 /* ======================= the sidebar: the session, its key numbers, the sections ======================= */
 (() => {
   $('secAgents').hidden = $('stages').hidden;
+  if ($('sideVer') && M.version) $('sideVer').textContent = M.version;
   $('sideMeta').innerHTML = `<b>${esc(M.agent_label)}</b> · ${esc(M.models.join(', '))}<br>${M.project ? esc(M.project) + ' · ' : ''}${esc(M.date || '')}` +
     (M.session_id ? `<br><span id="sideSid" title="Session ${esc(M.session_id)} (open it again with: sessioncost ${esc(M.session_id.slice(0, 8))})">session <code>${esc(M.session_id.slice(0, 8))}</code></span>` : '');
   /* the four numbers, each with its small picture (the tiles row above the board shows them when there is no sidebar) */
@@ -3097,8 +3124,8 @@ if (PHONE()) $('keybox').open = false;
   (function guardSection(){
     const GA = D.guard_all, GUARD = D.guard || null, n = x => (x || 0).toLocaleString();   // (the page's own GUARD is set further down)
     const howOn = `<div class="gon"><p><b>Turn the guard on</b> to have each risky step checked before it runs:</p>
-      <p>Claude Code: type <code>/livesession</code> in any chat, or run <code>sessioncost guard on</code>: every chat is guarded until <code>/livesession off</code>.
-      Codex, Cursor, Antigravity, Copilot: <code>sessioncost guard setup codex</code> (or <code>cursor</code>, <code>antigravity</code>, <code>copilot</code>), then <code>sessioncost guard on</code>.</p></div>`;
+      <p>Type <code>/liveguard</code> in any agent's chat, or run <code>sessioncost guard on</code>: every chat is guarded until <code>/liveguard off</code>,
+      in Claude Code, Codex, Cursor, Antigravity and Copilot alike (your install set the guard up in each). Installed an agent later? Run <code>sessioncost setup</code> again.</p></div>`;
     if (!GA){
       $('guardHead').textContent = 'the guard has not been used yet';
       $('guardBody').innerHTML = `<p>The live guard has not been used on this computer yet, so there is nothing to report.</p>${howOn}`;
@@ -3107,7 +3134,7 @@ if (PHONE()) $('keybox').open = false;
     const proj = esc(GA.project), plural_ = (k, w) => `${n(k)} ${w}${k === 1 ? '' : 's'}`;
     $('guardHead').textContent = `${GA.project}: ${plural_(GA.chats, 'chat')} with the guard on`;
     const here = GUARD ? `<p><b>In this chat the guard was on:</b> ${n(GUARD.blocked)} stopped (did not run) · ${n(GUARD.asked)} asked you first (you said yes to ${n(GUARD.allowed)}) · record ${GUARD.intact ? 'untouched ✓' : `<b style="color:var(--heat)">${{incomplete: 'cut off', unreadable: 'could not be read'}[GUARD.status] || 'edited'}</b>`}. Those steps are marked in the <a class="link" href="#skyview" data-sky="1">Trace &amp; risk map</a>.</p>`
-      : `<p><b>The guard was off in this chat.</b> Type <code>/livesession</code> (Claude Code): every chat is guarded from then on, until <code>/livesession off</code>.</p>`;
+      : `<p><b>The guard was off in this chat.</b> Type <code>/liveguard</code> (Claude Code): every chat is guarded from then on, until <code>/liveguard off</code>.</p>`;
     const tile = (v, l, cls = '') => `<div class="${cls}"><b>${v}</b><span>${l}</span></div>`;
     const reasons = [...new Set([...GA.reasons.blocked, ...GA.reasons.asked].map(r => r[0]))].slice(0, 6);
     const count = (d, w) => (GA.reasons[d].find(r => r[0] === w) || [, ''])[1];
@@ -3323,7 +3350,7 @@ function drawRules(){
       <pre><code>${esc(ownText)}</code></pre><p class="muted">${own.note} <a href="${own.docs}" target="_blank" rel="noopener">${esc(own.name)}'s docs</a></p>`
     : `<p class="muted">${esc(own.name)}'s own settings have no rule for these steps (<a href="${own.docs}" target="_blank" rel="noopener">its docs</a>).</p>`;
   const guardLine = claude ? '' : GUARD_SETUP[M.agent]
-    ? `<p class="muted"><b>To have every step checked:</b> run <code>sessioncost guard setup ${GUARD_SETUP[M.agent]}</code>, then <code>sessioncost guard on</code>: the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
+    ? `<p class="muted"><b>To have every step checked:</b> type <code>/liveguard</code> in any agent (or run <code>sessioncost guard on</code>): the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
     : `<p class="muted">The SessionCost guard does not run in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent || 'this agent')} yet: these rules are all there is.</p>`;
   box.innerHTML = ownBlock + `<p><b>Rules that would have stopped these</b> <span class="muted">· ${claude ? 'paste into .claude/settings.json (Claude Code enforces them)' : 'paste into your rules file (the agent reads them; nothing enforces them)'}</span></p>
     ${claude ? `<pre><code>${esc(json)}</code></pre><p class="muted">ask = Claude Code asks you first · deny = never. A deny wins over any allow.</p>` : ''}
@@ -3371,7 +3398,7 @@ function drawSky(){
       (G.inventory ? ` · ${G.inventory.first ? `${G.inventory.items} skills, plugins and MCP servers recorded` : (G.inventory.new || []).length + (G.inventory.changed || []).length
         ? `<b>new or changed since the last chat: ${esc([...(G.inventory.new || []), ...(G.inventory.changed || [])].map(k => k.replace(':', ' ')).join(', '))}</b>` : `${G.inventory.items} skills, plugins and MCP servers unchanged`}` : '') + ' · ' +
       (G.intact ? `<span class="ok">log intact ✓</span> <span class="muted">(${G.lines} lines, each chained to the one before)</span>` : `<b style="color:var(--alarm)">${{incomplete: 'log cut off ✗: its last line was not written in full', unreadable: 'log could not be read ✗: it cannot be checked'}[G.status] || 'log changed ✗: a line was edited or removed after it was written'}</b>`) + '</span>'
-    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Type <code>/livesession</code> (Claude Code) and every chat is guarded until <code>/livesession off</code>: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
+    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Type <code>/liveguard</code> (Claude Code) and every chat is guarded until <code>/liveguard off</code>: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
   const trace = !!t && sky.view === 'trace';
   box.classList.toggle('trace', trace);
   box.classList.toggle('allchains', sky.mark === 'after_untrusted');

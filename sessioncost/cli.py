@@ -12,6 +12,10 @@ from . import __version__, locate, prices as pricemod, readers, report
 from .analyse import analyse
 from .readers import cursor
 from .readers.antigravity import antigravity_homes
+from .cli_setup import SKILL_HOMES, agent_installed, claude_plugin_installed, cmd_setup
+from .names import GUARD_CMD
+from .cli_setup import LIVE_SKILL, SKILL, plugin_installed, setup  # noqa: F401 (cli.<name> for other modules and tests)
+
 
 REPORTS = Path.home() / ".sessioncost" / "reports"
 DOWNLOADS = Path.home() / "Downloads"      # where a browser saves Cursor's usage export (tests point it elsewhere)
@@ -62,6 +66,8 @@ def summary(a: dict, path: Path | None) -> str:
                      f"saves {money(f['saving_usd'])} (measured from this session)")
     else:
         lines.append("Top fix: none of the built-in checks fired")
+    for v in a.get("fix_verify") or []:
+        lines.append(f"Fixed earlier: {v}")
     if mo.get("range") and mo.get("export_partial"):
         lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate. The usage export covered "
                      "only part of this chat; export a newer one (cursor.com/settings, Usage tab) for the turns after it")
@@ -79,7 +85,7 @@ def summary(a: dict, path: Path | None) -> str:
         exact = "tokens are exact" if mo.get("tokens_exact", True) else "tokens estimated from the text size"
         lines.append(f"Cost: about {money(t['usd'])} ({how}; {exact})")
     if path:
-        lines.append(f"Report: {path}")
+        lines.append(f"Report: {Path(path).as_posix()}")     # a chat's markdown eats "\." in C:\Users\me\.sessioncost
     return "\n".join(lines)
 
 
@@ -149,8 +155,17 @@ def build(path, args) -> tuple[dict, Path | None]:
                   "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
     a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
     a["guard_all"] = guard_totals(s.cwd)
+    from . import fixer, guard
+    project = getattr(args, "project", None) or s.cwd
+    a["fix_project"] = str(project or "")
+    a["fix_verify"] = []
+    if project:                    # fixes applied here: note this chat's waste, and say what each fix saved
+        fixer.record_seen(a, project)
+        a["fix_verify"] = fixer.verify_lines(project)
+        a["fix_done"] = {v["id"]: v["at"] for v in fixer.verify(project) if v.get("id") and v.get("at")}
+        fixer.for_report(a, project)
     out = None
-    if not args.json:
+    if not args.json and not (getattr(args, "live", False) and not guard.reports_on()):
         REPORTS.mkdir(parents=True, exist_ok=True)
         out = REPORTS / f"{s.session_id}.html"
         out.write_text(report.render(a), encoding="utf-8")
@@ -192,104 +207,6 @@ def guard_totals(cwd: str | None) -> dict | None:
             "all_chats": len(r["chats"]), "all_projects": len({c["project"] for c in r["chats"]})}
 
 
-SKILL = Path(__file__).parent / "skill" / "SKILL.md"
-LIVE_SKILL = Path(__file__).parent / "skill" / "livesession.md"
-SKILL_HOMES = [   # (agent, its folder, where its personal skills live inside it, its name for `guard setup`)
-    ("Claude Code", ".claude", "skills", "claude"),
-    ("Codex", ".codex", "skills", "codex"),
-    ("Antigravity", ".gemini", "config/skills", "antigravity"),
-    ("Cursor", ".cursor", "skills", "cursor"),
-]
-
-
-def claude_plugin_installed(home: Path) -> bool:
-    """True when Claude Code has the SessionCost plugin, which brings its own /sessioncost."""
-    try:
-        plugins = json.loads((home / ".claude" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return any(k.startswith("sessioncost@") for k in (plugins.get("plugins") or {}))
-
-
-def plugin_installed(folder: str, home: Path) -> bool:
-    """True when this agent has the SessionCost plugin, which brings its own /sessioncost (2026-10-16: Cursor and Codex
-    showed two /sessioncost, the plugin's and a copy setup had written)."""
-    if folder == ".claude":
-        return claude_plugin_installed(home)
-    plugins = home / folder / "plugins"
-    if folder == ".codex":
-        return (plugins / "cache").is_dir() and any((plugins / "cache").glob("*/sessioncost"))
-    if folder == ".cursor":
-        return plugins.is_dir() and any(p.is_dir() for p in plugins.glob("**/sessioncost"))
-    return False
-
-
-def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
-    """Add the /sessioncost and /livesession skills to every agent installed for this user (/livesession runs that
-    agent's `guard setup`). Returns (agent, the /sessioncost skill file written), with None for an agent whose
-    SessionCost plugin already provides both."""
-    home = home or Path.home()
-    # The skills name this exact Python, so they run even when no 'python' or 'sessioncost' is on the PATH.
-    exe = Path(sys.executable).as_posix()
-    run = f'"{exe}" -m sessioncost' if " " in exe else f"{exe} -m sessioncost"
-    fill = lambda f: f.read_text(encoding="utf-8").replace("{{RUN}}", run).replace("{{VERSION}}", __version__)
-    text, live = fill(SKILL), fill(LIVE_SKILL)
-    if " " in exe:
-        text = text.replace("   If that fails because", "   In PowerShell, put `& ` in front of the quoted path. If that fails because")
-        live = live.replace("     Add ` strict`", "     In PowerShell, put `& ` in front of the quoted path. Add ` strict`")
-    done = []
-    for agent, folder, sub, guard_name in SKILL_HOMES:
-        if not (home / folder).is_dir():
-            continue
-        skills = {"sessioncost": text}
-        if guard_name:
-            skills["livesession"] = live.replace("{{AGENT}}", agent).replace("{{SETUP}}", guard_name)
-        if plugin_installed(folder, home):
-            # Two /sessioncost in one agent confuse people: remove copies an earlier setup wrote, add none.
-            for name in skills:
-                dest = home / folder / sub / name / "SKILL.md"
-                if dest.is_file() and f"name: {name}" in dest.read_text(encoding="utf-8", errors="replace"):
-                    dest.unlink()
-                    if not any(dest.parent.iterdir()):
-                        dest.parent.rmdir()
-            done.append((agent, None))
-            continue
-        for name, body in skills.items():
-            dest = home / folder / sub / name / "SKILL.md"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(body, encoding="utf-8")
-        done.append((agent, home / folder / sub / "sessioncost" / "SKILL.md"))
-    return done
-
-
-def cmd_setup() -> int:
-    done = setup()
-    if not done:
-        print("No Claude Code, Codex, Antigravity or Cursor folder found for this user; nothing to set up.")
-        return 1
-    for agent, dest in done:
-        if not dest:
-            print(f"{agent:12} /sessioncost comes from the SessionCost plugin; nothing added")
-        else:
-            print(f"{agent:12} /sessioncost and /livesession added ({dest.parent.parent})")
-    # The guard goes into every agent now, not at its first /livesession: the switch is one for all agents, so turning
-    # it on in one guards them all (owner 2026-11-02). Off, the hooks only look at the switch and let each step pass.
-    from . import guard
-    from .readers.copilot import copilot_home
-    names = {a: g for a, _, _, g in SKILL_HOMES}
-    # an agent's plugin brings the commands; only Claude Code's brings the guard's hooks too
-    ready = [(a, names[a]) for a, dest in done if dest or a != "Claude Code"]
-    if copilot_home().is_dir():
-        ready.append(("Copilot", "copilot"))
-    for agent, name in ready:
-        guard.setup(name)
-        print(f"{agent:12} live guard ready (off until you type /livesession in any agent)"
-              + ("; Codex asks you once to trust new hooks: type /hooks there" if name == "codex" else ""))
-    for name in guard.refresh():            # hooks an older version wrote get this version's commands
-        if name not in {n for _, n in ready}:
-            print(f"{name.capitalize():12} live guard hooks brought up to date")
-    print("\nRestart the agent if it is open, then type /sessioncost in a chat. /livesession turns the live guard on.")
-    return 0
 
 
 def cmd_list(args) -> int:
@@ -324,6 +241,134 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_fix(argv: list[str]) -> int:
+    """`sessioncost fix`: this project's token-waste to-do list, the change for each, applied on yes (backup + undo).
+    `sessioncost fix auto on|off`: the same list after each answer, in the chat. Token waste only, never safety."""
+    from . import fixer
+    if argv[:1] == ["auto"]:
+        way = argv[1] if len(argv) > 1 else ""
+        if way not in ("", "on", "off"):
+            print("sessioncost fix auto: use `sessioncost fix auto on`, `... off`, or `sessioncost fix auto` for its state.")
+            return 2
+        print(fixer.auto_text() if not way else fixer.set_auto(way == "on"))
+        if way == "on":
+            for line in fix_hooks():
+                print(line)
+        return 0
+    if argv[:1] == ["learn"]:      # your agent, at a handover: a token waste SessionCost's checks do not know yet
+        lp = argparse.ArgumentParser(prog="sessioncost fix learn",
+                                     description="Keep a token waste your agent found, and the rule that prevents it: "
+                                                 "`sessioncost fix` offers that rule in every project from then on.")
+        lp.add_argument("what", help="what happened, one line")
+        lp.add_argument("--rule", required=True, help="one rule that prevents it, one line")
+        lp.add_argument("--project", help="the project it was found in (default: the current folder)")
+        lp.add_argument("--agent", help="the agent that found it (default: the agent of this project's newest chat)")
+        la = lp.parse_args(argv[1:])
+        project = la.project or os.getcwd()
+        code, msg = fixer.learn(la.what, la.rule, project, agent=la.agent or newest_agent(project))
+        print(msg)
+        return code
+    if argv[:1] == ["long-chat"]:  # when a chat counts as long: the handover offer
+        if len(argv) < 2:
+            print(f"SessionCost fix: a chat over {fixer._tok(fixer.long_chat())} tokens gets the handover offer. "
+                  "`sessioncost fix long-chat 150k` changes it.")
+            return 0
+        code, msg = fixer.set_long_chat(argv[1])
+        print(msg)
+        return code
+    if argv[:1] == ["budget"]:     # per-chat dollar or token ceiling for the handover offer
+        if len(argv) < 2:
+            print(fixer.budget_text())
+            return 0
+        code, msg = fixer.set_budget(argv[1])
+        print(msg)
+        return code
+    ap = argparse.ArgumentParser(
+        prog="sessioncost fix",
+        description="This project's token waste, newest chat first: what to change, the change itself, applied on "
+                    "your yes with a backup (`--undo` puts it back). `sessioncost fix auto on|off`: the same list "
+                    f"after each answer, in the chat. Token waste only: the live guard (/{GUARD_CMD}) is for safety.")
+    ap.add_argument("target", nargs="?", default="last",
+                    help="'last' (the newest chat of this project, the default), a session id, or a log file")
+    ap.add_argument("--project", help="project folder (default: the current folder)")
+    ap.add_argument("--preview", "--dry-run", dest="preview", action="store_true", help="show the list and changes only")
+    ap.add_argument("-y", "--yes", dest="yes", action="store_true",
+                    help="apply without asking (for your agent, after you said yes in the chat)")
+    ap.add_argument("--only", help="apply only these items (their ids, comma-separated, as the list shows them)")
+    ap.add_argument("--undo", action="store_true", help="put back this project's newest fix")
+    ap.add_argument("--handover", action="store_true", help="print where the handover of this project's last chat is")
+    ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
+    args = ap.parse_args(argv)
+    project = Path(args.project or os.getcwd()).resolve()
+    if args.handover:
+        h = fixer.handover_file(project)
+        print(h.as_posix() if h.is_file() else f"No handover for {project} yet: when a chat grows long, SessionCost "
+                                                "fix offers one.")
+        return 0 if h.is_file() else 1
+    if args.undo:
+        code, msg = fixer.undo(project)
+        print(msg)
+        return code
+    path = find_session(args, chat=args.target)
+    if path is None:
+        return 1
+    try:
+        a = analyse(readers.read(path), pricemod.load(args.prices))
+    except (readers.NotSupported, ValueError, OSError) as e:
+        print(f"sessioncost fix: could not read that chat: {e}")
+        return 2
+    fixer.record_seen(a, project)
+    plan = fixer.plan(a, project, only={x.strip() for x in args.only.split(",") if x.strip()} if args.only else None)
+    print(fixer.render(plan, fixer.verify_lines(project)))
+    fixer.mark_shown(plan)         # the live tip does not list these again in that chat
+    if not any(i.can_apply or i.kind == "handover" for i in plan.items) or args.preview:
+        return 0
+    if not args.yes:
+        try:
+            yes = input("\nApply these? [y/N] ").strip().lower() in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            yes = False
+        if not yes:
+            print("Nothing applied. (An agent runs this with -y, and only after you said yes in the chat.)")
+            return 0
+    code, msg = fixer.apply(plan)
+    print("\n" + msg)
+    return code
+
+
+def newest_agent(project) -> str:
+    """The agent of the project's newest chat (for a rule learned there); "" when there is none."""
+    try:
+        found = locate.sessions(project)
+        return readers.read(found[0][1]).agent if found else ""
+    except Exception:              # a learned rule is kept anyway, just without the agent's name
+        return ""
+
+
+def fix_hooks(home: Path | None = None) -> list[str]:
+    """`fix auto on` needs the hooks `sessioncost setup` puts into each agent (they read the switch); the guard itself
+    stays as it was. Adds them where they are missing."""
+    from . import guard
+    home = home or Path.home()
+    out = []
+    for agent, folder, _, name in SKILL_HOMES:
+        if not agent_installed(folder, home):
+            continue
+        if name == "claude" and claude_plugin_installed(home):
+            out.append(f"{agent:12} the SessionCost plugin brings the hooks (update it if it is older than this copy)")
+            continue
+        try:
+            text = guard._hooks_file(name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if "sessioncost" in text.lower() and " hook " in text:
+            out.append(f"{agent:12} hooks in place")
+            continue
+        guard.setup(name)
+        out.append(f"{agent:12} hooks added (the guard stays off unless you turn it on); restart {agent}")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -331,19 +376,21 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] == ["guard"]:      # `sessioncost guard on|off|start|auto on|...`: the live guard's own commands
+    if argv[:1] == ["guard"]:      # `sessioncost guard on|off|auto on|...` (start = on, kept for old notes): the live guard's own commands
         from . import guard
         return guard.main(argv[1:])
     if argv[:1] == ["auto"] and argv[1:2] in (["on"], ["off"]):   # each chat's report after each answer (on by default)
         from . import guard
         print(guard.command(f"reports-{argv[1]}", os.getcwd()))
         return 0
+    if argv[:1] == ["fix"]:        # `sessioncost fix ...`: its own options (see cmd_fix)
+        return cmd_fix(argv[1:])
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local: reads log files on this computer and sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'list', 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|start|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'fix' (this project's token waste and the change for each, applied on your yes with a backup; `sessioncost fix --undo` puts it back; `sessioncost fix auto on|off`: the list after each answer, in the chat), 'list', 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'setup' (add /sessioncost to your agents),'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--brief", action="store_true", help="print only the report's path, not the summary (for agents: "
@@ -357,9 +404,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cursor-usage", metavar="CSV",
                     help="Cursor only: your usage export from the Cursor dashboard, for exact token counts")
     ap.add_argument("--limit", type=int, default=10, help="list: how many sessions (default 10)")
+    ap.add_argument("--port", type=int, default=0, help="serve: the port on this computer (default: a free one)")
     ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
     ap.add_argument("--all", action="store_true", help="version: list every copy on this computer, not only this one")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
+    ap.add_argument("--live", action="store_true", help=argparse.SUPPRESS)   # the hooks' run after each answer
     args = ap.parse_args(argv)
 
     if args.target == "setup":
@@ -374,7 +423,44 @@ def main(argv: list[str] | None = None) -> int:
         return update.show_versions(every=args.all)
     if args.target == "list":
         return cmd_list(args)
-    if args.target == "last":
+    if args.target == "serve":
+        from . import serve
+        return serve.run(args)
+    path = find_session(args)
+    if path is None:
+        return 1
+    try:
+        a, out = build(path, args)
+    except (readers.NotSupported, ValueError) as e:
+        print(f"sessioncost: {e}")
+        return 2
+    if args.live:                  # after an answer, in the background: the to-do list for the next reply
+        from . import fixer
+        if fixer.auto_on():
+            fixer.write_note(a, a["fix_project"] or os.getcwd())
+        return 0
+    if args.sarif:
+        from . import sarif
+        Path(args.sarif).write_text(json.dumps(sarif.build(a, path), indent=1, ensure_ascii=False), encoding="utf-8")
+    if args.json:
+        print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
+        return 0
+    print(f"Report: {Path(out).as_posix()}" if args.brief else summary(a, out))
+    if args.sarif:
+        print(f"SARIF: {args.sarif}")
+    old = old_reports(out) if out else []
+    if len(old) > OLD_REPORTS_HINT:
+        print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
+    if out and not args.no_open:
+        webbrowser.open(out.resolve().as_uri())
+    return 0
+
+
+def find_session(args, chat: str | None = None) -> Path | None:
+    """The chat's log file: 'last' = the newest session of the project, else a path or a session id's first
+    characters. None (and says why) when there is none."""
+    target = chat or args.target
+    if target == "last":
         loose: list = []
         found = locate.sessions(args.project, unlinked=loose)
         if not found and loose:
@@ -388,33 +474,13 @@ def main(argv: list[str] | None = None) -> int:
                   f"(looked in {locate.claude_home() / 'projects'}, {locate.codex_home() / 'sessions'} and "
                   f"{locate.codex_home() / 'archived_sessions'}, {copilot_home() / 'session-state'}, "
                   f"{', '.join(str(h / 'conversations') for h in antigravity_homes())}, and Cursor's chats)")
-            return 1
-        path = found[0][1]
-    else:
-        path = Path(args.target).expanduser()
-        if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
-            loose = []
-            hits = [p for _, p in locate.sessions(args.project, unlinked=loose) + loose
-                    if locate.session_id(p).startswith(args.target)]
-            if len(hits) == 1:
-                path = hits[0]
-    try:
-        a, out = build(path, args)
-    except (readers.NotSupported, ValueError) as e:
-        print(f"sessioncost: {e}")
-        return 2
-    if args.sarif:
-        from . import sarif
-        Path(args.sarif).write_text(json.dumps(sarif.build(a, path), indent=1, ensure_ascii=False), encoding="utf-8")
-    if args.json:
-        print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
-        return 0
-    print(f"Report: {out}" if args.brief else summary(a, out))
-    if args.sarif:
-        print(f"SARIF: {args.sarif}")
-    old = old_reports(out) if out else []
-    if len(old) > OLD_REPORTS_HINT:
-        print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
-    if out and not args.no_open:
-        webbrowser.open(out.resolve().as_uri())
-    return 0
+            return None
+        return found[0][1]
+    path = Path(target).expanduser()
+    if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
+        loose = []
+        hits = [p for _, p in locate.sessions(args.project, unlinked=loose) + loose
+                if locate.session_id(p).startswith(target)]
+        if len(hits) == 1:
+            path = hits[0]
+    return path

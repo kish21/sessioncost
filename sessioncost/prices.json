@@ -47,10 +47,15 @@
     "gemini-3.8-flash-n": {"input": 0.75, "output": 3.75, "cache_write_5m": 0.75, "cache_write_1h": 0.75, "cache_read": 0.075, "checked": false},
     "gemini-3.7-flash": {"input": 0.75, "output": 3.75, "cache_write_5m": 0.75, "cache_write_1h": 0.75, "cache_read": 0.075, "checked": false},
     "gemini-3.6-flash": {"input": 0.75, "output": 3.75, "cache_write_5m": 0.75, "cache_write_1h": 0.75, "cache_read": 0.075, "checked": true},
-    "composer-2.5": {"input": 0.5, "output": 2.5, "cache_write_5m": 0.5, "cache_write_1h": 0.5, "cache_read": 0.2, "checked": true},
-    "grok-4.7": {"input": 2.0, "output": 6.0, "cache_write_5m": 2.0, "cache_write_1h": 2.0, "cache_read": 0.5, "checked": true},
-    "grok-4.7-medium": {"input": 2.0, "output": 6.0, "cache_write_5m": 2.0, "cache_write_1h": 2.0, "cache_read": 0.5, "checked": false},
-    "grok-4.7-fast": {"input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0, "checked": true},
-    "grok-4.7-high-fast": {"input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0, "checked": false}
+    "composer-2.5": {"input": 0.5, "output": 2.5, "cache_write_5m": 0.5, "cache_write_1h": 0.5, "cache_read": 0.2, "checked": true,
+                     "over": {"above": 256000, "input": 1.0, "output": 5.0, "cache_write_5m": 1.0, "cache_write_1h": 1.0, "cache_read": 0.4}},
+    "grok-4.7": {"input": 2.0, "output": 6.0, "cache_write_5m": 2.0, "cache_write_1h": 2.0, "cache_read": 0.5, "checked": true,
+                 "over": {"above": 256000, "input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0}},
+    "grok-4.7-medium": {"input": 2.0, "output": 6.0, "cache_write_5m": 2.0, "cache_write_1h": 2.0, "cache_read": 0.5, "checked": false,
+                        "over": {"above": 256000, "input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0}},
+    "grok-4.7-fast": {"input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0, "checked": true,
+                      "over": {"above": 256000, "input": 8.0, "output": 24.0, "cache_write_5m": 8.0, "cache_write_1h": 8.0, "cache_read": 2.0}},
+    "grok-4.7-high-fast": {"input": 4.0, "output": 12.0, "cache_write_5m": 4.0, "cache_write_1h": 4.0, "cache_read": 1.0, "checked": false,
+                           "over": {"above": 256000, "input": 8.0, "output": 24.0, "cache_write_5m": 8.0, "cache_write_1h": 8.0, "cache_read": 2.0}}
   }
 }

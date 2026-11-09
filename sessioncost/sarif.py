@@ -23,7 +23,7 @@ TEXT = {
     "secrets": "Touched a secrets file or key", "skips_commit_checks": "Tried to switch off the commit checks",
     "wipe": "Deleted the whole disk or the home folder", "privilege": "Raised its own rights or changed the computer itself (sudo, accounts, services, the machine's settings)",
     "git_push": "Pushed with git", "deletes": "Deleted files", "installs": "Installed or fetched packages",
-    "outside_project": "Changed a file outside the project", "network": "Used the network",
+    "outside_project": "Changed a file outside the project", "big_read": "Read a whole lockfile, build bundle or large file without a line range", "network": "Used the network",
     "inline_script": "Ran code written into the command",
     "key_in_output": "A key or token reached the chat (a tool result showed one, or a script printed one)",
     "poisoned_tool": "Used a tool of an MCP server whose descriptions showed signs of a prompt injection",

@@ -164,14 +164,20 @@ class CopilotReader:
                 if agent != "main" or str(d.get("source") or "").startswith("agent-"):
                     continue                    # the agent's prompt to a helper, not yours
                 text = _text(d.get("content")).strip()
-                if not text:
+                atts = [x for x in list(d.get("attachments") or []) + list(d.get("references") or []) if isinstance(x, dict)]
+                img_atts = [x for x in atts if str(x.get("mimeType") or x.get("type") or "").startswith("image")
+                            or str(x.get("path") or x.get("name") or "").lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))]
+                if not text and not img_atts:
                     continue
+                text = text or "(an image)"
                 waited = (rts - last_agent_ts).total_seconds() if rts and last_agent_ts and rts > last_agent_ts else 0.0
                 kind = "queued" if d.get("delivery") == "steering" else said_kind(text)
                 n = len([x for x in turns if x.n > 0]) + 1
                 turn = Turn(n=n, kind=kind, text=short(text, 300), ts=rts, waited_s=waited if turns else 0.0)
                 said = {"queued": "you typed (while the agent worked)", "command": "you ran a command"}.get(kind, "you typed")
                 turn.events.append(Event(kind, said, short(text, 300), len(text), rts))
+                for _ in img_atts:
+                    turn.events.append(Event("image", "image attached", "image", 6_000, rts))
                 turns.append(turn)
             elif t == "assistant.message":
                 c = call_for(str(d.get("apiCallId") or d.get("messageId") or r.get("id")), agent, rts)

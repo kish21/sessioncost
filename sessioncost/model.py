@@ -72,6 +72,8 @@ class Action:
     ts: datetime | None = None
     result_ts: datetime | None = None
     answer_text: str = ""        # question cards: the answers given
+    images: int = 0              # images returned inside this tool result
+    image_chars: int = 0         # estimated character equivalent of images in this tool result
 
 
 @dataclass
@@ -89,6 +91,8 @@ class Call:
     last_text: str = ""          # the end of the last thing it wrote (did it ask the user something?)
     thinking_chars: int = 0      # visible thinking text (usually empty: thinking is hidden)
     actions: list[Action] = field(default_factory=list)
+    cache_miss_reason: str = ""  # why the prompt cache missed, when the log records it
+    cache_missed_tokens: int = 0 # tokens that missed the cache, when the log records it
 
 
 @dataclass
@@ -157,6 +161,8 @@ class Fix:
     calls: list[tuple[str, int]] = field(default_factory=list)  # (thread, call number) of the calls it applies to
     how: str = ""                # what to do, in one or two lines
     paste: bool = False          # `how` is a line to paste into the agent's instruction file
+    targets: list[str] = field(default_factory=list)   # what a setting switches off (server or tool names), for `fix`
+    per_target: dict[str, int] = field(default_factory=dict)   # the tokens of each target, when they differ
 
 
 @dataclass

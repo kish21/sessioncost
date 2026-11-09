@@ -2,7 +2,7 @@
 
 **See where every token of your AI coding chat went, and what to fix to send fewer.**
 
-[![PyPI](https://img.shields.io/pypi/v/sessioncost)](https://pypi.org/project/sessioncost/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Works with](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%C2%B7%20Antigravity-1f6f78) [![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dkish21%252Fsessioncost%26metric%3Dtrust)](https://hol.org/registry/plugins/kish21%2Fsessioncost)
+[![PyPI](https://img.shields.io/pypi/v/sessioncost)](https://pypi.org/project/sessioncost/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE) ![Works with](https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Cursor%20%C2%B7%20Antigravity%20%C2%B7%20Copilot-1f6f78) [![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dkish21%252Fsessioncost%26metric%3Dtrust)](https://hol.org/registry/plugins/kish21%2Fsessioncost)
 
 ![Every turn of a chat on one path; tap a turn to see the calls inside it](https://github.com/kish21/sessioncost/releases/download/media/path.gif)
 
@@ -17,7 +17,7 @@ from the size of the text.
 
 ## Install
 
-One line adds `/sessioncost` to every agent on your computer: **Claude Code, Codex, Cursor and Antigravity**. It needs
+One line adds `/sessioncost` to every agent on your computer: **Claude Code, Codex, Cursor, Antigravity and GitHub Copilot**. It needs
 neither Python nor Git. Open a terminal, paste the line for your computer, and press Enter:
 
 | Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
@@ -28,7 +28,8 @@ It ends with `/sessioncost added` for each agent it found. Then restart your age
 
 Prefer PyPI (`python -m pip install -U sessioncost`, then `python -m sessioncost setup`), npm (`npx sessioncost`,
 then `npx sessioncost setup`) or your agent's plugin list
-(Claude Code: `/plugin marketplace add kish21/sessioncost`)? Every way, step by step:
+(Claude Code: `claude plugin install sessioncost --marketplace kish21/sessioncost --scope user`; `--scope user` =
+every folder, not one)? Every way, step by step:
 **[Install SessionCost](https://kish21.github.io/sessioncost-help/start/install/)**.
 
 ## Use it
@@ -50,13 +51,23 @@ through it in five minutes, and every section of the report has a **?** that ope
 
 ## Commands
 
+You need two. Type them in a chat, in any agent (Claude Code, Codex, Cursor, Antigravity, Copilot):
+
 | In a chat | What it does |
 |---|---|
-| `/sessioncost` | Builds the report of this chat and gives you its link |
-| `/sessioncost clean` | Deletes old reports, keeps the latest |
+| `/sessioncost` | Builds the report of this chat, gives you its link and names the top fix. Say "fix it" and your agent fixes the waste, after your yes |
+| `/liveguard` | Turns on [the guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) for every chat, in every agent: it checks each step before it runs, blocks the dangerous ones and asks before the risky ones. `/liveguard off` turns it off |
+
+Everything else is optional. When the guard asks about a step that is normal for your project, its message gives you
+the exact line to send so it stops asking; you do not need to remember it.
+
+| Optional, in a chat | What it does |
+|---|---|
+| `/sessioncost fix` | Lists this project's token waste with the change for each, and applies it on your yes (with a backup; `/sessioncost fix --undo` puts it back) |
+| `/sessioncost fix auto on` | After each answer, your agent lists new waste at your next message and asks before fixing. `off` stops it |
 | `/sessioncost update` | Updates SessionCost, then restart your agent |
 | `/sessioncost version` | Shows which SessionCost version this agent uses |
-| `/livesession` | Claude Code: [the guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) checks each step before it runs, blocks the dangerous ones and asks before the risky ones, in every chat until `/livesession off` |
+| `/sessioncost clean` | Deletes old reports, keeps the latest |
 
 Terminal commands, report options and the guard's settings:
 **[Commands](https://kish21.github.io/sessioncost-help/reference/commands/)**.

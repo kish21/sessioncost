@@ -1,6 +1,30 @@
 # What's new
 
-## Next
+## Unreleased
+
+- New features and fixes.
+
+## 1.0.5
+
+- New features and fixes.
+
+## 1.0.4
+
+- New features and fixes.
+
+## 1.0.3
+
+- New features and fixes.
+
+## 1.0.2
+
+- New features and fixes.
+
+## 1.0.1
+
+- New features and fixes.
+
+## 1.0.0
 
 - New features and fixes.
 

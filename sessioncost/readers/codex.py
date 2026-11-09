@@ -237,9 +237,10 @@ class _Thread:
             c = self._call(rts)
             tool, kind, label, target, written = describe(p)
             raw = p.get("input") if t == "custom_tool_call" else p.get("arguments") or p.get("action")
+            img_n = 1 if tool == "view_image" else 0
             a = Action(id=str(p.get("call_id") or p.get("id") or ""), tool=tool, kind=kind, label=label, target=target,
                        args_chars=len(raw if isinstance(raw, str) else json.dumps(raw or {}, ensure_ascii=False)),
-                       written_chars=written, ts=rts)
+                       written_chars=written, ts=rts, images=img_n, image_chars=6_000 * img_n)
             c.actions.append(a)
             if a.id:
                 self.uses[a.id] = a
@@ -380,6 +381,9 @@ class CodexReader:
                                               len(json.dumps(p, ensure_ascii=False)), rts))
             elif t == "response_item":
                 if pt == "message" and p.get("role") in ("user", "developer"):
+                    for b in (p.get("content") if isinstance(p.get("content"), list) else []):
+                        if isinstance(b, dict) and b.get("type") in ("input_image", "image"):
+                            current().events.append(Event("image", "image attached", "image", 6_000, rts))
                     txt = _text(p.get("content"))
                     kinds = (p.get("internal_chat_message_metadata_passthrough") or {}).get("content_item_kinds") or []
                     typed = p.get("role") == "user" and ("user.text" in kinds or not (

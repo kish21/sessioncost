@@ -110,20 +110,24 @@ def _path_arg(p: str) -> str:
     return f'"{p}"'
 
 
+def _quiet_python() -> Path:
+    """python.exe flashes a console window on Windows at every hook; pythonw.exe opens none and still reads and answers
+    through the pipes (Claude Code's bash and Antigravity's cmd.exe both, checked 2026-11-10)."""
+    exe = Path(sys.executable)
+    quiet = exe.with_name("pythonw.exe")
+    return quiet if os.name == "nt" and exe.name.lower() == "python.exe" and quiet.is_file() else exe
+
+
 def _launch(event: str, agent: str) -> str:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
     if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
         run = f'"{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
-        exe = Path(sys.executable)
-        # python.exe flashes a console window on Windows at every hook; pythonw.exe opens none and still reads and
-        # answers through the pipes (Antigravity gets no answer from it, so only Claude Code uses it)
-        quiet = exe.with_name("pythonw.exe")
-        if os.name == "nt" and exe.name.lower() == "python.exe" and quiet.is_file():
-            exe = quiet
-        return f'"{exe.as_posix()}" {run} hook {event} claude'
+        return f'"{_quiet_python().as_posix()}" {run} hook {event} claude'
     run = _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
-    return f'{_path_arg(sys.executable)} {run} hook {event} {agent}'
+    quiet = _quiet_python()
+    exe = str(quiet) if agent == "antigravity" and quiet.name.lower() == "pythonw.exe" else sys.executable
+    return f'{_path_arg(exe)} {run} hook {event} {agent}'
 
 
 def _backup(p: Path) -> None:

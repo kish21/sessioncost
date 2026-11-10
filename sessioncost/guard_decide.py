@@ -40,6 +40,7 @@ def step_of(tool: str, inp: dict, tool_id: str = ""):
         target = str(inp.get("url") or inp.get("query") or target)
     a = Action(id=tool_id, tool=tool, kind=kind, label=label, target=str(target or ""))
     a.written = json.dumps({k: v for k, v in inp.items() if k in ("content", "new_string", "edits", "new_source")}, ensure_ascii=False)
+    a.replaced = inp.get("old_string") if isinstance(inp.get("old_string"), str) else None   # what an Edit replaces
     a.paths = "\n".join(str(inp.get(k) or "") for k in ("path", "glob", "SearchPath", "DirectoryPath", "SearchDirectory", "targetDirectory")
                         if inp.get(k))   # where a search looks; one per line, a path may hold spaces
     a.ranged = bool(inp.get("limit") or inp.get("offset") or inp.get("pages") or inp.get("view_range") or
@@ -187,7 +188,8 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     rules = risks.read_allow(cwd)
     marks = [m for m in risks.watch_marks(a, cwd) if m == "guard_tamper" or not risks._allowed(a, m, rules, cwd)]
     doc = re.search(r"\.(?:md|mdx|markdown|txt|rst|adoc|html?)\s*$", a.target or "", re.I)
-    if "guard_tamper" not in marks and not doc and risks.tamper_write(a.target or "", getattr(a, "written", "") or ""):
+    if "guard_tamper" not in marks and not doc and risks.tamper_write(a.target or "", getattr(a, "written", "") or "",
+                                                                      getattr(a, "replaced", None), cwd):
         marks.append("guard_tamper")          # writing disableAllHooks or guard off into a file, or the guard folder
                                               # where the hooks read it (a document that only mentions them runs
                                               # nothing: help pages, notes, TESTING.md)

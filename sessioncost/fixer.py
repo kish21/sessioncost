@@ -289,9 +289,9 @@ def _one_line(items: list[dict], same: bool) -> str:
     if learnt:
         parts.append("a rule your agent found in an earlier chat: " + "; ".join(str(i.get("title") or i["id"])
                                                                               for i in learnt))
-    line = f"SessionCost: {'. Also '.join(parts)}. Shall I fix these?" if parts else ""
+    line = f"💡 SessionCost: {'. Also '.join(parts)}. Shall I fix these?" if parts else ""
     if long:
-        line = (line + " " if line else "SessionCost: ") + long.get("line", "")
+        line = (line + " " if line else "💡 SessionCost: ") + long.get("line", "")
     return line
 
 
@@ -332,7 +332,8 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 look = f"{run_cmd()} fix --preview --only {ids} --project {where}"
                 out.append(
                     "SessionCost (fix auto is on) found token waste. Open your reply with this one line, as written, "
-                    f"then answer the user's message as usual:\n{_one_line(items, note.get('chat') == chat)}\n"
+                    "as a quote block (begin it with \"> \") so it stands apart from your answer, then answer the "
+                    f"user's message as usual:\n{_one_line(items, note.get('chat') == chat)}\n"
                     "Do not end that reply with a question of your own: the user answers this one first. "
                     f"If the user asks what these are, run `{look}` and show what it prints. Only if the user says yes "
                     f"(to all, or to some), run `{cmd}` (keep only the ids they chose) and show the lines it prints; if "

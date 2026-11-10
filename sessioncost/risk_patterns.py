@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 
 from .model import Session
 
@@ -219,7 +220,48 @@ def code_text(target: str, written: str) -> str:
     return written
 
 
-def tamper_write(target: str, written: str) -> bool:
+_JSON_FILE = re.compile(r"\.jsonc?\s*$", re.I)
+_RUN_KEYS = {"command", "commands", "bash", "powershell", "cmd", "run", "args", "env", "environment"}
+
+
+def _json_after(target: str, written: str, replaced: str | None, cwd: str = "") -> object:
+    """A JSON file as it will be after this Write/Edit, parsed; None when that cannot be told for sure."""
+    try:
+        d = json.loads(written)
+        if isinstance(d.get("content"), str):
+            text = d["content"]
+        else:
+            p = Path(target)
+            text = (p if p.is_absolute() or not cwd else Path(cwd) / p).read_text(encoding="utf-8")
+            edits = d.get("edits") or ([{"old_string": replaced, "new_string": d.get("new_string")}]
+                                       if replaced is not None else [])
+            for e in edits:
+                old, new = e.get("old_string"), e.get("new_string")
+                if not (isinstance(old, str) and isinstance(new, str) and old and old in text):
+                    return None
+                text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
+            if not edits:
+                return None
+        return json.loads(text)
+    except (ValueError, OSError, AttributeError, TypeError):
+        return None
+
+
+def _runs(node, key: str = "") -> list[str]:
+    """What in a JSON settings file can run or switch something: every key name, and the values of command and
+    environment keys. Descriptions, names and notes run nothing."""
+    if isinstance(node, dict):
+        return [s for k, v in node.items() for s in [str(k)] + _runs(v, str(k).lower())]
+    if isinstance(node, list):
+        return [s for v in node for s in _runs(v, key)]
+    return [str(node)] if key in _RUN_KEYS and not isinstance(node, (dict, list)) else []
+
+
+def tamper_write(target: str, written: str, replaced: str | None = None, cwd: str = "") -> bool:
+    if _JSON_FILE.search(target or ""):
+        after = _json_after(target, written, replaced, cwd)
+        if after is not None:            # a settings file: only what runs counts (owner 2026-11-10, a hooks.json note)
+            written = "\n".join(_runs(after))
     written = code_text(target, written)
     return bool(_TAMPER_WRITE.search(written) or
                 (_ENV_FILE.search(target or "") and re.search(r"\bSESSIONCOST_GUARD_DIR\b", written)))

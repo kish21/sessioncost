@@ -28,9 +28,10 @@ async function show($: Engine): Promise<void> {
   try {
     config ??= await where($)
     const c = config ? JSON.parse(await $.fs.read(config)) : {}
-    next = c.on ? (c.strict ? '🛡 Guard on (strict)' : '🛡 Guard on') : undefined
+    // since 1.1 the guard is on unless you turned it off ("on": false), as guard_store.guard_on reads it
+    next = c.on !== false ? (c.strict ? '🛡 Guard on (strict)' : '🛡 Guard on') : undefined
   } catch {
-    next = undefined                   // no config yet: the guard is off
+    next = '🛡 Guard on'               // no config yet: the guard is on by default
   }
   if (next !== label) {
     label = next

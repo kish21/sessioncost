@@ -125,7 +125,7 @@ def cmd_setup() -> int:
     ready = [(a, names[a]) for a, dest in done if dest or a != "Claude Code"]
     for agent, name in ready:
         guard.setup(name)
-        print(f"{agent:12} live guard ready (off until you type /{GUARD_CMD} in any agent)"
+        print(f"{agent:12} live guard ready (on in every chat; /{GUARD_CMD} off turns it off)"
               + ("; Codex asks you once to trust new hooks: type /hooks there" if name == "codex" else ""))
     for name in guard.refresh():            # hooks an older version wrote get this version's commands
         if name not in {n for _, n in ready}:

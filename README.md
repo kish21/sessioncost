@@ -51,13 +51,23 @@ through it in five minutes, and every section of the report has a **?** that ope
 
 ## Commands
 
+You need two. Type them in a chat, in any agent (Claude Code, Codex, Cursor, Antigravity, Copilot):
+
 | In a chat | What it does |
 |---|---|
-| `/sessioncost` | Builds the report of this chat and gives you its link |
-| `/sessioncost clean` | Deletes old reports, keeps the latest |
+| `/sessioncost` | Builds the report of this chat, gives you its link and names the top fix. Say "fix it" and your agent fixes the waste, after your yes |
+| `/liveguard off` | [The guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) is on from install, for every chat, in every agent: it checks each step before it runs, blocks the dangerous ones and asks before the risky ones. `/liveguard off` turns it off, `/liveguard` turns it back on |
+
+Everything else is optional. When the guard asks about a step that is normal for your project, its message gives you
+the exact line to send so it stops asking; you do not need to remember it.
+
+| Optional, in a chat | What it does |
+|---|---|
+| `/sessioncost fix` | Lists this project's token waste with the change for each, and applies it on your yes (with a backup; `/sessioncost fix --undo` puts it back) |
+| `/sessioncost fix auto off` | On from install: after each answer, your agent lists new waste at your next message and asks before fixing. `off` stops it, `on` starts it again |
 | `/sessioncost update` | Updates SessionCost, then restart your agent |
 | `/sessioncost version` | Shows which SessionCost version this agent uses |
-| `/livesession` | Claude Code: [the guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) checks each step before it runs, blocks the dangerous ones and asks before the risky ones, in every chat until `/livesession off` |
+| `/sessioncost clean` | Deletes old reports, keeps the latest |
 
 Terminal commands, report options and the guard's settings:
 **[Commands](https://kish21.github.io/sessioncost-help/reference/commands/)**.

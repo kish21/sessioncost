@@ -10,7 +10,8 @@ Only the start and end of a result are looked at, where agents put these notices
 the words (like this one) does not count.
 
 Signs of a prompt injection are looked for in the whole result (up to SCAN characters): text written to steer the
-agent rather than inform it. Like the others, only the flag leaves: the text is never kept.
+agent rather than inform it. Like the others, only the flag is kept; injection_quote gives the words around it for
+the live warning in the chat, so you can judge it (never logged).
 
     injection   "ignore previous instructions", "you are now…", "new instructions:", fake <system> tags,
                 "do not tell the user", "IMPORTANT for the AI/assistant/agent"
@@ -57,6 +58,54 @@ _HIDDEN_ALWAYS = re.compile("[\U000E0000-\U000E007F‪-‮⁦-⁩]")
 _ZERO_WIDTH = re.compile("[​‌⁠⁡⁢⁣⁤]|(?<=.)﻿", re.S)
 
 
+# A character set in a pattern written in code, as in re.compile("[a-b]"): hidden characters there are what a
+# detector looks for (SessionCost's own textflags.py), not a hidden message, which is a long run of them.
+_PATTERN_SET = re.compile(r"(?<=[\"'(])\[[^\]\n]{1,40}\]")
+
+
+def _no_pattern_sets(t: str) -> str:
+    return _PATTERN_SET.sub(" ", t)
+
+
+def injection_quote(txt: str, width: int = 120) -> str:
+    """The words that made injection_signs say yes, about `width` characters around them, hidden characters shown as
+    [hidden character]. Only for the warning in the chat, so you can judge it: never logged."""
+    t = txt[:SCAN] if txt else ""
+    h = _no_pattern_sets(t)
+    m = _INJECTION.search(t) or _HIDDEN_ALWAYS.search(h) or _ZERO_WIDTH.search(h)
+    t = t if _INJECTION.search(t) else h
+    if not m:
+        return ""
+    pad = max(20, (width - len(m.group(0))) // 2)
+    s, e = max(0, m.start() - pad), min(len(t), m.end() + pad)
+    q = _ZERO_WIDTH.sub("[hidden character]", _HIDDEN_ALWAYS.sub("[hidden character]", t[s:e]))
+    q = re.sub(r"(?:\[hidden character\])+", "[hidden character]", q)
+    q = re.sub(r'\\([nrt"\\])', lambda x: {"n": " ", "r": " ", "t": " ", '"': "'"}.get(x.group(1), "\\"), q)   # JSON escapes
+    q = " ".join(q.replace("`", "'").replace('"', "'").split())
+    return ("…" if s else "") + q + ("…" if e < len(t) else "")
+
+
+_INSTRUCTIONS = re.compile(r"(?:^|[\\/])(?:CLAUDE|AGENTS|GEMINI|SKILL)\.md$|(?:^|[\\/])\.cursorrules$|"
+                           r"(?:^|[\\/])\.(?:claude|cursor[\\/]+rules|github[\\/]+instructions|agents)[\\/]|"
+                           r"(?:^|[\\/])\.github[\\/]+copilot-instructions\.md$", re.I)
+
+
+def instruction_file(path: str) -> bool:
+    """A file written for the agent to follow (CLAUDE.md, AGENTS.md, rules folders): orders are what it holds, and the
+    agent loads it as instructions anyway, so its words are no sign of an injection. Hidden characters still are."""
+    return bool(_INSTRUCTIONS.search((path or "").strip()))
+
+
+_TEST_FILE = re.compile(r"(?:^|[\\/])(?:tests?|__tests__|spec)[\\/]|(?:^|[\\/])test_[^\\/]*\.\w+$|"
+                        r"_test\.\w+$|\.(?:test|spec)\.\w+$", re.I)
+
+
+def test_file(path: str) -> bool:
+    """A test file: tests quote attack text on purpose (a guard's, a filter's), so its words are no sign of an
+    injection. Only for files inside the project (the caller checks); hidden characters still count."""
+    return bool(_TEST_FILE.search((path or "").strip().strip("'\"")))
+
+
 def injection_signs(txt: str) -> list[str]:
     """Yes/no signs that a result tries to steer the agent (see the module notes)."""
     if not txt:
@@ -65,7 +114,8 @@ def injection_signs(txt: str) -> list[str]:
     out = []
     if _INJECTION.search(t):
         out.append("injection")
-    if _HIDDEN_ALWAYS.search(t) or len(_ZERO_WIDTH.findall(t)) >= 3:
+    h = _no_pattern_sets(t)
+    if _HIDDEN_ALWAYS.search(h) or len(_ZERO_WIDTH.findall(h)) >= 3:
         out.append("hidden_text")
     return out
 

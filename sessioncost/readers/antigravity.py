@@ -227,9 +227,10 @@ class _Thread:
                 if m:
                     self.children.append((m.group(1), str(args.get("Role") or ""), str(args.get("TypeName") or "")))
             size, digest = _content(rest, raw)
+            img_n = 1 if name == "generate_image" else 0
             self.order[-1].actions.append(Action(
                 id=_pb.text(call, 1), tool=name, kind=kind, label=label, target=target, args_chars=len(raw),
-                written_chars=written, result_chars=size,
+                written_chars=written, result_chars=size, images=img_n, image_chars=6_000 * img_n,
                 result_hash=digest, is_error=error, ts=created, result_ts=done,
                 result_flags=text_flags(rest[len(raw.encode('utf-8', 'replace')):].decode('utf-8', 'replace'))))
             self.last_ts = done or created or self.last_ts
@@ -331,6 +332,9 @@ class AntigravityReader:
                 t = Turn(n=len([x for x in turns if x.n > 0]) + 1, kind=said_kind(txt), text=short(txt, 300) or "(empty)",
                          ts=when, waited_s=waited if turns else 0.0)
                 t.events.append(Event(t.kind, "you ran a command" if t.kind == "command" else "you typed", short(txt, 300), len(txt), when))
+                for m in _pb.all_(payload, 19, 9):
+                    if _pb.text(m, 1).startswith("image"):
+                        t.events.append(Event("image", "image attached", _pb.text(m, 1), 6_000, when))
                 turns.append(t)
                 continue
             c = th.step(typ, meta, payload, bool(err))

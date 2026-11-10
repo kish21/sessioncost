@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sessioncost"
-version = "1.0.5"
+version = "1.1.0"
 description = "See how many tokens each turn of your coding-agent chat sends, why, and what to cut. Cost goes down with it."
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = []
 authors = [{ name = "kish21" }]
@@ -21,7 +22,7 @@ Homepage = "https://github.com/kish21/sessioncost"
 sessioncost = "sessioncost.cli:main"
 
 [tool.setuptools]
-packages = ["sessioncost", "sessioncost.readers", "sessioncost.skill"]
+packages = ["sessioncost", "sessioncost.fixes", "sessioncost.readers", "sessioncost.skill"]
 
 [tool.setuptools.package-data]
-sessioncost = ["prices.json", "report_board.html", "skill/SKILL.md", "skill/livesession.md"]
+sessioncost = ["prices.json", "report_board.html", "skill/SKILL.md", "skill/liveguard.md"]

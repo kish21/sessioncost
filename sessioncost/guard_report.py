@@ -121,7 +121,7 @@ th{{color:var(--ink-2);font-weight:600;font-size:12.5px;white-space:nowrap}}td.n
 </style></head><body><main>
 <h1>SessionCost guard report</h1>
 <p>What the SessionCost guard did on this computer. The guard is an optional safety check: turned on
-(<code>/livesession</code> in Claude Code, or <code>sessioncost guard on</code>; every chat until it is turned off), it looks at every step your AI agent is about to take, stops the dangerous ones and asks you
+(<code>/liveguard</code> in Claude Code, or <code>sessioncost guard on</code>; every chat until it is turned off), it looks at every step your AI agent is about to take, stops the dangerous ones and asks you
 before the risky ones. This page covers <b>every chat where it was on, in every project</b>.</p>
 <div class="tiles">{tile(len(chats), "chats with the guard on")}{tile(t.get("checked", 0), "risky steps it noticed")}
 {tile(t.get("blocked", 0), "stopped (did not run)", "bad")}{tile(t.get("asked", 0), "asked you first", "warn")}{tile(t.get("allowed", 0), "you said yes")}
@@ -152,6 +152,7 @@ def write(as_json: bool = False, out: Path | None = None, folder: Path | None = 
         return json.dumps(r, indent=1)
     out = out or Path.home() / ".sessioncost" / "reports" / "guard.html"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(r, folder), encoding="utf-8")
+    # errors="replace": logs written before 1.1 may hold a broken character (a lone surrogate); show "?", don't crash
+    out.write_text(render(r, folder), encoding="utf-8", errors="replace")
     return (f"SessionCost guard report: {len(r['chats'])} chats with the guard on, {r['total'].get('blocked', 0)} steps stopped, "
             f"{r['total'].get('asked', 0)} asked you first, {r['intact']}/{len(r['chats'])} records untouched: {out}")

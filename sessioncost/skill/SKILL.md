@@ -1,12 +1,13 @@
 ---
 name: sessioncost
-description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost). Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, or runs /sessioncost.
+description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says "continue from handover".
 ---
 
 # SessionCost: where did this session's tokens go?
 
 Run the local `sessioncost` tool on the current session. It reads the session's log on this machine (Claude Code,
-Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and sends nothing anywhere.
+Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and sends nothing anywhere (only
+`prices update`, when the user asks for it, fetches SessionCost's price list).
 
 ## Steps
 
@@ -29,6 +30,44 @@ Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and
    Only if the user asks for the numbers in the chat, run it again without `--brief` and show the printed summary
    exactly as printed, in a code block.
 
+## Fix it for me
+
+- Only when the user asks to fix the waste (for example "/sessioncost fix"), run `{{RUN}} fix --preview` and show
+  its output as printed, then ask "Shall I apply these?". Only after their yes, run `{{RUN}} fix -y` (add
+  `--only <ids>` when they chose some of them) and show what it prints. Never run `fix -y` without their yes.
+- If it says a file was not changed (it does not parse, for example), tell the user and stop there: never edit that
+  file yourself, not even to repair it, unless the user asks you to in their own words.
+- "/sessioncost fix learn" with nothing after it: write both lines yourself from this chat (what wasted tokens, one
+  line; one rule that prevents it, one line), show them, and ask one question: "Record this rule?". Only after their
+  yes, run `{{RUN}} fix learn "<what happened>" --rule "<the rule>"`. Never ask the user to write the lines.
+- If what it prints asks you to write a handover, write it yourself in the file it names: the goal, what is done,
+  files changed, tests run, what is next, and the "Other token waste" section it asks for (run the `fix learn` line
+  it gives for each new one). Show it in your reply, then tell the user to start a new chat and say "continue from
+  handover" there.
+- "/sessioncost fix --undo": run `{{RUN}} fix --undo` and show the lines it prints.
+- "/sessioncost fix auto on", "... off" or "... auto" alone: run `{{RUN}} fix auto on`, `{{RUN}} fix auto off` or
+  `{{RUN}} fix auto` and show the line it prints. While it is on, a SessionCost to-do list can arrive with the
+  user's message: follow the instructions that come with it. Right after turning it on, ask once: "A handover is
+  offered when a chat passes 100k tokens. Keep 100k, or another number?" If they give a number, run
+  `{{RUN}} fix long-chat <number>` (for example 150k) and show the line it prints.
+- "/sessioncost fix long-chat <number>": run `{{RUN}} fix long-chat <number>` and show the line it prints.
+- When the user says "continue from handover": run `{{RUN}} fix --handover`. It prints the handover file's path; read
+  that file and carry on from its "what is next".
+
+## Prices
+
+- "/sessioncost prices": run `{{RUN}} prices` and show its output as printed, in a code block.
+- When the user gives their own prices in their words (for example "Opus: 4 input, 20 output"), run
+  `{{RUN}} prices set <model> --input 4 --output 20` (add `--cache-read R` and `--cache-write W` only when they gave
+  those) and show the lines it prints. Use the model name as the report or `prices` shows it. Prices are US dollars
+  per million tokens: if they gave another unit, ask before converting.
+- "/sessioncost prices import <file>": run `{{RUN}} prices import <file>` (a .csv with the columns model, input,
+  output, cache_read, cache_write, or a .json) and show what it prints.
+- "/sessioncost prices team <file>" or "... team off": run `{{RUN}} prices team <file>` (or `team off`) and show what
+  it prints.
+- Only when the user asks to update the prices (for example "/sessioncost prices update"), run
+  `{{RUN}} prices update` and show what it prints. It is the only command that goes online; never run it by yourself.
+
 ## Old reports, updates
 
 - An "Old reports: ..." line: show it as printed and ask nothing. Only when the user asks to delete or clean old
@@ -39,7 +78,7 @@ Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and
   show its output as printed, adding no advice of your own (add `--all` only when they ask for every copy).
 - Only when the user asks to turn the report after each answer on or off (for example "/sessioncost auto off"), run
   `{{RUN}} auto on` or `{{RUN}} auto off` and show the line it prints. It is on by default.
-- All four take the same fallbacks as step 1.
+- All of these take the same fallbacks as step 1.
 
 ## Never
 

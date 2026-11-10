@@ -1,7 +1,7 @@
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
 // The guard's one switch is ~/.sessioncost/guard/config.json "on" (SESSIONCOST_GUARD_DIR moves the folder).
-// This module only shows it; switching stays with /livesession and `sessioncost guard on|off`. In the terminal it is
+// This module only shows it; switching stays with /liveguard and `sessioncost guard on|off`. In the terminal it is
 // a label beside the model; elsewhere (VS Code, the desktop app), which draw no footer labels for plugins, it is a
 // short status line under the message box.
 const WHERE = 'import os, pathlib; print(os.environ.get("SESSIONCOST_GUARD_DIR") or pathlib.Path.home() / ".sessioncost" / "guard")'
@@ -48,7 +48,7 @@ export const register: Register = on => {
     return started
   })
 
-  // /livesession on or off: shown as soon as the guard's own prompt hook has switched it
+  // /liveguard on or off: shown as soon as the guard's own prompt hook has switched it
   on('prompt.submit', async ($, e, next) => {
     const sent = await next(e)
     await show($)

@@ -41,6 +41,16 @@ RULES = [
     ("Do not re-run a command when no file has changed since the last run. Read the first result.",
      ["re-run", "test-rerun"],
      ["re-run a command", "rerun a command", "read the first result"]),
+    ("Write long command or log output to a file and read only the lines you need, so the full output does not stay "
+     "in the chat.", ["stale-context"],
+     ["does not stay in the chat", "write long command or log output"]),
+    ("When sharing a screenshot or image, crop it to the part that matters or describe it in words instead.",
+     ["images"], ["crop it to the part", "describe it in words instead"]),
+    ("Keep replies concise: give the short answer first and detail only when asked.",
+     ["long-output"], ["keep replies concise", "short answer first"]),
+    ("When starting a helper agent, pass the relevant file excerpts or facts in its task prompt so it does not "
+     "re-read files you already read.", ["helper-rereads"],
+     ["pass the relevant file excerpts", "does not re-read files you already read"]),
 ]
 
 HOME: Path | None = None  # the home folder to look in (tests set it); None = your own

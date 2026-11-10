@@ -20,20 +20,21 @@ counted and their text is not kept.
 """
 from __future__ import annotations
 
-import csv
 import json
 import os
 import re
 import sqlite3
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from ..textflags import fingerprint, text_flags
 from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn, Usage, said_kind
 from .claude import short, ts
-from .codex import _command, _name
+from .codex import _name
+from .cursor_steps import _ms, _params, _reply_id, describe
+# Names other modules and tests use as cursor.<name>; they live in cursor_usage.py.
+from .cursor_usage import apply_usage_csv, is_usage_csv, read_usage_csv  # noqa: F401
 
 USER, AGENT = 1, 2
 SETUP_IDS = {"system_prompt", "tools", "rules", "skills", "mcp", "subagents"}
@@ -101,69 +102,6 @@ def helper_ids(all_chats: list[dict]) -> set[str]:
 def workspace(d: dict) -> str:
     uri = (d.get("workspaceIdentifier") or {}).get("uri") or {}
     return str(uri.get("fsPath") or "") if isinstance(uri, dict) else ""
-
-
-def _ms(x) -> datetime | None:
-    return datetime.fromtimestamp(x / 1000, tz=timezone.utc) if isinstance(x, (int, float)) and x > 0 else None
-
-
-def _params(t: dict) -> dict:
-    for k in ("params", "rawArgs"):
-        try:
-            v = json.loads(t.get(k) or "{}")
-        except ValueError:
-            continue
-        if isinstance(v, dict) and v:
-            return v
-    return {}
-
-
-def describe(name: str, p: dict) -> tuple[str, str, str]:
-    """(kind, plain-words label, target) for one Cursor tool call."""
-    f = str(p.get("targetFile") or p.get("relativeWorkspacePath") or p.get("path") or p.get("filePath") or "")
-    base = re.sub(r"_v\d+$", "", name)
-    if base in ("read_file",):
-        return "read", f"read `{_name(f)}`", f
-    if base == "write":
-        return "write", f"wrote `{_name(f)}`", f
-    if base in ("edit_file", "search_replace", "apply_patch"):
-        return "edit", f"edited `{_name(f)}`", f
-    if base == "delete_file":
-        return "edit", f"deleted `{_name(f)}`", f
-    if base == "run_terminal_command" or base == "run_terminal_cmd":
-        return _command(name, str(p.get("command") or ""))
-    if base in ("ripgrep_raw_search", "grep_search", "codebase_search", "grep"):
-        q = str(p.get("pattern") or p.get("query") or "")
-        return "search", f"searched for `{short(q, 50)}`", q
-    if base in ("glob_file_search", "list_dir", "file_search"):
-        q = str(p.get("globPattern") or p.get("query") or p.get("targetDirectory") or "")
-        return "search", f"looked for files `{short(_name(q) or q, 50)}`", q
-    if base == "web_search":
-        q = str(p.get("searchTerm") or p.get("query") or "")
-        return "web", f"searched the web: {short(q, 60)}", q
-    if base == "web_fetch":
-        u = str(p.get("url") or "")
-        return "web", f"opened a web page: {short(u, 60)}", u
-    if base == "task":
-        d = str(p.get("description") or "")
-        return "helper", f"started a helper: {short(d, 60)}", d
-    if base == "ask_question":
-        return "question", "asked you a question", ""
-    if base in ("todo_write", "update_current_step"):
-        return "plan", "updated its plan", ""
-    if base == "await":
-        return "command", "waited for a running command", ""
-    if base == "get_mcp_tools":
-        return "search", "looked up tools to load", ""
-    if name.startswith("mcp"):
-        return "other", f"used {name.rsplit('-', 1)[-1]}", ""
-    return "other", f"used {name}", ""
-
-
-def _reply_id(t: dict) -> str:
-    """The model reply a tool call came from: ids look like 'call-<request>-<n>' + newline + 'fc_<reply>_<index>'."""
-    mid = str(t.get("modelCallId") or t.get("toolCallId") or "")
-    return mid.splitlines()[-1].rsplit("_", 1)[0] if mid else ""
 
 
 class _Builder:
@@ -412,6 +350,9 @@ class CursorReader:
                 builder.history += extra
                 for label, shown, chars in pills:
                     t.events.append(Event("instructions", label, shown, chars, when))
+                for _ in list(b.get("images") or []) + list((b.get("context") or {}).get("images") or []):
+                    t.events.append(Event("image", "image attached", "image", 6_000, when))
+                    builder.history += 6_000
                 turns.append(t)
             elif b.get("type") == AGENT:
                 c = builder.agent_msg(b, when)
@@ -480,158 +421,3 @@ def _setup(d: dict) -> Setup:
             st.parts.append(SetupPart(str(c.get("label") or c.get("id")).lower(), int(c["estimatedTokens"]) * 4))
     st.known = bool(st.parts)
     return st
-
-
-# ---- Cursor's usage export (dashboard > usage > export CSV): exact tokens per request ---------------------------
-
-COLUMNS = {
-    "date": ("date", "timestamp", "time", "created at"),
-    "model": ("model",),
-    "input_write": ("input (w/ cache write)", "input with cache write", "cache write", "input_with_cache_write"),
-    "input_plain": ("input (w/o cache write)", "input without cache write", "input", "input tokens",
-                    "input_without_cache_write"),
-    "cache_read": ("cache read", "cache read tokens", "cache_read"),
-    "output": ("output tokens", "output", "output_tokens"),
-    "total": ("total tokens", "total", "total_tokens"),
-    "cost": ("cost", "cost ($)", "cost (usd)", "usd"),
-}
-
-
-def _num(x) -> float | None:
-    x = str(x or "").replace(",", "").replace("$", "").strip()
-    try:
-        return float(x)
-    except ValueError:
-        return None
-
-
-def _when(x: str) -> datetime | None:
-    x = str(x or "").strip().strip('"')
-    w = ts(x)
-    if w is None:
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p", "%b %d, %Y, %I:%M:%S %p",
-                    "%b %d, %Y, %I:%M %p", "%Y-%m-%d %H:%M"):
-            try:
-                w = datetime.strptime(x, fmt)
-                break
-            except ValueError:
-                continue
-    if w is not None and w.tzinfo is None:
-        w = w.astimezone()             # no zone in the file: it is the user's local time
-    return w
-
-
-def is_usage_csv(path: str | Path) -> bool:
-    """Is this a Cursor usage export? Only its first line is read: a date column, a model column, and Cursor's own
-    names for the input columns (another provider's usage file has other names)."""
-    try:
-        with open(path, encoding="utf-8-sig", newline="") as f:
-            head = [h.strip().lower() for h in next(csv.reader(f), [])]
-    except (OSError, UnicodeDecodeError):
-        return False
-    return any(n in head for n in COLUMNS["date"]) and "model" in head and \
-        any(n in head for n in ("input (w/ cache write)", "input (w/o cache write)", "input with cache write"))
-
-
-def read_usage_csv(path: str | Path) -> list[dict]:
-    """Rows of Cursor's usage export as {when, model, write, plain, cache_read, output, cost}."""
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f))
-    if not rows:
-        return []
-    head = [h.strip().lower() for h in rows[0]]
-    col = {}
-    for k, names in COLUMNS.items():
-        for n in names:
-            if n in head:
-                col[k] = head.index(n)
-                break
-    if "date" not in col or not ({"input_plain", "output", "total"} & col.keys()):
-        raise ValueError(f"{Path(path).name}: not a Cursor usage export (need a date column and token columns; "
-                         f"found {', '.join(rows[0])})")
-    out = []
-    for r in rows[1:]:
-        get = lambda k: r[col[k]] if k in col and col[k] < len(r) else ""
-        when = _when(get("date"))
-        if when is None:
-            continue
-        write, plain = int(_num(get("input_write")) or 0), int(_num(get("input_plain")) or 0)
-        read, output = int(_num(get("cache_read")) or 0), int(_num(get("output")) or 0)
-        if not (write or plain or read or output):
-            total = int(_num(get("total")) or 0)
-            if not total:
-                continue
-            plain = total
-        out.append({"when": when, "model": get("model").strip(), "write": write, "plain": plain,
-                    "cache_read": read, "output": output, "cost": _num(get("cost"))})
-    return out
-
-
-def apply_usage_csv(s: Session, rows: list[dict], slack_s: float = 60.0) -> int:
-    """Replace estimated tokens with Cursor's exact ones, turn by turn: each export row (one request) belongs to the
-    turn whose time span holds it; the turn's exact tokens are spread over its calls, and those of the helpers that
-    worked in it, in proportion to the estimates.
-    Returns the number of export rows used. Rows of other chats running at the same time cannot be told apart."""
-    used = 0
-    cost = 0.0
-    have_cost = False
-    spans = []
-    for i, t in enumerate(s.turns):
-        if not t.calls:
-            continue
-        start = t.ts or t.calls[0].ts_first
-        end = max((c.ts_last or c.ts_first for c in t.calls if c.ts_last or c.ts_first), default=start)
-        if start and end:
-            spans.append((t, start, end))
-    owner: dict[int, list[dict]] = {}
-    for r in rows:      # each request belongs to one turn: the one it falls in, else the nearest one before it
-        near = [k for k, (_, start, end) in enumerate(spans)
-                if start - _td(slack_s) <= r["when"] <= end + _td(slack_s)]
-        if near:
-            inside = [k for k in near if spans[k][1] <= r["when"]]
-            owner.setdefault(inside[-1] if inside else near[0], []).append(r)
-    for k, (t, start, end) in enumerate(spans):
-        mine = owner.get(k, [])
-        if not mine:
-            continue
-        used += len(mine)
-        tot = {k: sum(r[k] for r in mine) for k in ("write", "plain", "cache_read", "output")}
-        for r in mine:
-            if r["cost"] is not None:
-                cost += r["cost"]
-                have_cost = True
-        if mine[0]["model"]:
-            for c in t.calls:
-                c.model = mine[0]["model"]
-        # the export has no chat or helper id: a helper working in this turn is in these rows too, so the turn's
-        # exact tokens are shared with its helpers rather than added on top of their estimates
-        _spread(t.calls + [c for h in s.helpers for c in h.calls if c.turn == t.n], tot)
-    if used:
-        s.tokens_exact = len(owner) == len(spans)      # every turn got its exact numbers
-        s.notes = [n for n in s.notes if not n.startswith("Cursor does not keep token counts")]
-        s.notes.append(f"Tokens from Cursor's usage export ({used} requests), spread over each turn's calls in "
-                       "proportion to their size; the turn totals are exact.")
-        if have_cost:
-            s.own_cost_usd = cost
-    return used
-
-
-def _td(sec: float):
-    from datetime import timedelta
-    return timedelta(seconds=sec)
-
-
-def _spread(calls: list[Call], tot: dict) -> None:
-    def share(values: list[int], total: int) -> list[int]:
-        w = sum(values) or len(values)
-        parts = [int(total * (v if sum(values) else 1) / w) for v in values]
-        if parts:
-            parts[-1] += total - sum(parts)
-        return parts
-
-    ctx = [c.usage.context for c in calls]
-    outs = [c.usage.output for c in calls]
-    writes, plains, reads = share(ctx, tot["write"]), share(ctx, tot["plain"]), share(ctx, tot["cache_read"])
-    for c, w, p, r, o in zip(calls, writes, plains, reads, share(outs, tot["output"])):
-        think = min(c.usage.thinking or 0, o)
-        c.usage = Usage(fresh_input=p, cache_write_5m=w, cache_read=r, output=o, thinking=think)

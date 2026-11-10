@@ -51,7 +51,7 @@ def make_server(args, port: int = 0, token: str | None = None) -> tuple[Threadin
             pass
 
         def send(self, code: int, body: str, kind: str = "text/plain; charset=utf-8") -> None:
-            data = body.encode("utf-8")
+            data = body.encode("utf-8", errors="replace")      # an old guard log's broken character: '?'
             self.send_response(code)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))

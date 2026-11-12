@@ -36,7 +36,36 @@ AGY_TOOLS = {"run_command": ("Bash", lambda a: {"command": a.get("CommandLine") 
              "list_dir": ("Glob", lambda a: {"pattern": "*", "path": a.get("DirectoryPath") or ""})}
 AGY_EVENTS = {"session-start", "pre", "post", "invocation", "stop"}
 AFFIRM = re.compile(r"^\s*(?:y|yes|yeah|ok|okay|sure|go ahead|go on|allow(?: it)?|do it|proceed|approved?)\b", re.I)
-CURSOR_GATES = {"beforeShellExecution", "beforeMCPExecution", "beforeReadFile"}
+_ALLOW_SAID = re.compile(r"\b(?:allow|permit)\s+(?:it|this|that|them|these)\b|\balways\s+allow\b|"
+                         r"\b(?:don'?t|do\s+not|stop)\s+ask(?:ing)?\b.{0,20}\bagain\b", re.I)
+_ALLOW_NOT = re.compile(r"\b(?:don'?t|do\s+not|never|not|cannot|can'?t|won'?t)\s+(?:\w+\s+){0,2}(?:allow|permit)\b|\?", re.I)
+
+
+def says_allow(text: str) -> bool:
+    """The user's own short message says, in plain words, to allow the step the guard just asked about: "allow it",
+    "always allow this", "don't ask again". A question, a "do not allow" or a long message is not that."""
+    return len(text.split()) <= 15 and bool(_ALLOW_SAID.search(text)) and not _ALLOW_NOT.search(text)
+
+
+# The guard's switches in plain words (owner, 2026-11-11: nothing has to be typed). The phrase must be the whole
+# message, with "please" at most: "why did the guard turn off?" or "turn the guard off and run the tests" switch nothing.
+_G = r"(?:the\s+)?(?:live\s*)?guard"
+_RULES = r"(?:all\s+)?(?:my\s+|the\s+|this\s+project'?s\s+)?allow(?:ed)?\s+(?:steps|rules|list)"
+_SAID_SWITCH = [(arg, re.compile(rf"^\s*(?:please\s+)?(?:{words})[\s.!]*(?:please[\s.!]*)?$", re.I)) for arg, words in (
+    ("off", rf"(?:turn|switch|shut)\s+{_G}\s+off|(?:turn|switch|shut)\s+off\s+{_G}|{_G}\s+off|stop\s+{_G}"),
+    ("strict", rf"{_G}\s+strict|(?:turn|switch|make|set)\s+{_G}\s+(?:to\s+)?strict|(?:turn|switch)\s+on\s+(?:the\s+)?strict\s+(?:live\s*)?guard"),
+    ("on", rf"(?:turn|switch)\s+{_G}\s+on|(?:turn|switch)\s+on\s+{_G}|{_G}\s+on|start\s+{_G}"),
+    ("allow-clear", rf"(?:clear|remove|delete|forget)\s+{_RULES}"),
+    ("allow-list-rules", rf"(?:show|list)\s+(?:me\s+)?{_RULES}"))]
+
+
+def says_switch(text: str) -> str | None:
+    """The guard switch the user's own whole message asks for in plain words: on, strict, off, allow-clear or
+    allow-list-rules; None when it is anything else."""
+    return next((arg for arg, rx in _SAID_SWITCH if rx.match(text)), None)
+
+
+CURSOR_GATES ={"beforeShellExecution", "beforeMCPExecution", "beforeReadFile"}
 
 
 def _codex_in(inp: dict) -> dict:

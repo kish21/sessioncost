@@ -23,7 +23,8 @@ def _fix_auto() -> bool:
     return fix_auto_on(_read(home() / "config.json", {}))
 
 
-# The to-do list reaches the agent where its hooks can add text for the model, and only at the start of a reply:
+# The to-do list reaches the agent where its hooks can add text for the model, and only at the start of a reply
+# (the agent is told to say it as the reply's last line):
 # Claude Code and Codex at the user's next message (UserPromptSubmit additionalContext); Antigravity before the first
 # model call of a turn (PreInvocation injectSteps, antigravity.google/docs/hooks); Cursor and Copilot drop what a
 # prompt hook answers (cursor.com/docs/hooks, docs.github.com hooks-configuration), so there it comes when the next

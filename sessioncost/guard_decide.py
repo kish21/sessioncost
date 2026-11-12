@@ -267,6 +267,7 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
             extra += f" (to {', '.join(a.push_to)}{raw})"
         if "new_package" in open_:
             extra += f" ({', '.join(a.new_pkgs[:5])}: check each name is real and spelled right)"
+        a.allow_rule = allow_rule(open_, a)   # on_pre keeps it: the user's next message "allow it" saves this rule
         return "ask", marks, f"SessionCost guard: {'; '.join(WHY.get(m, m) for m in open_)}{extra}. Allow it?{_allow_hint(open_, a)}"
     if _read(home() / "config.json", {}).get("allow_list") and _changes(a) and not risks._allowed(a, "step", rules, cwd, _changes) \
             and learn_key("unlisted", a) not in set(st.get("learned", [])):
@@ -275,19 +276,28 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     return "log", marks, why
 
 
-def _allow_hint(open_: list[str], a) -> str:
-    """The one message that stops this ask in this project, for a single expected step: one mark, one plain line,
-    nothing after outside content (there the content is the risk, not the step), nothing asked every time (a new
-    package name may be a typo an attacker registered) and nothing the user cannot allow."""
+def allow_rule(open_: list[str], a) -> tuple[str, str] | None:
+    """The project rule that stops this ask, for a single expected step: one mark, one plain line, nothing after
+    outside content (there the content is the risk, not the step), nothing asked every time (a new package name may
+    be a typo an attacker registered) and nothing the user cannot allow."""
     from .guard_setup import NO_PROJECT_ALLOW
     from .risks import NEVER
     target = " ".join((a.target or "").split())
     if len(open_) != 1 or open_[0] in NEVER or open_[0] in NO_PROJECT_ALLOW or open_[0] == "after_untrusted" \
             or every_time(open_[0], a) \
             or not target or "\n" in (a.target or "").strip() or len(target) > 120 or any(c in target for c in "*?[`"):
+        return None
+    return open_[0], target
+
+
+def _allow_hint(open_: list[str], a) -> str:
+    """How the user stops this ask in this project: in plain words in their next message, or with the command."""
+    rule = allow_rule(open_, a)
+    if not rule:
         return ""
-    return (f" If this is a normal step for this project, the user can send `/{GUARD_CMD} allow {open_[0]} {target}` "
-            "as their own message and it will not ask again here.")
+    return (f' If this is a normal step for this project, the user can say "allow it" in their next message (or send '
+            f"`/{GUARD_CMD} allow {rule[0]} {rule[1]}`) and it will not ask again here. Only the user's own message "
+            "counts.")
 
 
 _GIT_LOOK = re.compile(r"^\s*git\s+(?:status|diff|log|show|blame|rev-parse|ls-files|check-ignore|remote\s+-v|"

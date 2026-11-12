@@ -286,7 +286,7 @@ def cmd_fix(argv: list[str]) -> int:
     if argv[:1] == ["long-chat"]:  # when a chat counts as long: the handover offer
         if len(argv) < 2:
             print(f"SessionCost fix: a chat over {fixer._tok(fixer.long_chat())} tokens gets the handover offer. "
-                  "`sessioncost fix long-chat 150k` changes it.")
+                  'To change it, say "warn me at 150k tokens" (or type `sessioncost fix long-chat 150k`).')
             return 0
         code, msg = fixer.set_long_chat(argv[1])
         print(msg)

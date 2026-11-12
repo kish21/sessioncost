@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .fixer_plan import Plan, plan
 from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_ASK, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
-                          NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SETTINGS, _load, _norm, _now, _save, _sha, _tok, _ts,
+                          NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _tok, _ts,
                           auto_on, backups_dir, base, chat_file, fixes_file, handover_file, known, live_file,
                           offered_file)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
@@ -215,7 +215,7 @@ def verify_lines(project) -> list[str]:
     return [v["line"] for v in verify(project)]
 
 
-# ---- live: the to-do list after each answer, shown at the start of the next reply ----
+# ---- live: the to-do list after each answer, shown as the last line of the next reply ----
 def write_note(a: dict, project, home: Path | None = None) -> dict:
     p = plan(a, project, home=home)
     note = {"chat": p.chat, "agent": p.agent, "at": time.time(), "context": p.context,
@@ -289,15 +289,22 @@ def _one_line(items: list[dict], same: bool) -> str:
     if learnt:
         parts.append("a rule your agent found in an earlier chat: " + "; ".join(str(i.get("title") or i["id"])
                                                                               for i in learnt))
-    line = f"💡 SessionCost: {'. Also '.join(parts)}. Shall I fix these?" if parts else ""
-    if long:
-        line = (line + " " if line else "💡 SessionCost: ") + long.get("line", "")
-    return line
+    # its own words, never "Shall I ...?": the agent may have asked its own question higher up the reply, and a bare
+    # "yes" would answer either (owner, 2026-11-11). The command is named too, for those who prefer to type it.
+    typed = "(or type /sessioncost fix)"
+    line = f"💡 SessionCost: {'. Also '.join(parts)}." if parts else ""
+    if not long:
+        return f'{line} Say "{SAY_FIX}" {typed} to fix these.' if line else ""
+    line = (line + " " if line else "💡 SessionCost: ") + long.get("line", "")
+    if parts:
+        return f'{line} Say "{SAY_FIX}" {typed} to fix these and write a handover, so you can start a fresh chat.'
+    return f'{line} Say "{SAY_HANDOVER}" {typed} so you can start a fresh chat.'
 
 
 def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | None = None) -> str:
-    """What the agent is told at the start of a reply: the to-do list not shown yet in this chat (fix auto on), and
-    the handover when the user asks to continue from it. `turn`: a key that changes with each user message, for
+    """What the agent is told at the start of a reply: the to-do list not shown yet in this chat (fix auto on), which
+    it says as the last line of that reply (at the top it scrolled away while the agent worked: owner, 2026-11-11),
+    and the handover when the user asks to continue from it. `turn`: a key that changes with each user message, for
     agents whose hook runs before every model call (Antigravity), so the list comes only at the start of a turn."""
     out: list[str] = []
     st = _load(chat_file(chat), {})
@@ -307,7 +314,8 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
             return ""
         st["turn"], dirty = turn, True
         if st.get("pending"):                 # the list was shown last turn and this agent forgets it: the command
-            out.append(f"If the user's message says yes to the SessionCost fixes you listed, run `{st['pending']}` "
+            out.append(f"If the user's message says \"{SAY_FIX}\" or \"{SAY_HANDOVER}\" (or names the SessionCost fixes you "
+                       f"listed), run `{st['pending']}` "
                        "(keep only the ids they chose) and show the lines it prints. Otherwise ignore this.")
             st["pending"] = ""
     if cwd and prompt and HANDOVER_ASK.search(prompt) and handover_file(cwd).is_file():
@@ -331,12 +339,16 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 cmd = f"{run_cmd()} fix -y --only {ids} --project {where}"
                 look = f"{run_cmd()} fix --preview --only {ids} --project {where}"
                 out.append(
-                    "SessionCost (fix auto is on) found token waste. Open your reply with this one line, as written, "
-                    "as a quote block (begin it with \"> \") so it stands apart from your answer, then answer the "
-                    f"user's message as usual:\n{_one_line(items, note.get('chat') == chat)}\n"
-                    "Do not end that reply with a question of your own: the user answers this one first. "
-                    f"If the user asks what these are, run `{look}` and show what it prints. Only if the user says yes "
-                    f"(to all, or to some), run `{cmd}` (keep only the ids they chose) and show the lines it prints; if "
+                    "SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
+                    "all your work for it is done, end your reply with this one line, as written, as a quote block "
+                    "(begin it with \"> \"), as the very last thing in the reply, so the user sees it where the chat "
+                    f"stops:\n{_one_line(items, note.get('chat') == chat)}\n"
+                    "Put nothing after that line. Do not end that reply with a question of your own: the user answers this one first. "
+                    f"If the user asks what these are, run `{look}` and show what it prints. Only if the user says "
+                    f"\"{SAY_FIX}\" or \"{SAY_HANDOVER}\" (or \"fix these\", \"fix all\", \"fix the first one\": all, "
+                    f"or some), run `{cmd}` "
+                    "(keep only the ids they chose) and show the lines it prints. A bare \"yes\" answers your own "
+                    "question, not this line: do not run it then. If "
                     "it asks you to write a handover, do it. If running it is blocked or refused (auto mode, for "
                     "example), do not try another way: tell the user to type /sessioncost fix and answer yes there. "
                     "If they say no, or say nothing about it, drop it. Never run it without their yes.")

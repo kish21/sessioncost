@@ -289,12 +289,11 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
         if over_usd and not over_tok:
             why = f"This chat has reached ${p.usd:.2f} (your ${busd:.2f} budget; {k}k tokens in context): every message re-sends all of it."
             line = (f"This chat has reached ${p.usd:.2f} (your ${busd:.2f} budget; {k}k tokens): every message re-sends "
-                    "all of it. Shall I write a handover so you can start a fresh chat?")
+                    "all of it.")
         else:
             extra = f" (${p.usd:.2f}, past your ${busd:.2f} budget)" if over_usd else ""
             why = f"This chat is at {k}k tokens{extra}: every message re-sends all of it."
-            line = (f"This chat is at {k}k tokens{extra}: every message re-sends all of it. Shall I write a handover so you "
-                    "can start a fresh chat?")
+            line = f"This chat is at {k}k tokens{extra}: every message re-sends all of it."   # fixer._one_line asks
         p.items.append(Item(
             id="long-chat", title="Start a fresh chat with a handover", kind="handover",
             why=why, tokens=int(lc.get("saving_tokens") or 0) if lc else 0, line=line))
@@ -341,5 +340,5 @@ def render(p: Plan, verify: list[str] | None = None) -> str:
     can = [n for n, it in enumerate(p.items, 1) if it.can_apply]
     if can:
         out.append(f"\nApplying {', '.join(map(str, can))} would have cut ~{_tok(p.saving_tokens)} tokens from this chat. "
-                   "A backup is kept; `sessioncost fix --undo` puts it back.")
+                   "A backup is kept: to put it back, say \"undo the fix\" (or type `sessioncost fix --undo`).")
     return "\n".join(out)

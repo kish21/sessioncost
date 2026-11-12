@@ -56,8 +56,9 @@ def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | No
         have = _read(cfg, {})
         strict = strict or bool(guard_on(have) and have.get("strict"))     # turning it on again never lowers strict
         _write(cfg, {**have, "on": True, "strict": strict})
-        return (f"SessionCost guard: on{' (strict)' if strict else ''} for every chat, this one included, until you type "
-                f"/{GUARD_CMD} off (or run `sessioncost guard off`). Every agent `sessioncost setup` gave the guard.")
+        return (f"SessionCost guard: on{' (strict)' if strict else ''} for every chat, this one included, until you say "
+                f'"turn the guard off" (or type /{GUARD_CMD} off; in a terminal `sessioncost guard off`). Every agent '
+                "`sessioncost setup` gave the guard.")
     if arg == "off":
         _write(cfg, {**keep, "on": False})
         for p in home().glob("*.state.json"):
@@ -65,7 +66,8 @@ def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | No
                 p.unlink()
             except OSError:
                 pass
-        return f"SessionCost guard: off for every chat. /{GUARD_CMD} turns it on again. The logs stay in " + str(home())
+        return (f'SessionCost guard: off for every chat. To turn it on again, say "turn the guard on" (or type '
+                f"/{GUARD_CMD}). The logs stay in " + str(home()))
     if arg.rsplit("-", 1)[0] in SETTINGS and arg.endswith(("-on", "-off")):
         name, on = arg.rsplit("-", 1)[0], arg.endswith("-on")
         _write(cfg, {**_read(cfg, {}), SETTINGS[name][0]: on})

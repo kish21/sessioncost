@@ -42,6 +42,8 @@ KNOWN = ["unused connected tools (MCP servers, connectors)", "Claude Code's unus
 LEARN_MAX = 240                         # one plain line: what happened, and the rule that prevents it
 SIMILAR = 0.8
 ASKED_FIX = re.compile(r"^\s*[/$](?:sessioncost:)?sessioncost\b|\bsessioncost fix\b", re.I)   # "/sessioncost fix", "/sessioncost"
+SAY_FIX = "fix it"           # what the user says to the live tip: its own words, not a bare "yes" (owner, 2026-11-11)
+SAY_HANDOVER = "write a handover"    # ... to the long-chat tip
 HANDOVER_ASK = re.compile(r"\b(?:continue|carry on|resume|pick up)\b.{0,40}\bhand-?over\b", re.I | re.S)
 
 
@@ -149,19 +151,23 @@ def auto_on() -> bool:
 
 
 def auto_text() -> str:
-    return ("SessionCost fix auto: on for every chat, until `sessioncost fix auto off`." if auto_on() else
-            "SessionCost fix auto: off. `sessioncost fix auto on` turns it on; `sessioncost fix` works either way.")
+    return ('SessionCost fix auto: on for every chat. To stop the tips, say "turn token tips off" (or type '
+            "`sessioncost fix auto off`)." if auto_on() else
+            'SessionCost fix auto: off. To start the tips, say "turn token tips on" (or type `sessioncost fix auto '
+            'on`); "fix my token waste" (`sessioncost fix`) works either way.')
 
 
 def set_auto(on: bool) -> str:
     cfg = _config()
     _save(cfg, {**_load(cfg, {}), "fix_auto": bool(on)})
     if on:
-        return ("SessionCost fix auto: on for every chat, every day, until `sessioncost fix auto off`. After each answer "
-                "SessionCost looks for new token waste; your agent lists it at the start of its next reply and asks "
-                f"before it changes anything. A chat over {_tok(long_chat())} tokens gets a handover offer; "
-                "`sessioncost fix long-chat <tokens>` changes that (for example 150k).")
-    return "SessionCost fix auto: off. `sessioncost fix` still shows the to-do list whenever you ask."
+        return ("SessionCost fix auto: on for every chat, every day. After each answer SessionCost looks for new token "
+                "waste; your agent names it in the last line of its next reply and changes nothing until you say "
+                f'"{SAY_FIX}". A chat over {_tok(long_chat())} tokens gets a handover offer: to change that, say "warn '
+                'me at 150k tokens" (or type `sessioncost fix long-chat 150k`). To stop the tips, say "turn token tips '
+                'off" (or type `sessioncost fix auto off`).')
+    return ('SessionCost fix auto: off. To start the tips again, say "turn token tips on" (or type `sessioncost fix '
+            'auto on`). Say "fix my token waste" (or type `sessioncost fix`) for the to-do list whenever you want.')
 
 
 def long_chat() -> int:
@@ -184,7 +190,9 @@ def set_long_chat(text: str) -> tuple[int, str]:
         return 2, "sessioncost fix long-chat: give the tokens, 10k or more (for example 150k, or 1m)."
     cfg = _config()
     _save(cfg, {**_load(cfg, {}), "long_chat": n})
-    return 0, f"SessionCost fix: a chat over {_tok(n)} tokens now gets the handover offer (it was {_tok(LONG_CHAT)} by default)."
+    return 0, (f"SessionCost fix: a chat over {_tok(n)} tokens now gets the handover offer (it was {_tok(LONG_CHAT)} by "
+               'default). To change it, say "warn me at 150k tokens" with your own number (or type `sessioncost fix '
+               "long-chat 150k`).")
 
 
 def budget_usd() -> float | None:
@@ -196,9 +204,9 @@ def budget_usd() -> float | None:
 def budget_text() -> str:
     b = budget_usd()
     usd = f"${b:.2f} dollar budget" if b is not None else "no dollar budget set"
-    return (f"SessionCost fix budget: {_tok(long_chat())} token ceiling, {usd}. "
-            "`sessioncost fix budget 5` (dollars) or `150k` (tokens) changes it; `sessioncost fix budget off` clears the "
-            "dollar budget.")
+    return (f"SessionCost fix budget: {_tok(long_chat())} token ceiling, {usd}. To change it, say \"set my budget to "
+            "$5\" or \"warn me at 150k tokens\" (or type `sessioncost fix budget 5` or `150k`); say \"clear my budget\" "
+            "(or type `sessioncost fix budget off`) to remove the dollar budget.")
 
 
 def set_budget(text: str) -> tuple[int, str]:
@@ -263,4 +271,5 @@ def learn(what: str, rule: str, project=None, agent: str = "") -> tuple[int, str
                   "rule": rule, "source": "agent", "agent": agent, "first": now, "last": now, "times": 1,
                   "projects": [where] if where else []})
     _save(learned_file(), {**data, "version": 1, "items": items})
-    return 0, f"Kept: {what}. `sessioncost fix` offers its rule from now on, in every project."
+    return 0, (f"Kept: {what}. Its rule is offered from now on, in every project, when you say \"fix my token waste\" "
+               "(or type `sessioncost fix`).")

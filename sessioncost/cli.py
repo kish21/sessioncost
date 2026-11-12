@@ -316,15 +316,16 @@ def cmd_fix(argv: list[str]) -> int:
     args = ap.parse_args(argv)
     project = Path(args.project or os.getcwd()).resolve()
     if args.handover:
-        h = fixer.handover_file(project)
-        print(h.as_posix() if h.is_file() else f"No handover for {project} yet: when a chat grows long, SessionCost "
-                                                "fix offers one.")
-        return 0 if h.is_file() else 1
+        h = fixer.find_handover(project)
+        print(h.as_posix() if h else f"No handover for {project} yet: a long chat gets one from `sessioncost fix`.")
+        return 0 if h else 1
     if args.undo:
         code, msg = fixer.undo(project)
         print(msg)
         return code
-    path = find_session(args, chat=args.target)
+    path, newest = find_session(args, chat=args.target), args.target == "last"
+    if path is not None and not path.is_file() and not newest:
+        path, newest = find_session(args, chat="last"), True   # a chat the live tip named but no log is found for
     if path is None:
         return 1
     try:
@@ -334,7 +335,7 @@ def cmd_fix(argv: list[str]) -> int:
         return 2
     fixer.record_seen(a, project)
     plan = fixer.plan(a, project, only={x.strip() for x in args.only.split(",") if x.strip()} if args.only else None)
-    print(fixer.render(plan, fixer.verify_lines(project)))
+    print(fixer.render(plan, fixer.verify_lines(project), newest=newest))
     fixer.mark_shown(plan)         # the live tip does not list these again in that chat
     if not any(i.can_apply or i.kind == "handover" for i in plan.items) or args.preview:
         return 0

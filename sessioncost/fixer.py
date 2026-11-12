@@ -24,8 +24,8 @@ from pathlib import Path
 from .fixer_plan import Plan, plan
 from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_ASK, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
                           NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _tok, _ts,
-                          auto_on, backups_dir, base, chat_file, fixes_file, handover_file, known, live_file,
-                          offered_file)
+                          auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
+                          live_file, offered_file, project_key, start_folder)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
 from .fixer_plan import for_report, render  # noqa: F401
 from .fixer_store import LONG_CHAT, auto_text, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
@@ -40,7 +40,7 @@ def apply(p: Plan) -> tuple[int, str]:
         now = Path(path).read_bytes() if Path(path).exists() else None
         if now != p.originals.get(path):
             return 1, f"{path} changed while SessionCost was working; nothing was applied. Run `sessioncost fix` again."
-    if todo:
+    if p.finals:                               # the fixes, and the handover's .gitignore line
         bid = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         folder = backups_dir(p.project) / bid
         folder.mkdir(parents=True, exist_ok=True)
@@ -60,25 +60,32 @@ def apply(p: Plan) -> tuple[int, str]:
                 (folder / e["backup"]).write_bytes(raw)
             entries.append(e)
         mf = backups_dir(p.project) / "manifest.json"
-        _save(mf, _load(mf, []) + [{"id": bid, "at": _now(), "chat": p.chat, "items": [i.id for i in todo],
-                                    "entries": entries}])
+        _save(mf, _load(mf, []) + [{"id": bid, "at": _now(), "chat": p.chat,
+                                    "items": [i.id for i in todo] or ["long-chat"], "entries": entries}])
         for path in paths:                     # the backup is on disk before any file changes
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_bytes(data[path])
+    if not todo and p.finals:
+        out.append(f"Added {handover_file(p.project).name} to .gitignore, so the handover is not committed "
+                   "(`sessioncost fix --undo` takes it out).")
+    if todo:
         mem = _load(fixes_file(p.project), {})
         mem["project"] = str(p.project)
         mem["applied"] = [r for r in mem.get("applied", []) if r.get("id") not in {i.id for i in todo}] + [
-            {"id": i.id, "title": i.title, "at": _now(), "chat": p.chat, "files": [str(i.change.path)],
+            {"id": i.id, "title": i.title, "at": _now(), "chat": p.chat,
+             "files": [str(c.path) for c in [i.change, *i.also]],
              "before_tokens": i.tokens, "before_calls": p.calls, "backup": bid} for i in todo]
         _save(fixes_file(p.project), mem)
         out.append(f"Applied {len(todo)} fix{'es' if len(todo) != 1 else ''} (backup kept; `sessioncost fix --undo` "
                    "puts it back):")
         for i in todo:
-            try:
-                where = i.change.path.relative_to(p.project).as_posix()
-            except ValueError:
-                where = i.change.path.as_posix()
-            out.append(f"  - {i.title}: {'a rule added to' if i.kind == 'rule' else 'set in'} {where}")
+            where = []
+            for c in [i.change, *i.also]:      # a rule goes into every agent's file in the project
+                try:
+                    where.append(c.path.relative_to(p.project).as_posix())
+                except ValueError:
+                    where.append(c.path.as_posix())
+            out.append(f"  - {i.title}: {'a rule added to' if i.kind == 'rule' else 'set in'} {', '.join(where)}")
         out.append(f"In this chat they would have cut ~{_tok(sum(i.tokens for i in todo))} tokens. The next reports show "
                    "what they save from now on.")
     for i in p.items:
@@ -90,7 +97,6 @@ def apply(p: Plan) -> tuple[int, str]:
                        + "\n".join("  " + x for x in i.steps.splitlines()))
     if any(i.kind == "handover" for i in p.items):
         h = handover_file(p.project)
-        h.parent.mkdir(parents=True, exist_ok=True)
         out.append(f"Handover: write it now in {h.as_posix()} (replace what is there): the goal, what is done, files "
                    "changed, tests run, what is next. Show it in your reply, then tell the user to start a new chat "
                    "and say \"continue from handover\" there.")
@@ -301,7 +307,12 @@ def _one_line(items: list[dict], same: bool) -> str:
     return f'{line} Say "{SAY_HANDOVER}" {typed} so you can start a fresh chat.'
 
 
-def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | None = None) -> str:
+def _same_agent(hook_agent: str, note_agent: str) -> bool:
+    """The hooks' name (claude, codex, cursor, copilot, antigravity) and the reader's (claude-code, copilot-vscode, ...)."""
+    return not hook_agent or not note_agent or note_agent.split("-")[0] == hook_agent
+
+
+def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | None = None, agent: str = "") -> str:
     """What the agent is told at the start of a reply: the to-do list not shown yet in this chat (fix auto on), which
     it says as the last line of that reply (at the top it scrolled away while the agent worked: owner, 2026-11-11),
     and the handover when the user asks to continue from it. `turn`: a key that changes with each user message, for
@@ -318,15 +329,18 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                        f"listed), run `{st['pending']}` "
                        "(keep only the ids they chose) and show the lines it prints. Otherwise ignore this.")
             st["pending"] = ""
-    if cwd and prompt and HANDOVER_ASK.search(prompt) and handover_file(cwd).is_file():
+    h = find_handover(cwd) if cwd else None
+    if h and prompt and HANDOVER_ASK.search(prompt):
         out.append(f"The user wants to continue from the handover of an earlier chat: read "
-                   f"{handover_file(cwd).as_posix()} first, then carry on from its \"what is next\".")
-    elif cwd and start and handover_file(cwd).is_file() and \
-            time.time() - handover_file(cwd).stat().st_mtime < CHAT_KEEP_S:
-        out.append(f"A handover from an earlier chat in this project is at {handover_file(cwd).as_posix()}. Read it "
+                   f"{h.as_posix()} first, then carry on from its \"what is next\".")
+    elif h and start and time.time() - h.stat().st_mtime < CHAT_KEEP_S:
+        out.append(f"A handover from an earlier chat in this project is at {h.as_posix()}. Read it "
                    "only if the user asks to continue from it.")
     if cwd and auto_on():
         note = _load(live_file(cwd), {})
+        # another agent's chat in this project (a colleague in Antigravity, say): its fixes go into that agent's file
+        if note and not _same_agent(agent, str(note.get("agent") or "")):
+            note = {}
         if note and time.time() - float(note.get("at") or 0) < NOTE_MAX_AGE_S:
             items = _quiet(note, chat, cwd, st)
             if items and ASKED_FIX.search(prompt or ""):
@@ -336,8 +350,9 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
             if items:
                 ids = ",".join(i["id"] for i in items)
                 where = _q(Path(cwd).as_posix())
-                cmd = f"{run_cmd()} fix -y --only {ids} --project {where}"
-                look = f"{run_cmd()} fix --preview --only {ids} --project {where}"
+                of = f"{_q(str(note['chat']))} " if note.get("chat") else ""   # the chat the list came from
+                cmd = f"{run_cmd()} fix -y {of}--only {ids} --project {where}"
+                look = f"{run_cmd()} fix --preview {of}--only {ids} --project {where}"
                 out.append(
                     "SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
                     "all your work for it is done, end your reply with this one line, as written, as a quote block "

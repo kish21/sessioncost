@@ -77,8 +77,33 @@ def backups_dir(project) -> Path:
     return base() / "backups" / project_key(project)
 
 
+HANDOVER_NAME = "NEXT-SESSION.md"      # in the project, where the user can find it (owner, 2026-11-12)
+
+
 def handover_file(project) -> Path:
-    return base() / "handover" / f"{project_key(project)}.md"
+    """Where the agent writes the handover: a file in the project's top folder."""
+    return Path(project) / HANDOVER_NAME
+
+
+def find_handover(project) -> Path | None:
+    """The handover to continue from: the project's own, else one an older SessionCost kept under base()."""
+    for f in (handover_file(project), base() / "handover" / f"{project_key(project)}.md"):
+        if f.is_file():
+            return f
+    return None
+
+
+def start_folder(chat: str, cwd: str) -> str:
+    """The folder a chat started in. It stays the chat's project when the agent changes folder later (cd backend),
+    so its fixes and its to-do list belong to that project, not to wherever the agent is now."""
+    if not chat or not cwd:
+        return cwd
+    st = _load(chat_file(chat), {})
+    if st.get("cwd"):
+        return str(st["cwd"])
+    st["cwd"] = cwd
+    _save(chat_file(chat), st)
+    return cwd
 
 
 def offered_file(project) -> Path:

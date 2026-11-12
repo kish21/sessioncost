@@ -3124,7 +3124,7 @@ if (PHONE()) $('keybox').open = false;
   (function guardSection(){
     const GA = D.guard_all, GUARD = D.guard || null, n = x => (x || 0).toLocaleString();   // (the page's own GUARD is set further down)
     const howOn = `<div class="gon"><p><b>Turn the guard on</b> to have each risky step checked before it runs:</p>
-      <p>Type <code>/liveguard</code> in any agent's chat, or run <code>sessioncost guard on</code>: every chat is guarded until <code>/liveguard off</code>,
+      <p>Say "turn the guard on" (or type <code>/liveguard</code>) in any agent's chat, or run <code>sessioncost guard on</code>: every chat is guarded until you say "turn the guard off",
       in Claude Code, Codex, Cursor, Antigravity and Copilot alike (your install set the guard up in each). Installed an agent later? Run <code>sessioncost setup</code> again.</p></div>`;
     if (!GA){
       $('guardHead').textContent = 'the guard has not been used yet';
@@ -3134,7 +3134,7 @@ if (PHONE()) $('keybox').open = false;
     const proj = esc(GA.project), plural_ = (k, w) => `${n(k)} ${w}${k === 1 ? '' : 's'}`;
     $('guardHead').textContent = `${GA.project}: ${plural_(GA.chats, 'chat')} with the guard on`;
     const here = GUARD ? `<p><b>In this chat the guard was on:</b> ${n(GUARD.blocked)} stopped (did not run) · ${n(GUARD.asked)} asked you first (you said yes to ${n(GUARD.allowed)}) · record ${GUARD.intact ? 'untouched ✓' : `<b style="color:var(--heat)">${{incomplete: 'cut off', unreadable: 'could not be read'}[GUARD.status] || 'edited'}</b>`}. Those steps are marked in the <a class="link" href="#skyview" data-sky="1">Trace &amp; risk map</a>.</p>`
-      : `<p><b>The guard was off in this chat.</b> Type <code>/liveguard</code> (Claude Code): every chat is guarded from then on, until <code>/liveguard off</code>.</p>`;
+      : `<p><b>The guard was off in this chat.</b> Say "turn the guard on" (or type <code>/liveguard</code>) in any agent's chat: every chat is guarded from then on.</p>`;
     const tile = (v, l, cls = '') => `<div class="${cls}"><b>${v}</b><span>${l}</span></div>`;
     const reasons = [...new Set([...GA.reasons.blocked, ...GA.reasons.asked].map(r => r[0]))].slice(0, 6);
     const count = (d, w) => (GA.reasons[d].find(r => r[0] === w) || [, ''])[1];
@@ -3350,7 +3350,7 @@ function drawRules(){
       <pre><code>${esc(ownText)}</code></pre><p class="muted">${own.note} <a href="${own.docs}" target="_blank" rel="noopener">${esc(own.name)}'s docs</a></p>`
     : `<p class="muted">${esc(own.name)}'s own settings have no rule for these steps (<a href="${own.docs}" target="_blank" rel="noopener">its docs</a>).</p>`;
   const guardLine = claude ? '' : GUARD_SETUP[M.agent]
-    ? `<p class="muted"><b>To have every step checked:</b> type <code>/liveguard</code> in any agent (or run <code>sessioncost guard on</code>): the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
+    ? `<p class="muted"><b>To have every step checked:</b> say "turn the guard on" in any agent's chat (or type <code>/liveguard</code>): the SessionCost guard blocks the never list and asks about the rest, in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent)} too.</p>`
     : `<p class="muted">The SessionCost guard does not run in ${esc(own ? own.name : {'copilot-vscode': 'Copilot in VS Code'}[M.agent] || M.agent || 'this agent')} yet: these rules are all there is.</p>`;
   box.innerHTML = ownBlock + `<p><b>Rules that would have stopped these</b> <span class="muted">· ${claude ? 'paste into .claude/settings.json (Claude Code enforces them)' : 'paste into your rules file (the agent reads them; nothing enforces them)'}</span></p>
     ${claude ? `<pre><code>${esc(json)}</code></pre><p class="muted">ask = Claude Code asks you first · deny = never. A deny wins over any allow.</p>` : ''}
@@ -3398,7 +3398,7 @@ function drawSky(){
       (G.inventory ? ` · ${G.inventory.first ? `${G.inventory.items} skills, plugins and MCP servers recorded` : (G.inventory.new || []).length + (G.inventory.changed || []).length
         ? `<b>new or changed since the last chat: ${esc([...(G.inventory.new || []), ...(G.inventory.changed || [])].map(k => k.replace(':', ' ')).join(', '))}</b>` : `${G.inventory.items} skills, plugins and MCP servers unchanged`}` : '') + ' · ' +
       (G.intact ? `<span class="ok">log intact ✓</span> <span class="muted">(${G.lines} lines, each chained to the one before)</span>` : `<b style="color:var(--alarm)">${{incomplete: 'log cut off ✗: its last line was not written in full', unreadable: 'log could not be read ✗: it cannot be checked'}[G.status] || 'log changed ✗: a line was edited or removed after it was written'}</b>`) + '</span>'
-    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Type <code>/liveguard</code> (Claude Code) and every chat is guarded until <code>/liveguard off</code>: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
+    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Say "turn the guard on" (or type <code>/liveguard</code>) in any agent's chat and every chat is guarded again: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
   const trace = !!t && sky.view === 'trace';
   box.classList.toggle('trace', trace);
   box.classList.toggle('allchains', sky.mark === 'after_untrusted');

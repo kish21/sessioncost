@@ -130,5 +130,6 @@ def cmd_setup() -> int:
     for name in guard.refresh():            # hooks an older version wrote get this version's commands
         if name not in {n for _, n in ready}:
             print(f"{name.capitalize():12} live guard hooks brought up to date")
-    print(f"\nRestart the agent if it is open, then type /sessioncost in a chat. /{GUARD_CMD} turns the live guard on.")
+    print(f'\nRestart the agent if it is open, then type /sessioncost in a chat. The live guard is already on: to turn '
+          f'it off, say "turn the guard off" (or type /{GUARD_CMD} off).')
     return 0

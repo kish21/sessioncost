@@ -8,8 +8,12 @@ from pathlib import Path
 
 from . import fixes as fixmod
 from . import rules
-from .fixer_store import (BUILTIN_SETTING, HEAD, LONG_CHAT, RULE_OF, SETTINGS, _first, _load, _tok, _ts, budget_usd,
-                          fixes_file, learned, long_chat)
+from .fixer_store import (BUILTIN_SETTING, HANDOVER_NAME, HEAD, LONG_CHAT, RULE_OF, SETTINGS, _first, _load, _tok, _ts,
+                          budget_usd, fixes_file, learned, long_chat)
+
+# every agent's own instruction file at a project's top: a rule goes into each one that is there (two developers on
+# two agents in one project both get it), never into a new file for an agent the project does not use
+AGENT_FILES = ("CLAUDE.md", "GEMINI.md", "AGENTS.md", ".cursor/rules/sessioncost.mdc", ".github/copilot-instructions.md")
 
 
 
@@ -39,6 +43,7 @@ class Item:
     kind: str                   # rule | setting | manual | handover | came-back | not-followed
     line: str = ""              # the to-do line the agent shows
     change: Change | None = None
+    also: list[Change] = field(default_factory=list)   # the same rule in the other agents' files of the project
     steps: str = ""             # what the user does by hand (no setting SessionCost can change)
     problem: str = ""           # why it cannot be applied
 
@@ -189,6 +194,24 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
             texts[path], problems[path], p.originals[str(path)] = text, prob, raw
         return texts[path], problems[path]
 
+    def add_everywhere(it: Item, rule: str) -> None:
+        """The rule into this agent's file (the item's change), then into every other agent's file already here."""
+        main = rules_file(agent, project)
+        before, prob = current(main)
+        if prob:
+            it.problem = prob
+            return
+        it.change = Change(main, before, add_rule(before, rule, main))
+        texts[main] = it.change.after
+        for path in (project / n for n in AGENT_FILES):
+            if path == main or not path.is_file():
+                continue
+            before, prob = current(path)
+            if prob or rules._plain(rule) in rules._plain(before or ""):
+                continue
+            it.also.append(Change(path, before, add_rule(before, rule, path)))
+            texts[path] = it.also[-1].after
+
     def came_back(fid: str) -> dict | None:
         rec = applied.get(fid)
         return rec if rec and rec.get("chat") != p.chat and started > _ts(rec.get("at")) else None
@@ -228,13 +251,7 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
                 else:
                     continue                  # already fixed (in a file the agent reads): not shown again
             else:
-                path = rules_file(agent, project)
-                before, prob = current(path)
-                if prob:
-                    it.problem = prob
-                else:
-                    it.change = Change(path, before, add_rule(before, rule, path))
-                    texts[path] = it.change.after
+                add_everywhere(it, rule)
         elif updates:
             it.kind, path = "setting", project / SETTINGS
             before, prob = current(path)
@@ -271,13 +288,7 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
                   why=f"Found by your agent in an earlier chat ({int(x.get('times') or 1)}x). SessionCost has no check "
                       "that measures it, so no tokens are counted for it.",
                   line=f"{x['what']} (found by your agent)")
-        path = rules_file(agent, project)
-        before, prob = current(path)
-        if prob:
-            it.problem = prob
-        else:
-            it.change = Change(path, before, add_rule(before, x["rule"], path))
-            texts[path] = it.change.after
+        add_everywhere(it, x["rule"])
         p.items.append(it)
 
     lc = next((f for f in a.get("fixes") or [] if f.get("id") == "long-chat"), None)
@@ -294,9 +305,17 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
             extra = f" (${p.usd:.2f}, past your ${busd:.2f} budget)" if over_usd else ""
             why = f"This chat is at {k}k tokens{extra}: every message re-sends all of it."
             line = f"This chat is at {k}k tokens{extra}: every message re-sends all of it."   # fixer._one_line asks
-        p.items.append(Item(
-            id="long-chat", title="Start a fresh chat with a handover", kind="handover",
-            why=why, tokens=int(lc.get("saving_tokens") or 0) if lc else 0, line=line))
+        ho = Item(id="long-chat", title="Start a fresh chat with a handover", kind="handover",
+                  why=why, tokens=int(lc.get("saving_tokens") or 0) if lc else 0, line=line)
+        gi = project / ".gitignore"
+        if (project / ".git").exists():                # the handover file in the project stays out of git
+            before, prob = current(gi)
+            listed = any(x.strip().lstrip("/") == HANDOVER_NAME for x in (before or "").splitlines())
+            if not prob and not listed:
+                sep = "" if not before or before.endswith(("\n", "\r\n")) else "\n"
+                ho.change = Change(gi, before, f"{before or ''}{sep}{HANDOVER_NAME}\n")
+                texts[gi] = ho.change.after
+        p.items.append(ho)
     p.items.sort(key=lambda i: -i.tokens)
     for path, text in texts.items():
         raw = p.originals.get(str(path))
@@ -306,15 +325,17 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
     return p
 
 
-def render(p: Plan, verify: list[str] | None = None) -> str:
+def render(p: Plan, verify: list[str] | None = None, newest: bool = True) -> str:
+    """newest: the chat is the project's newest (`fix` with no chat id); a named chat may be an older one."""
     out = []
     if verify:
         out += ["Earlier fixes in this project:"] + [f"  - {v}" for v in verify] + [""]
     if not p.items:
-        out.append("SessionCost fix: no token waste to fix in the newest chat of this project.")
+        out.append("SessionCost fix: no token waste to fix in " +
+                   ("the newest chat of this project." if newest else f"\"{p.title[:60]}\"."))
         return "\n".join(out)
     out.append(f"SessionCost fix: {len(p.items)} thing{'s' if len(p.items) != 1 else ''} wasting tokens in "
-               f"\"{p.title[:60]}\" (the newest chat of this project), most tokens first:")
+               f"\"{p.title[:60]}\"{' (the newest chat of this project)' if newest else ''}, most tokens first:")
     for n, it in enumerate(p.items, 1):
         size = f"~{_tok(it.tokens)} tokens in this chat" if it.tokens or not it.id.startswith("learned-") else \
             "found by your agent, not measured"
@@ -327,12 +348,16 @@ def render(p: Plan, verify: list[str] | None = None) -> str:
         elif it.kind == "not-followed":
             out.append(f"   {it.line}. Nothing to apply: remind the agent of the rule in the chat, or reword it more "
                        "plainly in that file.")
+        elif it.kind == "handover":
+            out.append(f"   The fix: your agent writes a handover in {HANDOVER_NAME} in this project (goal, what is "
+                       "done, files changed, tests run, what is next) and you start a fresh chat."
+                       + (" So it is not committed, it goes into .gitignore:" if it.change else ""))
+            if it.change:
+                out += ["     " + x for x in it.change.diff(p.project).rstrip("\n").splitlines()]
         elif it.change:
             out.append("   The change:")
-            out += ["     " + x for x in it.change.diff(p.project).rstrip("\n").splitlines()]
-        elif it.kind == "handover":
-            out.append("   The fix: your agent writes a handover (goal, what is done, files changed, tests run, what is "
-                       "next) and you start a fresh chat. Nothing in your files changes.")
+            for c in [it.change, *it.also]:    # the agent's own file first, then every other agent's file here
+                out += ["     " + x for x in c.diff(p.project).rstrip("\n").splitlines()]
         if it.steps:
             out.append("   You do the rest yourself:" if it.change else
                        "   You do this one (SessionCost has no setting to change it):")

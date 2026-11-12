@@ -37,11 +37,12 @@ def _fix_tip(event: str, inp: dict, raw: dict, agent: str) -> str:
     if event not in TIP_EVENTS.get(agent, ()):
         return ""
     from . import fixer
-    sid, cwd = str(inp.get("session_id") or ""), str(inp.get("cwd") or "")
+    sid = str(inp.get("session_id") or "")
+    cwd = fixer.start_folder(sid, str(inp.get("cwd") or ""))    # the project: where the chat started, not where it is now
     if agent == "antigravity":                # runs before every model call: once per user message
         said = str(raw.get("lastUserInput") or "")
-        return fixer.tip(sid, cwd, prompt=said, turn=hashlib.sha1(said.encode()).hexdigest()[:16])
-    return fixer.tip(sid, cwd, prompt=str(inp.get("prompt") or ""), start=event == "session-start")
+        return fixer.tip(sid, cwd, prompt=said, turn=hashlib.sha1(said.encode()).hexdigest()[:16], agent=agent)
+    return fixer.tip(sid, cwd, prompt=str(inp.get("prompt") or ""), start=event == "session-start", agent=agent)
 
 
 def _with_tip(event: str, out: dict | None, tip: str, agent: str) -> dict | None:
@@ -68,7 +69,9 @@ def _auto_report(inp: dict, st: dict) -> str:
     root = Path(__file__).resolve().parent.parent
     run = [str(root / "run.py")] if (root / "run.py").is_file() else ["-m", "sessioncost"]
     # --live: also write this chat's to-do list (fix auto), and build the report only when reports are on
-    cmd = [sys.executable, *run, target, "--no-open", *(["--project", str(inp["cwd"])] if inp.get("cwd") else []),
+    from .fixer_store import start_folder
+    cwd = start_folder(str(inp.get("session_id") or ""), str(inp.get("cwd") or ""))
+    cmd = [sys.executable, *run, target, "--no-open", *(["--project", cwd] if cwd else []),
            *(["--live"] if fix else [])]
     flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
     try:

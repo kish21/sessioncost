@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import re
 
-from .. import prices as pricemod
 from ..model import Fix, Session
-from .common import (_where, helper_name, tok)
+from .common import Ledger, _where, helper_name, src, tok
 
 TEST_CMD = re.compile(r"(?:^|[\s;&|(/\\])(?:pytest|py\.test|jest|vitest|mocha|rspec|phpunit|tox|nox|"
                       r"python3?\s+-m\s+(?:pytest|unittest)|go\s+test|cargo\s+test|dotnet\s+test|deno\s+test|bun\s+test|"
@@ -21,8 +20,7 @@ def is_test(a) -> bool:
 def test_reruns(s: Session, P) -> Fix | None:
     """The same test command run again with nothing changed in between: no file written or edited, no other
     command. Its second result tells nothing new, and it was carried by every later call."""
-    usd, tokens, items, turns = 0.0, 0, [], set()
-    per_turn: dict[int, int] = {}
+    led, items, turns = Ledger(), [], set()
     hit_calls: list[tuple[str, int]] = []
     for calls in [s.calls] + [h.calls for h in s.helpers]:
         ran: set[str] = set()                     # test commands run since the last change
@@ -37,14 +35,8 @@ def test_reruns(s: Session, P) -> Fix | None:
                 if key not in ran:
                     ran.add(key)
                     continue
-                t = tok(a.result_chars)
-                if t and i + 1 < len(calls):
-                    nxt = calls[i + 1]
-                    usd += (t * pricemod.new_input_rate(nxt.usage, P.rates(nxt))
-                            + sum(t * P.rates(k)["cache_read"] for k in calls[i + 2:])) / 1e6
-                tokens += t
+                led.carry(src(c, a), tok(a.result_chars), calls[i + 1:], P)
                 turns.add(c.turn)
-                per_turn[c.turn] = per_turn.get(c.turn, 0) + t
                 hit_calls.append((c.agent, c.n))
                 items.append(f"{a.label} again with nothing changed, call {c.n}"
                              + ("" if c.agent == "main" else f" of the helper {helper_name(s, c.agent)}"))
@@ -55,8 +47,8 @@ def test_reruns(s: Session, P) -> Fix | None:
         why=(f"The tests were run {len(items)} more time{'s' if len(items) > 1 else ''} with no file changed since "
              "the last run, so the result could not be different. Each copy of the output was carried by every "
              "later call."),
-        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
-        per_turn=per_turn, calls=hit_calls, paste=True,
+        saving_usd=led.usd, saving_tokens=led.tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=led.per_turn(), calls=hit_calls, paste=True, claims=led.claims,
         how="Do not re-run a command when no file has changed since the last run. Read the first result.")
 
 

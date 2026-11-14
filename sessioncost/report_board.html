@@ -1337,6 +1337,8 @@ const FIXES = D.fixes.map(f => ({...f, step0: f.id !== 'model-choice' && !f.turn
   basic: f.source === 'built-in', short: ({'unused-tools': 'unused tools', 'unused-builtin': 'unused built-ins', 'repeated-reads': 're-read files', 'repeated-writes': 'rewritten files', 'error-loop': 'failed steps', 'helper-polling': 'checking on helpers', 'test-rerun': 'tests run again','confirm-turn': 'confirm stops', 'long-chat': 'new chat', 'cache-break': 'expired cache', 'stale-context': 'old results', 'big-results': 'big results', 'startup-bloat': 'big Step 0', 'images': 'images', 'long-output': 'long replies', 'helper-rereads': 'helper re-reads', 'model-choice': 'cheaper model'})[f.id] || (f.title.length > 26 ? f.title.slice(0, 25) + '…' : f.title)}))
   .sort((a, b) => b.saving_usd - a.saving_usd || b.saving_tokens - a.saving_tokens);     // money first: a cut of cheap cache re-reads must not look like the biggest win
 const FIX = Object.fromEntries(FIXES.map(f => [f.id, f]));
+/* all fixes together, each token counted once (fixes/overlap.py); older reports have no D.saving: add them up */
+const SAV = D.saving || null;
 const CALLFIX = {}; FIXES.forEach(f => (f.calls || []).forEach(i => { if (!f.step0) CALLFIX[i] = CALLFIX[i] || f.id; }));
 
 let prevEnd = 0;
@@ -1359,17 +1361,17 @@ const TURNS = D.turns.filter(t => t.n > 0 || t.calls.length).map(t => {
     setupSum: sum(all, c => c.sent.setup || 0), histSum: sum(all, c => c.sent.history || 0), newSum: sum(all, c => c.sent.new || 0),
     usd: (t.usd || 0) + (t.helper_usd || 0), workMin: t.minutes || 0, waitMin: (t.waited_min || 0) + (t.question_wait_min || 0),
     carried: {setup: first ? first.sent.setup || 0 : 0, hist: hist0}, expired, gap: expired ? Math.max(t.waited_min || 0, 5) : 0, compacted,
-    fixes, cut: Math.min(sent, sum(fixes, f => f.amount))};
+    fixes, cut: Math.min(sent, SAV ? SAV.per_turn[String(t.n)] || 0 : sum(fixes, f => f.amount))};
 });
 const NT = TURNS.length;
 const SENT = T.sent, CACHE = sum(C, c => c.usage.cache_read), FRESH = SENT - CACHE, OUT = T.output;
 const SB = T.sent_by || {setup: 0, history: 0, new: SENT};
 const CLS = k => T.by_class.find(x => x.key === k) || {tokens: 0, usd: 0};
 const USD = T.usd, USD_READ = CLS('cache_read').usd, USD_OUT = CLS('output').usd, USD_WRITE = USD - USD_READ - USD_OUT;
-const S0_CUT = sum(FIXES.filter(f => f.step0), f => f.saving_tokens);
+const S0_CUT = SAV ? SAV.setup_tokens : sum(FIXES.filter(f => f.step0), f => f.saving_tokens);
 const TURN_CUT = sum(TURNS, t => t.cut);
 const ALL_CUT = Math.min(SENT, S0_CUT + TURN_CUT);
-const ALL_USD = sum(FIXES, f => f.saving_usd);
+const ALL_USD = SAV ? SAV.usd : sum(FIXES, f => f.saving_usd);
 const WORK = T.working_min, WAIT = T.waiting_min;
 const sortedSent = TURNS.map(t => t.sent).sort((a, b) => a - b);
 const MEDIAN = sortedSent.length ? sortedSent[sortedSent.length >> 1] : 0;
@@ -1496,7 +1498,7 @@ $('ansCount').innerHTML = (MO.tokens_exact === false
   const normal = USD - USD_READ + (T.cache_read_full_usd || 0);
   $('baKeys').innerHTML = `${ALL_CUT ? `<span><i class="sw" style="background:var(--keep)"></i>needed <b class="num" style="color:var(--ink)">${K(need)}</b></span>` : `<span>Nothing obvious to cut in this chat.</span>`}
     ${ALL_CUT ? `<span><i class="sw hatch"></i>could be cut <b class="num" style="color:var(--ink)">${K(ALL_CUT)}</b>: ${K(Math.min(S0_CUT, ALL_CUT))} in Step 0, ${K(Math.max(0, ALL_CUT - S0_CUT))} in the turns</span>` : ''}
-    ${RANGE && M.agent !== 'cursor' ? `<p class="cachenote" style="flex-basis:100%;max-width:none"><span><b>The cost is between ${usd(RANGE.low)} and ${usd(RANGE.high)}.</b> ${esc(M.agent_label)} records few token counts and nothing about the cache, so most tokens here are estimated from the size of the text (scaled to Copilot's own counts where it gave them). ${usd(RANGE.low)} is if calls close together re-read the conversation from the cache; ${usd(RANGE.high)} is if nothing was re-read.</span></p>` :
+    ${RANGE && M.agent !== 'cursor' ? `<p class="cachenote" style="flex-basis:100%;max-width:none"><span><b>The cost is between ${usd(RANGE.low)} and ${usd(RANGE.high)}.</b> ${MO.counts_note ? esc(MO.counts_note) + '.' : `${esc(M.agent_label)} records few token counts and nothing about the cache, so most tokens here are estimated from the size of the text (scaled to Copilot's own counts where it gave them).`} ${usd(RANGE.low)} is if calls close together re-read the conversation from the cache; ${usd(RANGE.high)} is if nothing was re-read.</span></p>` :
     RANGE ? `<div class="cachenote" style="flex-basis:100%;max-width:none;display:grid;gap:6px"><span><b>The cost is between ${usd(RANGE.low)} and ${usd(RANGE.high)}.</b> ${MO.export_partial ? 'Your Cursor usage export gave the real tokens for part of this chat; the turns after it are still estimated. ' : ''}Cursor does not record how much of each call was re-read from the cache, where it costs much less. ${usd(RANGE.low)} is if calls close together re-read the conversation; ${usd(RANGE.high)} is if nothing was re-read. For the exact cost:</span>
       <ol class="steps2 do" style="margin:0"><li><a class="btn" href="https://cursor.com/settings" target="_blank" rel="noopener">Open Cursor's settings page ↗</a> and log in there, on Cursor's own site.</li><li>Open the <b>Usage</b> tab and export the CSV. It goes to your Downloads folder.</li><li>Run /sessioncost again: it finds the file there by itself and shows the exact cost. The file is only read on this computer.</li></ol></div>` :
     `<p class="cachenote" style="flex-basis:100%;max-width:none"><i class="sw" style="background:var(--cache)"></i><span><b>${pct(CACHE, SENT)} of these tokens were re-read from the cache</b>, which costs ${CACHE_SHARE} of the normal price. That is why ${K(SENT)} tokens cost ${usd(USD)}${T.cache_read_full_usd ? `; at the normal input price they would have cost ${usd(normal)}` : ''}. Cheap or not, every token still fills the chat, so cutting them gives you more room and more turns.</span></p>`}`;
@@ -2447,7 +2449,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape'){ if (!$('pan
 /* ======================= D: what to fix ======================= */
 // the heading names the money; the line beside it says how sure that is
 $('fixH').textContent = !FIXES.length ? 'Nothing to fix' : ALL_USD ? `How to save ${RANGE ? 'up to ' : ''}${usd(ALL_USD)}` : 'How to save';
-$('fixHead').innerHTML = FIXES.length ? `<b style="color:var(--ink)">${plural(FIXES.length, 'fix', 'fixes')}</b> · biggest first · measured from this session's own calls; fixes can overlap, so this is the most they could save` : 'None of the checks fired.';
+$('fixHead').innerHTML = FIXES.length ? `<b style="color:var(--ink)">${plural(FIXES.length, 'fix', 'fixes')}</b> · biggest first · measured from this session's own calls; ${SAV ? 'when two fixes point at the same tokens, the total above counts them once' : 'fixes can overlap, so this is the most they could save'}` : 'None of the checks fired.';
 $('fixlist').innerHTML = FIXES.length ? FIXES.map((f, i) => {
   const CHIPS = 10;
   const chips = f.step0 ? `<span class="muted" style="font-size:12.5px">Step 0, on every one of the ${CALLS} calls</span>`
@@ -2458,6 +2460,7 @@ $('fixlist').innerHTML = FIXES.length ? FIXES.map((f, i) => {
   return `<article class="fx" data-k="${esc(f.id)}" id="fx-${esc(f.id)}">
     <div class="top"><span class="rank" aria-label="Fix ${i + 1}">${i + 1}</span><h3>${esc(f.title)}${f.basic ? '' : ' <span class="src deep">deeper fix</span>'}</h3><span class="amt">${usd(f.saving_usd)}<small>${tokLine}</small></span></div>
     <p class="why">${esc(f.why)}</p>
+    ${f.overlaps && f.overlaps.length ? `<p class="muted" style="font-size:12.5px;margin:0 0 6px">Shares tokens with: ${f.overlaps.map(id => FIX[id] ? `<a href="#fx-${esc(id)}" style="color:var(--new)">${esc(FIX[id].short)}</a>` : esc(id)).join(', ')}. The total counts them once.</p>` : ''}
     <div class="where"><span class="lbl">Where</span><div class="turnchips">${chips}</div></div>
     <details class="fxmore"><summary>Details${f.items && f.items.length ? ` (${f.items.length})` : ''}</summary><p class="paidline">${paidAs(f)}</p>${f.items && f.items.length ? `<ul>${f.items.map(x => `<li>${md(x)}</li>`).join('')}</ul>` : ''}</details>
     ${f.sc_can && f.sc_can.length ? `<div class="copybox rule"><span class="lbl"><b>SessionCost can switch ${f.sc_can.length === 1 ? 'this' : 'these'} off for you:</b> ${esc(f.sc_can.join(', '))}. Type <code>/sessioncost fix</code> in the chat and answer yes; <code>/sessioncost fix --undo</code> puts it back.${f.how ? ' The rest you turn off yourself:' : ''}</span>

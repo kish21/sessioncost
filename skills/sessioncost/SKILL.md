@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 1.1.3) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have".
+description: (SessionCost 1.1.4) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have".
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -35,8 +35,9 @@ it, fetches SessionCost's price list).
 
    Tell the user in one line that you fetched Python for SessionCost through uv.
 
-2. It prints `Report: <path>`. Reply with only: "The full report: <path>" (the path as a clickable link, on its own
-   line), then "(if it did not open by itself, click the path)". Add no summary: the report has every number, and
+2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
+   printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own
+   line), then "(if it did not open by itself, click the path)". Add no other summary: the report has every number, and
    text in this chat is re-sent with every later message. Do not say it is open (some agents, Cursor for example,
    cannot open a browser) and do not offer to open it. Only if the user says it did not open, open the file with the
    system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).

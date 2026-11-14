@@ -8,7 +8,7 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from . import __version__, locate, prices as pricemod, readers, report
+from . import __version__, locate, prices as pricemod, readers, report, zfile
 from .analyse import analyse
 from .readers import cursor
 from .readers.antigravity import antigravity_homes
@@ -87,8 +87,8 @@ def summary(a: dict, path: Path | None) -> str:
                      "only part of this chat; export a newer one (cursor.com/settings, Usage tab) for the turns after it")
     elif mo.get("range") and a["meta"]["agent"] != "cursor":
         lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate, API-equivalent. "
-                     f"{a['meta']['agent_label']} records few token counts and nothing about the cache, so most "
-                     "tokens are estimated from the size of the text")
+                     + (mo.get("counts_note") or f"{a['meta']['agent_label']} records few token counts and nothing "
+                        "about the cache, so most tokens are estimated from the size of the text"))
     elif mo.get("range"):
         lines.append(f"Cost: {money(mo['range']['low'])}–{money(mo['range']['high'])} estimate. Cursor does not record "
                      "how much was re-read from the cache; its usage export gives the exact cost (cursor.com/settings, "
@@ -104,7 +104,7 @@ def summary(a: dict, path: Path | None) -> str:
     return "\n".join(lines)
 
 
-OLD_REPORTS_HINT = 10      # past this many older reports, the summary says how to delete them (it never asks)
+KEEP_REPORTS = 20          # one report per chat, ~0.5 MB each: after each report, older ones past the newest 20 go
 GUARD_PAGE = "guard.html"  # the guard report across every chat: rewritten with each report, never an "old report"
 
 
@@ -114,6 +114,20 @@ def old_reports(keep: Path | None, folder: Path = REPORTS) -> list[Path]:
                    reverse=True) if folder.is_dir() else []
     keep = keep or (files[0] if files else None)
     return [f for f in files if keep is None or f.resolve() != keep.resolve()]
+
+
+def trim_reports(keep: Path, folder: Path = REPORTS, n: int = KEEP_REPORTS) -> tuple[int, int]:
+    """Delete the reports past the newest n (never the one just written); (how many, bytes freed). A deleted
+    report comes back the next time that chat is opened, while its log is still on this computer."""
+    gone = freed = 0
+    for f in old_reports(keep, folder)[max(0, n - 1):]:
+        try:
+            b = f.stat().st_size
+            f.unlink()
+        except OSError:
+            continue
+        gone, freed = gone + 1, freed + b
+    return gone, freed
 
 
 def size(n: int) -> str:
@@ -169,8 +183,8 @@ def build(path, args) -> tuple[dict, Path | None]:
             print(f"sessioncost: {used} requests from the usage export matched this chat" if used else
                   "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
     a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
-    a["guard_all"] = guard_totals(s.cwd)
     from . import fixer, guard
+    a["guard_all"] = guard_totals(s.cwd)
     project = getattr(args, "project", None) or s.cwd
     a["fix_project"] = str(project or "")
     a["fix_verify"] = []
@@ -184,6 +198,7 @@ def build(path, args) -> tuple[dict, Path | None]:
         REPORTS.mkdir(parents=True, exist_ok=True)
         out = REPORTS / f"{s.session_id}.html"
         out.write_text(report.render(a), encoding="utf-8", errors="replace")   # an old guard log's broken character: '?'
+        a["reports_trimmed"] = trim_reports(out, out.parent)
         if a["guard_all"]:                 # the report's "Open the full guard report" opens this page, next to it
             try:
                 from .guard_report import write as write_guard_report
@@ -194,41 +209,15 @@ def build(path, args) -> tuple[dict, Path | None]:
 
 
 def guard_totals(cwd: str | None) -> dict | None:
-    """The guarded chats of this chat's project, by name, as counts and reasons, plus how many chats and projects
-    were guarded on this computer in all (numbers only: a chat's report may be shared, so no other project's name or
-    any command). None when the guard has never been on here."""
-    import collections
-    from .guard import WHY
-    from .guard_report import collect
-    from .risks import SEVERITY
-    try:
-        r = collect()
-    except OSError:
-        return None
-    if not r["chats"]:
-        return None
-    same = lambda p: bool(p) and bool(cwd) and os.path.normcase(os.path.normpath(p)) == os.path.normcase(os.path.normpath(cwd))
-    mine = [c for c in r["chats"] if same(c["cwd"])]
-    ids = {c["id"] for c in mine}
-    reasons = {"blocked": collections.Counter(), "asked": collections.Counter()}
-    for st in r["steps"]:
-        if st["chat"] in ids:
-            reasons[st["decision"]].update(st["marks"])
-    return {"project": os.path.basename(str(cwd or "").rstrip("\\/")) or "this project",
-            "chats": len(mine), "intact": sum(c["intact"] for c in mine),
-            **{k: sum(c[k] for c in mine) for k in ("checked", "blocked", "asked", "allowed", "injections")},
-            "reasons": {d: [[WHY.get(m, m), n] for m, n in reasons[d].most_common(6) if SEVERITY.get(m) != "info"]
-                        for d in reasons},
-            "all_chats": len(r["chats"]), "all_projects": len({c["project"] for c in r["chats"]})}
-
-
+    from .guard_report import guard_totals as totals      # lives there; tests patch it here
+    return totals(cwd)
 
 
 def cmd_list(args) -> int:
     loose: list = []
     found = locate.sessions(args.project, unlinked=loose)
     if not found and not loose:
-        print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()}")
+        print(f"No Claude Code, Codex, Copilot CLI, Antigravity or Cursor sessions found for {args.project or Path.cwd()}" + zfile.codex_note("\n"))
         return 1
     P = pricemod.load(args.prices)
 
@@ -247,12 +236,14 @@ def cmd_list(args) -> int:
 
     if found:
         rows(found)
+        if len(found) > args.limit:
+            print(f"\nShowing {args.limit} of {len(found)}. All of them: sessioncost list --limit {len(found)}")
     else:
         print(f"No session is recorded for {args.project or Path.cwd()}.")
     if loose:
         print("\nThe agent did not record a folder for these, so they may belong to any project:")
         rows(loose)
-    print("\nOpen one: sessioncost <session>   (its first characters are enough)")
+    print(zfile.codex_note("\n", "\n") + "\nOpen one: sessioncost <session>   (its first characters are enough)")
     return 0
 
 
@@ -314,7 +305,7 @@ def cmd_fix(argv: list[str]) -> int:
     ap.add_argument("--handover", action="store_true", help="print where the handover of this project's last chat is")
     ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
     args = ap.parse_args(argv)
-    project = Path(args.project or os.getcwd()).resolve()
+    project = fixer.project_path(args.project or os.getcwd())     # as given: the key itself follows links
     if args.handover:
         h = fixer.find_handover(project)
         print(h.as_posix() if h else f"No handover for {project} yet: a long chat gets one from `sessioncost fix`.")
@@ -459,12 +450,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(a, indent=1, ensure_ascii=False, default=str))
         return 0
+    from .status import block      # what SessionCost is doing, before any number (NEXT-SESSION item 7)
+    print(block(a, a.get("fix_project") or os.getcwd()))
     print(f"Report: {Path(out).as_posix()}" if args.brief else summary(a, out))
     if args.sarif:
         print(f"SARIF: {args.sarif}")
-    old = old_reports(out) if out else []
-    if len(old) > OLD_REPORTS_HINT:
-        print(f"Old reports: {len(old)} ({size(sum(f.stat().st_size for f in old))}) · delete them with: sessioncost clean")
+    gone, freed = a.get("reports_trimmed") or (0, 0)
+    if gone:
+        print(f"Old reports: deleted {gone} ({size(freed)}); the newest {KEEP_REPORTS} are kept.")
     if out and not args.no_open:
         webbrowser.open(out.resolve().as_uri())
     return 0

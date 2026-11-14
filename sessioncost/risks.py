@@ -74,6 +74,7 @@ import json
 import os
 import re
 
+from . import risk_bypass
 from .model import Session
 from .risk_patterns import (_DB_CLIENT, _DB_WIPE, _DELETE, _ENCODED, _ENV_DUMP, _FILE_API, _FORCE, _GUARD, _GUARD_IN_CMD,
                             _INLINE, _INSTALL, _MCP_ACT, _MEMORY, _NET_CMD, _OUTWARD_TOOLS, _OWN_PATH, _PERSIST,
@@ -92,9 +93,15 @@ def watch_marks(a, cwd: str) -> list[str]:
     """The watch-list marks of one step (see the module notes)."""
     out = []
     tool, full = (a.tool or "").lower(), a.target or ""
+    if a.kind == "command":
+        full = risk_bypass.fold(full)                                     # '.' + 'env' is '.env'
     t = _unquote(_shell_part(full)) if a.kind == "command" else full
     if a.kind == "command" and (inner := _inner_cmds(_shell_part(full))):
         t += "".join("\n" + _unquote(_shell_part(i)) for i in inner)      # bash -c "...": the inner command, on its own line
+    if a.kind == "command":
+        t = risk_bypass.expand(t, cwd)                                    # cat .e*, cat $(ls -a | grep en): the file named
+    script = a.kind == "command" and bool(_INLINE.search(full) and _RUNS_BODY.search(t))
+    by_script = risk_bypass.script_marks(full) if script else []
     # the steps it takes, search words left out
     run = _without_searches(_shell_part(full), [_shell_part(i) for i in _inner_cmds(_shell_part(full))]) if a.kind == "command" else t
     if a.kind in ("edit", "write") and any(_outside(p, cwd) for p in full.splitlines()):
@@ -111,11 +118,11 @@ def watch_marks(a, cwd: str) -> list[str]:
     else:
         hit = a.kind != "search" and bool(_SECRET.search(t))      # a search pattern that mentions .env reads no secret
         hit = hit or (tool in ("grep", "grep_search") and bool(_SECRET.search(" " + str(getattr(a, "paths", "") or ""))))   # searching inside one does
-    if hit or ((a.kind in ("command", "web") or tool.startswith("mcp__")) and _SECRET_VALUE.search(full)):   # a key sent out
+    if hit or "secrets" in by_script or ((a.kind in ("command", "web") or tool.startswith("mcp__")) and _SECRET_VALUE.search(full)):
         out.append("secrets")
     if tool.startswith("mcp__"):
         out += _mcp_marks(tool.split("__")[-1], full, cwd)
-    if a.kind == "command" and (_DELETE.search(run) or _moves_out(run, cwd) or
+    if a.kind == "command" and (_DELETE.search(run) or _moves_out(run, cwd) or "deletes" in by_script or
                                 (_DB_CLIENT.search(run) and (_SQL_DESTROY.search(full) or _DB_WIPE.search(full)))):
         out.append("deletes")
     if a.kind == "command" and _PUSH.search(run):
@@ -130,8 +137,10 @@ def watch_marks(a, cwd: str) -> list[str]:
         for mark, rx, text in (("pipe_to_shell", _PIPE_SHELL, t), ("encoded_command", _ENCODED, full), ("env_dump", _ENV_DUMP, _QUOTED.sub("''", t)),
                                ("force_push", _FORCE, _no_prose(run)), ("persistence", _PERSIST, run), ("security_off", _SEC_OFF, run),
                                ("wipe", _WIPE, run), ("privilege", _PRIVILEGE, run)):
-            if rx.search(text):
+            if rx.search(text) or mark in by_script:
                 out.append(mark)
+        if "env_dump" not in out and risk_bypass.env_print(t):
+            out.append("env_dump")                                        # node -p process.env
         if "pipe_to_shell" not in out and _downloads_then_runs(t):
             out.append("pipe_to_shell")
         if "env_dump" not in out and _INLINE.search(full) and _RUNS_BODY.search(t) and _SCRIPT_ENV.search(full):
@@ -143,7 +152,7 @@ def watch_marks(a, cwd: str) -> list[str]:
             out.append("secrets")       # cmdkey /list, gh auth token: a stored login printed
         if _RC_FILE.search(t) and _WRITES.search(_QUIET.sub(" ", t)) and "persistence" not in out:
             out.append("persistence")
-        if _direct(run):
+        if _direct(run) or risk_bypass.hooks_off(t, cwd):
             out.append("skips_commit_checks")
     elif a.kind in ("edit", "write") and any(_RC_FILE.search(p.strip()) for p in full.splitlines()):
         out.append("persistence")
@@ -151,7 +160,7 @@ def watch_marks(a, cwd: str) -> list[str]:
         out.append("injected")
     if "secret_value" in (getattr(a, "result_flags", None) or []):
         out.append("key_in_output")
-    if _tampers(a, full, t):
+    if _tampers(a, full, t) or (a.kind == "command" and risk_bypass.moves_guard_settings(t)):
         out.append("guard_tamper")
     return list(dict.fromkeys(out))
 

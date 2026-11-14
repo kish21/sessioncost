@@ -123,12 +123,16 @@ def _quiet_python() -> Path:
 def _launch(event: str, agent: str) -> str:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
+    # -S when run from its own file: the guard needs only Python's own library, and add-ons that load at every Python
+    # start are skipped (one seen 2026-11-14: 2 s per step). Installed as a package it needs site-packages: no -S.
     if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
-        run = f'"{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
+        run = f'-S "{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
         return f'"{_quiet_python().as_posix()}" {run} hook {event} claude'
-    run = _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
+    run = "-S " + _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
+    # every agent: python.exe flashes a console window at each step (Copilot's VS Code panel, owner 2026-11-12);
+    # bash, cmd.exe and PowerShell (`& exe`) all pass pythonw.exe's input and answer on (checked 2026-11-13)
     quiet = _quiet_python()
-    exe = str(quiet) if agent == "antigravity" and quiet.name.lower() == "pythonw.exe" else sys.executable
+    exe = str(quiet) if quiet.name.lower() == "pythonw.exe" else sys.executable
     return f'{_path_arg(exe)} {run} hook {event} {agent}'
 
 
@@ -163,7 +167,7 @@ def setup(agent: str) -> str:
     elif agent == "cursor":
         p = Path.home() / ".cursor" / "hooks.json"
         ours = {ev: [{"command": _launch("gate" if ev in CURSOR_GATES else "note", "cursor"), "timeout": 10}]
-                for ev in ("sessionStart", "beforeShellExecution", "afterShellExecution", "beforeMCPExecution",
+                for ev in ("sessionStart", "beforeSubmitPrompt", "beforeShellExecution", "afterShellExecution", "beforeMCPExecution",
                            "afterMCPExecution", "beforeReadFile", "stop", "sessionEnd")}
     elif agent == "antigravity":              # one named hook of its own; every other named hook is kept
         p = Path.home() / ".gemini" / "config" / "hooks.json"

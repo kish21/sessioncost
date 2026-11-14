@@ -6,7 +6,7 @@ import re
 from .. import prices as pricemod
 from ..model import Fix, Session
 from .cache_break import cache_break
-from .common import (_where)
+from .common import Ledger, _where
 
 LONG_CHAT = 100_000      # a conversation this long, carried into a turn after a break, is worth a new chat
 LONG_BREAK_S = 30 * 60   # a break this long: the cache has usually expired, and the task has often changed
@@ -75,7 +75,7 @@ def long_chat(s: Session, P) -> Fix | None:
             why[t.n] = reason
     if not splits:
         return None
-    usd, tokens, per_turn, items, hit = 0.0, 0, {}, [], []
+    led, items, hit = Ledger(), [], []
     has_cb = cache_break(s, P) is not None
     order = {id(c): i for i, c in enumerate(calls)}
     for k, t in enumerate(splits):
@@ -93,14 +93,12 @@ def long_chat(s: Session, P) -> Fix | None:
             # the first call after a long break wrote it all again at full price; later calls re-read it cheaply
             rate = (pricemod.new_input_rate(c.usage, r)
                     if i == start and not has_cb and c.usage.cache_read < base / 2 else r["cache_read"])
-            usd += take * rate / 1e6
-            tokens += take
+            led.add(("history",), c, take, take * rate / 1e6, kind="history")
             seg += take
-            per_turn[c.turn] = per_turn.get(c.turn, 0) + take
         hit.append((t.calls[0].agent, t.calls[0].n))
         items.append(f"before turn {t.n}: {why[t.n]}, with ~{base:,} tokens of conversation; "
                      f"a new chat would have cut ~{seg:,} tokens from the {end - start} calls after it")
-    if not tokens:
+    if not led.tokens:
         return None
     turns = [t.n for t in splits]
     breaks = all(why[n].endswith("break") for n in turns)
@@ -113,5 +111,5 @@ def long_chat(s: Session, P) -> Fix | None:
              "later call re-sent all of it, including old work that had nothing to do with the next task. A new "
              "chat, or a compacted one, would have carried a short summary instead. (A fresh chat may re-read a "
              "file or two to catch up, so this is the most it could save.)"),
-        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=turns, items=items,
-        per_turn=per_turn, calls=hit, how=new_chat_steps(s.agent), paste=False)
+        saving_usd=led.usd, saving_tokens=led.tokens, where=_where(turns), turns=turns, items=items,
+        per_turn=led.per_turn(), calls=hit, claims=led.claims, how=new_chat_steps(s.agent), paste=False)

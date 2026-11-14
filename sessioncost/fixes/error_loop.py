@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import re
 
-from .. import prices as pricemod
 from ..model import Fix, Session
-from .common import (_where, helper_name, sent_usd, tok)
+from .common import Ledger, _where, helper_name, sent_usd, src, tok
 
 ERRORS_MIN = 3           # this many failed steps in a chat, or two in a row in one turn, is a pattern
 
@@ -14,8 +13,7 @@ def error_loop(s: Session, P) -> Fix | None:
     """Failed tool steps, and above all retries straight after a failure. Each error message rode on every later
     call of its thread; a retry right after a failure also re-sent the whole conversation to try again. Stopping to
     find the cause after the second failure would have saved the retries (the most it could save)."""
-    usd, tokens, items, turns, fails, longest, same = 0.0, 0, [], set(), 0, 0, 0
-    per_turn: dict[int, int] = {}
+    led, items, turns, fails, longest, same = Ledger(), [], set(), 0, 0, 0
     hit_calls: list[tuple[str, int]] = []
     for calls in [s.calls] + [h.calls for h in s.helpers]:
         run, turn = 0, None
@@ -36,20 +34,11 @@ def error_loop(s: Session, P) -> Fix | None:
                 fails += 1
                 run += 1
                 longest = max(longest, run)
-                t = tok(a.result_chars)
-                cost = 0.0
-                if t and i + 1 < len(calls):
-                    nxt = calls[i + 1]
-                    cost += t * pricemod.new_input_rate(nxt.usage, P.rates(nxt))
-                    cost += sum(t * P.rates(k)["cache_read"] for k in calls[i + 2:])
+                led.carry(src(c, a), tok(a.result_chars), calls[i + 1:], P)
                 retry = run > 1
                 if retry and a is c.actions[0]:       # this call only happened to try again after a failure
-                    cost += sent_usd(c, P.rates(c)) * 1e6
-                    t += c.usage.context
-                usd += cost / 1e6
-                tokens += t
+                    led.add(("call", c.agent, c.n), c, c.usage.context, sent_usd(c, P.rates(c)), kind="whole")
                 turns.add(c.turn)
-                per_turn[c.turn] = per_turn.get(c.turn, 0) + t
                 if (c.agent, c.n) not in hit_calls:
                     hit_calls.append((c.agent, c.n))
                 note = ", the same as before and unchanged" if again else ", again right after a failure" if retry else ""
@@ -64,7 +53,7 @@ def error_loop(s: Session, P) -> Fix | None:
              + (f"; {same} of them ran exactly what had already failed, with no file changed in between" if same else "")
              + ". Each error message was carried by every later call, and each retry right after a failure re-sent "
              "the whole conversation to try again. Finding the cause first is usually cheaper than trying again."),
-        saving_usd=usd, saving_tokens=tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
-        per_turn=per_turn, calls=hit_calls, paste=True,
+        saving_usd=led.usd, saving_tokens=led.tokens, where=_where(turns), turns=sorted(turns), items=items[:8],
+        per_turn=led.per_turn(), calls=hit_calls, paste=True, claims=led.claims,
         how="When a command or tool fails twice in a row, stop and find the cause before trying again. Do not retry "
             "the same thing with small changes.")

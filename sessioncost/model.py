@@ -146,6 +146,20 @@ class Setup:
 
 
 @dataclass
+class Claim:
+    """Tokens one fix would have kept out of one call, and what they cost there. `source` names the text they are
+    (one tool result, one reply, the old conversation...), so two fixes that point at the same text are counted
+    once in the headline (fixes/overlap.py). kind: carry (one piece of text), whole (the call would not have
+    happened), history (the old conversation, a new chat), price (the same tokens, cheaper: no tokens cut)."""
+    source: tuple
+    call: tuple[str, int]        # (thread, call number)
+    turn: int
+    tokens: int
+    usd: float
+    kind: str = "carry"
+
+
+@dataclass
 class Fix:
     """One fix, with a saving measured from this session's own calls."""
     id: str
@@ -163,6 +177,7 @@ class Fix:
     paste: bool = False          # `how` is a line to paste into the agent's instruction file
     targets: list[str] = field(default_factory=list)   # what a setting switches off (server or tool names), for `fix`
     per_target: dict[str, int] = field(default_factory=dict)   # the tokens of each target, when they differ
+    claims: list[Claim] = field(default_factory=list)   # call by call, what it cuts (empty: Step 0 or price only)
 
 
 @dataclass
@@ -195,6 +210,7 @@ class Session:
     billed_per_token: bool = True       # False: the agent's plan never bills per token (money is API-equivalent)
     tokens_exact: bool = True           # False: the log has no token counts; they are estimated from text size
     notes: list[str] = field(default_factory=list)
+    counts_note: str = ""               # how much the agent counted itself, when tokens are partly estimated
     fixes: list[Fix] = field(default_factory=list)   # filled by the fix engines (see fixes.py)
     added: list[Added] = field(default_factory=list) # setup-like text added after the first call
 

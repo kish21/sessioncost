@@ -56,9 +56,17 @@ def _norm(p) -> str:
     return os.path.normcase(os.path.normpath(str(p)))
 
 
+def project_path(project) -> Path:
+    """The project as the user or agent gave it, made absolute: links are kept, so paths shown read as given."""
+    return Path(os.path.abspath(str(project)))
+
+
 def project_key(project) -> str:
-    name = re.sub(r"[^\w.-]", "_", Path(str(project)).name or "root")[:40]
-    return f"{name}-{hashlib.sha1(_norm(project).encode()).hexdigest()[:8]}"
+    """One key per folder however it is spelled: macOS's /var is a link to /private/var, and a project can sit behind
+    any link or junction; the agent's cwd and SessionCost's own path must find the same files."""
+    real = os.path.realpath(str(project))
+    name = re.sub(r"[^\w.-]", "_", Path(real).name or "root")[:40]
+    return f"{name}-{hashlib.sha1(_norm(real).encode()).hexdigest()[:8]}"
 
 
 def fixes_file(project) -> Path:
@@ -157,6 +165,20 @@ def _tok(n: float) -> str:
     if n >= 1000:
         return f"{n / 1e3:.1f}".rstrip("0").rstrip(".") + "k"
     return f"{n:.0f}"
+
+
+def _usd(x: float) -> str:
+    """0.06 -> $0.06, 1234.5 -> $1,234.50, a real cost under a cent -> "under $0.01" (never "$0.00"), none -> ""."""
+    x = float(x or 0)
+    if x <= 0:
+        return ""
+    return f"${x:,.2f}" if x >= 0.005 else "under $0.01"
+
+
+def _size(tokens: float, usd: float) -> str:
+    """Tokens and what they cost, side by side: "~187k tokens, ~$0.06". No price known: tokens only."""
+    money = _usd(usd)
+    return f"~{_tok(tokens)} tokens" + (f", {'~' if money.startswith('$') else ''}{money}" if money else "")
 
 
 def _first(text: str) -> str:
@@ -266,6 +288,13 @@ def learned() -> list[dict]:
     return [x for x in _load(learned_file(), {}).get("items", []) if isinstance(x, dict) and x.get("rule")]
 
 
+def learned_here(x: dict, project) -> bool:
+    """A learned rule is offered in the project where the agent found it; once found in two projects (or kept before
+    projects were recorded), in every project. A rule about one project's dev server stays in that project."""
+    seen = {project_key(p) for p in x.get("projects") or [] if p}
+    return len(seen) != 1 or project_key(project) in seen
+
+
 def known() -> list[str]:
     """Everything SessionCost knows as token waste: its own checks, then what agents found before."""
     return KNOWN + [x["what"] for x in learned()]
@@ -284,7 +313,7 @@ def learn(what: str, rule: str, project=None, agent: str = "") -> tuple[int, str
             return 0, f"Already known: SessionCost checks for this (\"{text}\"). Nothing added."
     data = _load(learned_file(), {})
     items = [x for x in data.get("items", []) if isinstance(x, dict)]
-    now, where = _now(), str(Path(project).resolve()) if project else ""
+    now, where = _now(), str(project_path(project)) if project else ""
     for x in items:
         if _similar(rule, x.get("rule", "")) or _similar(what, x.get("what", "")):
             x["times"] = int(x.get("times") or 1) + 1

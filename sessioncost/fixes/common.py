@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from .. import prices as pricemod
-from ..model import Call, Session
+from ..model import Call, Claim, Session
 
 CONFIRM = {"y", "yes", "yes please", "yep", "yeah", "ok", "okay", "k", "sure", "go", "go ahead", "go on", "do it",
            "proceed", "continue", "save", "save it", "confirm", "confirmed", "approve", "approved", "lgtm",
@@ -75,6 +75,44 @@ def short_target(target: str, cwd: str = "") -> str:
     if "/" in t and len(t) > 48:
         t = t.rsplit("/", 1)[-1]
     return t[:60]
+
+
+def src(c: Call, a) -> tuple:
+    """The name of one tool result's text, the same in every check (fixes/overlap.py counts it once)."""
+    return ("result", c.agent, c.n, a.id)
+
+
+class Ledger:
+    """A check's claims (model.Claim), call by call; its saving is their sum."""
+
+    def __init__(self):
+        self.claims: list[Claim] = []
+
+    def add(self, source: tuple, c: Call, tokens: int, usd: float, kind: str = "carry", turn: int | None = None):
+        self.claims.append(Claim(source, (c.agent, c.n), c.turn if turn is None else turn, int(tokens), usd, kind))
+
+    def carry(self, source: tuple, tokens: int, later: list[Call], pr, first_new: bool = True, turn=None):
+        """`tokens` of text sent again by each later call: as new input on the first (unless not `first_new`), from
+        the cache after that."""
+        for k, lc in enumerate(later):
+            r = pr.rates(lc)
+            rate = pricemod.new_input_rate(lc.usage, r) if k == 0 and first_new else r["cache_read"]
+            self.add(source, lc, tokens, tokens * rate / 1e6, turn=turn)
+
+    @property
+    def tokens(self) -> int:
+        return sum(c.tokens for c in self.claims if c.kind != "price")
+
+    @property
+    def usd(self) -> float:
+        return sum(c.usd for c in self.claims)
+
+    def per_turn(self) -> dict[int, int]:
+        out: dict[int, int] = {}
+        for c in self.claims:
+            if c.kind != "price":
+                out[c.turn] = out.get(c.turn, 0) + c.tokens
+        return out
 
 
 def first_and_cached(tokens: int, calls: list[Call], pr) -> float:

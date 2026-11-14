@@ -97,7 +97,8 @@ def startup_bloat(s: Session, pr) -> Fix | None:
         id="startup-bloat",
         title=f"Trim Step 0 instructions and skill descriptions (~{cut_per_call:,} tokens on every call)",
         why=(f"Before anyone says a word, Step 0 sends ~{non_tool_tok:,} tokens of instructions and skill descriptions "
-             f"on every call. Trimming always-on instructions and unused skills saves ~{total_tok:,} tokens across {len(calls)} calls."),
+             f"on every call. Trimming always-on instructions and unused skills saves ~{total_tok:,} tokens across {len(calls)} calls "
+             f"(an estimate: it assumes about half of the instructions and 60% of an unused skill list can go)."),
         saving_usd=total_usd, saving_tokens=total_tok,
         where="every call", turns=[], items=items[:6],
         calls=[("main", c.n) for c in calls],

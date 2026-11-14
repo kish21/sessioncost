@@ -70,6 +70,32 @@ def collect(folder: Path | None = None) -> dict:
             "by_agent": by("via"), "by_project": by("project")}
 
 
+def guard_totals(cwd: str | None) -> dict | None:
+    """The guarded chats of this chat's project, by name, as counts and reasons, plus how many chats and projects
+    were guarded on this computer in all (numbers only: a chat's report may be shared, so no other project's name or
+    any command). None when the guard has never been on here."""
+    from .risks import SEVERITY
+    try:
+        r = collect()
+    except OSError:
+        return None
+    if not r["chats"]:
+        return None
+    same = lambda p: bool(p) and bool(cwd) and os.path.normcase(os.path.normpath(p)) == os.path.normcase(os.path.normpath(cwd))
+    mine = [c for c in r["chats"] if same(c["cwd"])]
+    ids = {c["id"] for c in mine}
+    reasons = {"blocked": collections.Counter(), "asked": collections.Counter()}
+    for st in r["steps"]:
+        if st["chat"] in ids:
+            reasons[st["decision"]].update(st["marks"])
+    return {"project": os.path.basename(str(cwd or "").rstrip("\\/")) or "this project",
+            "chats": len(mine), "intact": sum(c["intact"] for c in mine),
+            **{k: sum(c[k] for c in mine) for k in ("checked", "blocked", "asked", "allowed", "injections")},
+            "reasons": {d: [[WHY.get(m, m), n] for m, n in reasons[d].most_common(6) if SEVERITY.get(m) != "info"]
+                        for d in reasons},
+            "all_chats": len(r["chats"]), "all_projects": len({c["project"] for c in r["chats"]})}
+
+
 def _e(x) -> str:
     return html.escape(str(x), quote=True)
 

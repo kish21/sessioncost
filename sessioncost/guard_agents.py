@@ -101,6 +101,8 @@ def _cursor_in(inp: dict) -> tuple[str, dict]:
     if ev == "beforeReadFile":
         ti = {"file_path": str(inp.get("file_path") or "")}
         return "read", {**base, "tool_name": "Read", "tool_input": ti, "tool_use_id": tid(ti), "tool_response": inp.get("content") or ""}
+    if ev == "beforeSubmitPrompt":            # your message: the turn's checkpoint ("allow it", untrusted content reset)
+        return "prompt", {**base, "prompt": str(inp.get("prompt") or "")}
     return {"sessionStart": "session-start", "stop": "stop", "sessionEnd": "end"}.get(ev, ""), base
 
 
@@ -108,9 +110,10 @@ def _agy_in(event: str, inp: dict) -> tuple[str, dict]:
     roots = inp.get("workspacePaths") or [""]
     base = {"session_id": inp.get("conversationId") or "antigravity",
             "cwd": roots[0] if isinstance(roots, list) and roots else "", "_agent": "antigravity"}
-    if event == "invocation":                 # the user's message, when this build sends it: the turn's checkpoint
-        msg = next((inp[k] for k in ("userMessage", "currentUserMessage", "prompt", "userPrompt") if isinstance(inp.get(k), str)), "")
-        return ("prompt" if msg else ""), {**base, "prompt": msg}
+    if event == "invocation":                 # the user's message: the turn's checkpoint. PreInvocation runs before every
+        msg = next((inp[k] for k in ("lastUserInput", "userMessage", "currentUserMessage", "prompt", "userPrompt")  # model
+                    if isinstance(inp.get(k), str) and inp[k]), "")                # call: the turn is known by its text
+        return ("prompt" if msg else ""), {**base, "prompt": msg, "_turn": hashlib.sha1(msg.encode()).hexdigest()[:16]}
     if event not in ("pre", "post"):
         return event, base
     call = inp.get("toolCall") if isinstance(inp.get("toolCall"), dict) else {}
@@ -119,8 +122,17 @@ def _agy_in(event: str, inp: dict) -> tuple[str, dict]:
     m = re.match(r"mcp_([^_]+)_(.+)$", name)
     if m and name not in AGY_TOOLS:          # an MCP tool (Antigravity's naming is not documented: server_tool)
         tool = f"mcp__{m.group(1)}__{m.group(2)}"
+    err = str(inp.get("error") or "") if event == "post" else ""   # PostToolUse's error is empty when the step went fine
     return event, {**base, "tool_name": tool, "tool_input": ti, "tool_use_id": f"{base['session_id']}:{inp.get('stepIdx', '')}",
-                   "tool_response": inp.get("error") or ""}
+                   "tool_response": err, **(_failed() if err and tool == "Bash" and not _DENIED.search(err) else {})}
+
+
+_DENIED = re.compile(r"SessionCost guard|\bdenied\b|\bdeclined\b|\brejected\b|\bcancel", re.I)   # stopped, not failed
+
+
+def _failed(code: int = 1) -> dict:
+    """A command that ran and failed: guard.on_fail counts it (the third try in a row asks)."""
+    return {"_failed": True, "error": f"Exit code {code}"}
 
 
 # Copilot CLI (docs.github.com/en/copilot/reference/hooks-configuration and .../copilot-cli-reference/cli-hooks-reference):
@@ -144,7 +156,10 @@ COPILOT_TOOLS = {"bash": ("Bash", lambda a: {"command": a.get("command") or ""})
                  "grep": ("Grep", lambda a: {"pattern": a.get("pattern") or "", "path": _first(a.get("path") or a.get("paths"))}),
                  "rg": ("Grep", lambda a: {"pattern": a.get("pattern") or "", "path": _first(a.get("path") or a.get("paths"))})}
 COPILOT_EVENTS = {"sessionStart": "session-start", "userPromptSubmitted": "prompt", "preToolUse": "pre",
-                  "postToolUse": "post", "agentStop": "stop", "sessionEnd": "end"}
+                  "postToolUse": "post", "postToolUseFailure": "fail", "agentStop": "stop", "sessionEnd": "end"}
+# A shell command that exits non-zero is a success to Copilot (postToolUse); its result ends with the exit code. A tool
+# error goes to postToolUseFailure as {message, code}; code "denied" is a hook's block, not a failure.
+_EXIT = re.compile(r"exit code (\d+)>?\s*$", re.I)
 
 
 def _first(x) -> str:
@@ -155,7 +170,7 @@ def _copilot_in(event: str, inp: dict) -> dict:
     base = {"session_id": inp.get("sessionId") or "copilot", "cwd": str(inp.get("cwd") or ""), "_agent": "copilot"}
     if event == "prompt":
         return {**base, "prompt": str(inp.get("prompt") or "")}
-    if event not in ("pre", "post"):
+    if event not in ("pre", "post", "fail"):
         return base
     name, args = str(inp.get("toolName") or ""), inp.get("toolArgs")
     if isinstance(args, str):
@@ -166,6 +181,11 @@ def _copilot_in(event: str, inp: dict) -> dict:
     tid = f"{base['session_id']}:{hashlib.sha1(json.dumps([name, args], sort_keys=True).encode()).hexdigest()[:12]}"
     res = inp.get("toolResult") if isinstance(inp.get("toolResult"), dict) else {}
     out = {**base, "tool_use_id": tid, "tool_response": res.get("textResultForLlm") or ""}
+    err = inp.get("error") if isinstance(inp.get("error"), dict) else {"message": inp.get("error"), "code": "failure"}
+    if event == "fail" and err.get("code") != "denied":
+        out.update(_failed())
+    elif event == "post" and name in ("bash", "powershell") and (m := _EXIT.search(str(out["tool_response"]))) and int(m[1]):
+        out.update(_failed(int(m[1])))
     if isinstance(args, str) and "*** Begin Patch" in args:
         return {**_codex_in({"tool_name": "apply_patch", "tool_input": {"command": args}}), **out}
     args = args if isinstance(args, dict) else {"input": args}

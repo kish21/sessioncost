@@ -35,6 +35,18 @@ from .codex import _command, _name, _patch
 MAX_PROMPT = 128_000
 
 
+def counts_note(counted: int, asked: int) -> str:
+    """One sentence on how much of this chat's tokens Copilot counted itself (it never records the cache)."""
+    if asked and counted >= asked:
+        return (f"Copilot counted the tokens of every one of your {asked} messages itself, but not the cache or how "
+                "they split over the steps of a message, so those parts are estimated")
+    if counted:
+        return (f"Copilot counted the tokens of {counted} of your {asked} messages itself and nothing about the "
+                "cache; the rest are estimated from the size of the text")
+    return ("Copilot recorded no token counts in this chat and nothing about the cache, so the tokens are estimated "
+            "from the size of the text")
+
+
 def vscode_homes() -> list[Path]:
     """The VS Code user folders on this computer (stable and Insiders)."""
     if sys.platform == "win32":
@@ -250,8 +262,9 @@ class VSCodeChatReader:
             models[c.model] = models.get(c.model, 0) + 1
         s.model = max(models, key=models.get) if models else ""
         s.setup = Setup()                       # not in these files: its size is inside Copilot's own counts
-        s.notes.append("Copilot Chat in VS Code records few token counts and nothing about the cache: most tokens here "
-                       "are estimated from the size of the text, so the cost is a range.")
+        asked = sum(1 for t in s.turns if t.n > 0)
+        s.counts_note = counts_note(len(counted), asked)
+        s.notes.append(s.counts_note + ", so the cost is a range.")
         if any(c.usage.fresh_input >= MAX_PROMPT for c in main):
             s.notes.append(f"Some calls are counted at {MAX_PROMPT // 1000}K tokens, an assumed prompt limit: Copilot "
                            "trims older tool output to fit the model, and the log does not say how much.")

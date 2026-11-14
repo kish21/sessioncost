@@ -98,8 +98,9 @@ class _Thread:
 
 
 def _rows(path: Path) -> list[dict]:
+    from ..zfile import open_text                       # Codex's older threads are .jsonl.zst
     out = []
-    with path.open(encoding="utf-8", errors="replace") as f:
+    with open_text(path) as f:
         for line in f:
             line = line.strip()
             if line:

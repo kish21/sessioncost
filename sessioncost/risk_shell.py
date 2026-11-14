@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
 
 
 from .risk_patterns import _MOVE, _QUOTED, _SECRET, _norm
@@ -148,5 +147,6 @@ def _outside(path: str, cwd: str) -> bool:
     """A file changed outside the project folder (relative paths are inside it; the temp folder is fine)."""
     if not path or not cwd or not (os.path.isabs(_norm(path)) or path.startswith("~")):
         return False
+    import tempfile                # loaded only here: it takes ~0.1 s at every guard start (it brings shutil, bz2)
     temps = {tempfile.gettempdir(), "/tmp", "/var/tmp", os.environ.get("TMP", ""), os.environ.get("TEMP", "")}
     return not _inside(path, cwd) and not any(t and _inside(path, t) for t in temps)

@@ -21,8 +21,9 @@ Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and
    SessionCost is not installed and to install it from https://github.com/kish21/sessioncost#install, then stop. Do
    not run an installer yourself.
 
-2. It prints `Report: <path>`. Reply with only: "The full report: <path>" (the path as a clickable link, on its own
-   line), then "(if it did not open by itself, click the path)". Add no summary: the report has every number, and
+2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
+   printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own
+   line), then "(if it did not open by itself, click the path)". Add no other summary: the report has every number, and
    text in this chat is re-sent with every later message. Do not say it is open (some agents, Cursor for example,
    cannot open a browser) and do not offer to open it. Only if the user says it did not open, open the file with the
    system's default opener (`start "" <path>` on Windows, `open <path>` on macOS, `xdg-open <path>` on Linux).

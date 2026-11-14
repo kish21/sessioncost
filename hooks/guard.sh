@@ -25,4 +25,5 @@ if [ -z "$PY" ] || ! command -v "$PY" >/dev/null 2>&1; then
   [ -n "$PY" ] || { echo "SessionCost guard: no Python 3.10+ found, so it cannot check this step" >&2; exit 0; }
   mkdir -p "$G" && printf '%s' "$PY" > "$G/python"
 fi
-exec "$PY" "$ROOT/guard.py" hook "$@"
+# -S: the guard needs only Python's own library; add-ons that load at every Python start (one seen: 2 s) are skipped
+exec "$PY" -S "$ROOT/guard.py" hook "$@"

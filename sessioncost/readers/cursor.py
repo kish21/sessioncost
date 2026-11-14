@@ -183,32 +183,57 @@ class _Builder:
         return c
 
 
-def _estimate(calls: list[Call], sizes: list[dict], setup_tokens: int, last_context: int | None,
-              summary_tokens: int = 0, recent_tokens: int = 0) -> tuple[float, int | None]:
-    """Fill each call's usage from character sizes. Returns (scale used for the conversation, the call where Cursor
-    summarised the history, if it did).
+def _scales(conv: list[float], setup_tokens: int, points: dict[int, int]) -> list[float]:
+    """Per call, how much to scale its conversation part so the calls where Cursor recorded the context size match
+    it exactly; between two such calls the scale moves in a straight line, before the first and after the last it
+    stays. No usable point: 1 (text alone)."""
+    known = sorted((i, (tok - setup_tokens) / conv[i]) for i, tok in points.items()
+                   if 0 <= i < len(conv) and conv[i] > 0 and tok > setup_tokens)
+    if not known:
+        return [1.0] * len(conv)
+    out = []
+    for i in range(len(conv)):
+        before = [p for p in known if p[0] <= i]
+        after = [p for p in known if p[0] >= i]
+        if not before or not after:
+            out.append((after or before)[0 if not before else -1][1])
+            continue
+        (i0, r0), (i1, r1) = before[-1], after[0]
+        out.append(r0 if i1 == i0 else r0 + (r1 - r0) * (i - i0) / (i1 - i0))
+    return out
 
-    No summary: the conversation part is scaled up so the last call matches the context size Cursor recorded (file
-    reads keep only a short note here, so text alone undercounts). With a summary: Cursor recorded how big the summary
-    is and how much came after it, so the summary goes where the remaining messages add up to that recent part."""
+
+def _estimate(calls: list[Call], sizes: list[dict], setup_tokens: int, last_context: int | None,
+              summary_tokens: int = 0, recent_tokens: int = 0,
+              at_message: dict[int, int] | None = None) -> tuple[int, int | None]:
+    """Fill each call's usage from character sizes. Returns (how many recorded context sizes the estimate is pinned
+    to, the call where Cursor summarised the history, if it did).
+
+    No summary: the conversation part is scaled so each call where Cursor recorded the context size matches it: the
+    first call after a message of yours (`at_message`: call index -> Cursor's size when you sent it) and the last call
+    (file reads keep only a short note here, so text alone undercounts). With a summary: Cursor recorded how big the
+    summary is and how much came after it, so the summary goes where the remaining messages add up to that recent part."""
     if not calls:
-        return 1.0, None
+        return 0, None
     conv = [s["in"] / 4 for s in sizes]
-    scale, cut = 1.0, None
+    scales, cut, points = [1.0] * len(conv), None, {}
     if summary_tokens and recent_tokens and last_context and setup_tokens + conv[-1] > last_context:
         cut = next((i for i, cv in enumerate(conv) if conv[-1] - cv <= recent_tokens), len(conv) - 1)
         cut = cut if cut > 0 else None
-    elif last_context and conv[-1] > 0 and last_context > setup_tokens:
-        scale = max(1.0, (last_context - setup_tokens) / conv[-1])
+    else:
+        points = {len(conv) - 1: last_context} if last_context else {}
+        points.update(at_message or {})       # the size when you sent a message is that call's own input
+        scales = _scales(conv, setup_tokens, points)
+    pinned = sum(1 for i, tok in points.items() if 0 <= i < len(conv) and conv[i] > 0 and tok > setup_tokens)
     for i, (c, s, cv) in enumerate(zip(calls, sizes, conv)):
-        part = summary_tokens + (cv - conv[cut]) if cut is not None and i >= cut else cv * scale
+        part = summary_tokens + (cv - conv[cut]) if cut is not None and i >= cut else cv * scales[i]
         ctx = int(setup_tokens + part)
         # Cursor does not record cache hits in state.vscdb. A 5-minute gap is Claude's cache, not Cursor's,
         # so an estimate shows no re-read. A usage export fills the real cache numbers in later.
         out = max(1, s["out"] // 4)
         think = c.thinking_chars // 4
         c.usage = Usage(fresh_input=ctx, cache_read=0, output=out, thinking=min(think, out))
-    return scale, cut
+    return pinned, cut
 
 
 def _path_of(item) -> str:
@@ -328,6 +353,7 @@ class CursorReader:
         builder = _Builder(agent, model)
         turns: list[Turn] = []
         last_agent = None
+        at_message: dict[int, int] = {}
         for b in msgs:
             when = ts(b.get("createdAt")) or _ms(b.get("startedAtMs"))
             if b.get("type") == USER:
@@ -336,6 +362,10 @@ class CursorReader:
                 if info.get("modelName"):
                     builder.model = str(info["modelName"])
                 builder.user(text)
+                cw = b.get("contextWindowStatusAtCreation")
+                used = cw.get("tokensUsed") if isinstance(cw, dict) else None
+                if isinstance(used, int) and used > 0:   # Cursor's own count when you sent it: pins the next call
+                    at_message[len(builder.calls)] = used
                 if b.get("isSimulatedMsg"):        # written by Cursor itself, e.g. "a background task finished"
                     if not turns:
                         turns.append(Turn(n=0, kind="start", text="(before your first message)"))
@@ -366,9 +396,9 @@ class CursorReader:
         setup_tokens = sum(int(c.get("estimatedTokens") or 0) for c in _categories(d) if c.get("id") in SETUP_IDS)
         last_ctx = d.get("contextTokensUsed")
         cats = {c.get("id"): int(c.get("estimatedTokens") or 0) for c in _categories(d)}
-        scale, cut = _estimate(builder.calls, builder.sizes, setup_tokens,
-                               last_ctx if isinstance(last_ctx, int) else None,
-                               cats.get("summarized_conversation", 0), cats.get("conversation", 0))
+        pinned, cut = _estimate(builder.calls, builder.sizes, setup_tokens,
+                                last_ctx if isinstance(last_ctx, int) else None,
+                                cats.get("summarized_conversation", 0), cats.get("conversation", 0), at_message)
         if cut is not None:
             c = builder.calls[cut]
             t = next((t for t in turns if c in t.calls), None)
@@ -382,7 +412,8 @@ class CursorReader:
         s.model = model or (builder.calls[-1].model if builder.calls else "")
         s.notes.append("Cursor does not keep token counts on this computer, so every token figure here is an "
                        "estimate from the size of the text"
-                       + (f" (scaled ×{scale:.1f} to match the context size Cursor recorded)" if scale > 1.05 else "")
+                       + (f" (matched to the context size Cursor recorded at {pinned} point"
+                          f"{'s' if pinned != 1 else ''} in this chat)" if pinned else "")
                        + ". Cache re-reads are not in this log, so none are shown. "
                        "Add Cursor's usage export (--cursor-usage <file.csv>) for exact numbers.")
         return s, builder

@@ -1,13 +1,13 @@
 """Check 3 (1.1): single huge tool results (10k+ tokens) or lockfile / build-output reads."""
 from __future__ import annotations
 
-from .. import prices as pricemod
 from ..model import Call, Fix, Session
 from ..guard_checks import _BUILD_SUFFIXES, _LOCK_NAMES      # one list for the guard and this check
-from .common import short_target, tok, turns_where
+from .common import Ledger, short_target, src, tok, turns_where
 
 BIG_RESULT_TOKENS = 10_000
 LOCKFILE_TOKENS = 3_000
+CUT = 0.8                # an estimate: reading only the lines needed, or a short output, keeps about a fifth
 
 
 def _is_lock_or_build(target: str) -> bool:
@@ -39,13 +39,12 @@ def big_result_action_ids(calls: list[Call]) -> set[int]:
 
 def big_results(s: Session, pr) -> Fix | None:
     items: list[str] = []
-    per_turn: dict[int, int] = {}
+    led = Ledger()
     hit_calls: list[tuple[str, int]] = []
     kinds_hit: set[str] = set()
-    total_tok = 0
-    total_usd = 0.0
+    hit_turns: set[int] = set()
 
-    for thread, calls in [("main", s.calls)] + [(f"helper:{h.id}", h.calls) for h in s.helpers]:
+    for calls in [s.calls] + [h.calls for h in s.helpers]:
         edited = {a.target for c in calls for a in c.actions if a.kind in ("edit", "write") and a.target}
         searched_so_far = False
         for i, c in enumerate(calls):
@@ -63,22 +62,13 @@ def big_results(s: Session, pr) -> Fix | None:
                 elif a.kind == "read":
                     if "(lines " in a.label or a.target in edited or searched_so_far:
                         continue
-                cut = int(t * 0.8)
                 later = calls[i + 1 :]
-                if later:
-                    r1 = pr.rates(later[0])
-                    usd = cut * pricemod.new_input_rate(later[0].usage, r1) / 1e6
-                    usd += sum(cut * pr.rates(lc)["cache_read"] / 1e6 for lc in later[1:])
-                    saved = cut * len(later)
-                else:
-                    r0 = pr.rates(c)
-                    usd = cut * pricemod.new_input_rate(c.usage, r0) / 1e6
-                    saved = cut
-                total_tok += saved
-                total_usd += usd
-                per_turn[c.turn] = per_turn.get(c.turn, 0) + saved
-                if (thread, c.n) not in hit_calls:
-                    hit_calls.append((thread, c.n))
+                if not later:
+                    continue                     # the chat ended before the result was sent back
+                led.carry(src(c, a), int(t * CUT), later, pr)
+                if (c.agent, c.n) not in hit_calls:
+                    hit_calls.append((c.agent, c.n))
+                hit_turns.add(c.turn)
                 kinds_hit.add("read" if a.kind == "read" else "cmd")
                 name = short_target(a.target or a.label, s.cwd)
                 tag = "lockfile / build file" if lock_or_build else ("whole file read" if a.kind == "read" else "tool output")
@@ -86,7 +76,8 @@ def big_results(s: Session, pr) -> Fix | None:
 
     if not items:
         return None
-    turns = sorted(per_turn)
+    total_tok, per_turn = led.tokens, led.per_turn()
+    turns = sorted(hit_turns)
     n = len(items)
     if kinds_hit == {"read"}:
         what = f"{n} large file read{'s' if n != 1 else ''}"
@@ -98,8 +89,9 @@ def big_results(s: Session, pr) -> Fix | None:
         id="big-results",
         title=f"Trim {what} before they enter the chat",
         why=(f"{what.capitalize()} poured tens of thousands of tokens straight into the conversation. "
-             f"Searching first or reading only the lines you need would cut ~{total_tok:,} tokens across the chat."),
-        saving_usd=total_usd, saving_tokens=total_tok,
+             f"Searching first or reading only the lines you need would cut ~{total_tok:,} tokens across the chat "
+             f"(an estimate: it assumes about {round(CUT * 100)}% of each result was not needed)."),
+        saving_usd=led.usd, saving_tokens=total_tok, claims=led.claims,
         where=turns_where(turns), turns=turns, items=items[:6], per_turn=per_turn, calls=hit_calls,
         how="Keep command output short: use head/tail or a quiet flag, or write long output to a file and read only the lines you need.",
         paste=True,

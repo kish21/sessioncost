@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..model import Call, Fix, Session
-from .common import tok, turns_where
+from .common import Ledger, tok, turns_where
 
 AVG_OUTPUT_THRESHOLD = 3_000
 CALL_OUTPUT_THRESHOLD = 3_000
@@ -26,10 +26,9 @@ def long_output(s: Session, pr) -> Fix | None:
         return None
 
     items: list[str] = []
-    per_turn: dict[int, int] = {}
+    led = Ledger()
     hit_calls: list[tuple[str, int]] = []
-    total_tok = 0
-    total_usd = 0.0
+    excess_total = 0
     think_total = 0
     out_total = 0
 
@@ -42,20 +41,17 @@ def long_output(s: Session, pr) -> Fix | None:
         think = c.usage.thinking if c.usage.thinking is not None else max(0, nf - tok(c.text_chars))
         think_total += min(think, c.usage.output)
         out_total += c.usage.output
-        r = pr.rates(c)
-        later = calls[i + 1 :]
-        usd = (excess * r["output"] + sum(excess * pr.rates(lc)["cache_read"] / 1e6 * 1e6 for lc in later)) / 1e6
-        saved = excess
-        total_tok += saved
-        total_usd += usd
-        per_turn[c.turn] = per_turn.get(c.turn, 0) + saved
+        reply = ("reply", c.agent, c.n)
+        led.add(reply, c, 0, excess * pr.rates(c)["output"] / 1e6, kind="price")     # written: output, not sent
+        led.carry(reply, excess, calls[i + 1 :], pr, first_new=False)
+        excess_total += excess
         hit_calls.append(("main", c.n))
         think_note = f", ~{think:,} hidden thinking" if think >= 1_000 else ""
         items.append(f"call #{c.n} (turn {c.turn}) — {c.usage.output:,} output tokens ({nf:,} outside file edits{think_note})")
 
-    if total_tok < MIN_EXCESS_OUTPUT:
+    if excess_total < MIN_EXCESS_OUTPUT:
         return None
-    turns = sorted(per_turn)
+    turns = sorted({c.turn for c in calls if ("main", c.n) in hit_calls})
     hit_avg = out_total // len(hit_calls)          # the long replies only, not the whole chat
     think_pct = int(round(100 * think_total / out_total)) if out_total else 0
     think_sentence = (f" Hidden thinking accounted for ~{think_pct}% of those output tokens "
@@ -65,8 +61,8 @@ def long_output(s: Session, pr) -> Fix | None:
         title=f"{len(hit_calls)} long model repl{'ies' if len(hit_calls) != 1 else 'y'} averaged ~{hit_avg:,} output tokens",
         why=(f"Output tokens cost 3–5x more than input tokens and then sit in the conversation for every later call."
              f"{think_sentence}"),
-        saving_usd=total_usd, saving_tokens=total_tok,
-        where=turns_where(turns), turns=turns, items=items[:6], per_turn=per_turn, calls=hit_calls,
+        saving_usd=led.usd, saving_tokens=led.tokens, claims=led.claims,
+        where=turns_where(turns), turns=turns, items=items[:6], per_turn=led.per_turn(), calls=hit_calls,
         how="Keep replies concise: give the short answer first and detail only when asked.",
         paste=True,
     )

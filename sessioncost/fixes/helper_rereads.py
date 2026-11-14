@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..model import Fix, Session
-from .common import first_and_cached, short_target, tok, turns_where
+from .common import Ledger, short_target, src, tok, turns_where
 
 MIN_FILE_TOKENS = 200
 MIN_TOTAL_SAVED_TOKENS = 500
@@ -21,10 +21,8 @@ def helper_rereads(s: Session, pr) -> Fix | None:
         return None
 
     items: list[str] = []
-    per_turn: dict[int, int] = {}
+    led = Ledger()
     hit_calls: list[tuple[str, int]] = []
-    total_tok = 0
-    total_usd = 0.0
 
     for h in s.helpers:
         seen_in_helper: set[str] = set()
@@ -46,12 +44,10 @@ def helper_rereads(s: Session, pr) -> Fix | None:
                     if not any(mhash == a.result_hash for _, _, mhash in earlier):
                         continue
                 seen_in_helper.add(a.target)
-                tail = h.calls[j + 1 :] or [hc]
-                saved = t * len(tail)
-                usd = first_and_cached(t, tail, pr)
-                total_tok += saved
-                total_usd += usd
-                per_turn[hturn] = per_turn.get(hturn, 0) + saved
+                tail = h.calls[j + 1 :]
+                if not tail:
+                    continue                     # the helper ended before the result was sent back
+                led.carry(src(hc, a), t, tail, pr, turn=hturn)
                 tag = hc.agent if hc.agent.startswith("helper:") else f"helper:{h.id}"
                 if (tag, hc.n) not in hit_calls:
                     hit_calls.append((tag, hc.n))
@@ -59,6 +55,7 @@ def helper_rereads(s: Session, pr) -> Fix | None:
                 hname = h.description or h.agent_type or h.id[:8]
                 items.append(f"`{name}` (~{t:,} tokens) — re-read by helper `{hname}` in turn {hturn}")
 
+    total_tok, total_usd, per_turn = led.tokens, led.usd, led.per_turn()
     if total_tok < MIN_TOTAL_SAVED_TOKENS:
         return None
     turns = sorted(per_turn)
@@ -69,7 +66,7 @@ def helper_rereads(s: Session, pr) -> Fix | None:
         why=(f"Helper agents start with a blank context and cannot see what the main agent already read unless you "
              f"include it in their prompt. Passing the key facts or lines in the helper prompt avoids ~{total_tok:,} "
              f"duplicate tokens."),
-        saving_usd=total_usd, saving_tokens=total_tok,
+        saving_usd=total_usd, saving_tokens=total_tok, claims=led.claims,
         where=turns_where(turns), turns=turns, items=items[:6], per_turn=per_turn, calls=hit_calls,
         how="When starting a helper agent, pass the relevant file excerpts or facts in its task prompt so it does not re-read files you already read.",
         paste=True,

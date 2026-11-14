@@ -198,7 +198,10 @@ def _agent_roots() -> list[str]:
 
 def _outside_read(path: str, cwd: str) -> bool:
     """True when a Read step reads a file outside the project root (excluding temp and agent config/skill folders).
-    A relative path counts from the project folder, so ..\\other\\notes.md is outside too."""
+    A relative path counts from the project folder, so ..\\other\\notes.md is outside too, also on macOS and Linux,
+    where PowerShell takes ..\\ as well but Python reads \\ as part of a name."""
+    if path and os.sep == "/" and re.search(r"(?:^|\\)\.\.(?:\\|$)", path):
+        path = path.replace("\\", "/")
     if path and cwd and not (os.path.isabs(path) or path.startswith("~")):
         path = os.path.normpath(os.path.join(cwd, path))
     if not _outside(path, cwd):

@@ -62,7 +62,7 @@ _NET_CMD = re.compile(r"(?:^|[\s;&|(`])(?:curl|wget|Invoke-WebRequest|iwr|Invoke
 _INLINE = re.compile(r"<<-?\s*['\"]?[A-Za-z_]\w*|@['\"][ \t]*$|"
                      r"(?:^|[\s;&|(\\/])(?:python3?|py|node|ruby|perl|php)(?:\.exe)?\s+(?:-[a-zA-Z]+\s+)*-[ce]\s",
                      re.I | re.M)
-_SECRET = re.compile(r"(?:^|[\\/\s'\"`=@])\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(?:\.[\w.-]+)?(?:$|[\s'\"`;|&)])|[\\/]\.ssh(?:[\\/]|$)|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|"
+_SECRET = re.compile(r"(?:^|[\\/\s'\"`=@:(])\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(?:\.[\w.-]+)?(?:$|[\s'\"`;|&)])|[\\/]\.ssh(?:[\\/]|$)|\bid_(?:rsa|ed25519|ecdsa|dsa)\b|"
                      r"\.(?:pem|key|p12|pfx)(?:$|[\s'\"`;|&)])|[\\/]\.aws[\\/]credentials|\bcredentials\.json\b|"
                      r"(?:^|[\\/\s'\"`=@~])\.(?:npmrc|pypirc|netrc)\b|\bsecrets?\.(?:json|ya?ml|toml|env)\b|"
                      # the other places tools keep logins (2026-11-01): git, GitHub CLI, Docker, Kubernetes, Azure,
@@ -78,7 +78,8 @@ _SECRET = re.compile(r"(?:^|[\\/\s'\"`=@])\.env(?!\.(?:example|sample|template|d
 _SECRET_CMD = re.compile(r"\bcmdkey(?:\.exe)?\s+/list\b|\bvaultcmd\b|\bsecurity\s+(?:find-(?:generic|internet)-password|dump-keychain)\b|"
                          r"\bgit(?:\.exe)?\s+credential(?:-\w+)?\s+(?:fill|get)\b|\bgh(?:\.exe)?\s+auth\s+token\b|"
                          r"\bGet-StoredCredential\b", re.I)
-_DELETE = re.compile(r"(?:^|[\s;&|(`])(?:rm|del|erase|rmdir|rd|Remove-Item|ri)\s|"
+_DELETE = re.compile(r"(?:^|[\s;&|(`])(?:\\|(?:/usr)?/bin/)?(?:rm|del|erase|rmdir|rd|Remove-Item|ri|unlink|shred)(?:\s|$)|"
+                     r"\bfind\b[^\n;&|]*\s-delete\b|\[(?:System\.)?IO\.(?:File|Directory)\]::Delete\b|"   # (2026-11-13)
                      r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*(?:clean\s+(?:-\w+\s+)*-\w*f\w*|reset\s+--hard|branch\s+-D|"
                      # throwing away uncommitted work: checkout of paths, restore (not --staged), dropping stashes
                      r"checkout\s+(?:\S+\s+)?--\s+\S|checkout\s+\.(?=\s|$)|restore\s+(?![^\n;&|]*--staged)\S|stash\s+(?:drop|clear))|"
@@ -97,7 +98,7 @@ _PUSH = re.compile(r"\bgit(?:\.exe)?\s+(?:-c\s+\S+\s+)*push\b", re.I)
 # Windows names count too: .\.venv\Scripts\pip.exe install (Antigravity, 2026-11-01), npm.cmd install
 _INSTALL = re.compile(r"\b(?:pip3?(?:\.exe)?|uv(?:\.exe)?\s+pip|python3?(?:\.exe)?\s+-m\s+pip)\s+install\b|"
                       r"\buv(?:\.exe)?\s+(?:add|tool\s+install)\b|"
-                      r"\b(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?\s+(?:i|install|add)\b|"
+                      r"\b(?:npm|pnpm|yarn|bun)(?:\.cmd|\.exe)?\s+(?:global\s+)?(?:i|install|add)\b|"
                       r"(?:^|[\s;&|(\\/])(?:npx|uvx|pnpx|bunx)(?:\.cmd|\.exe)?\s|"
                       r"\b(?:apt(?:-get)?|brew|winget|choco|scoop|cargo|go|gem)(?:\.exe)?\s+install\b|"
                       r"\b(?:poetry|pdm|rye)(?:\.exe)?\s+add\b|\bpipx(?:\.exe)?\s+(?:install|run)\b|"
@@ -270,14 +271,16 @@ _READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|gre
                         r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b[^>|;&]*$", re.I)
 _SINKS = {"guard_tamper", "wipe", "privilege", "guardrails", "secrets", "skips_commit_checks", "git_push", "deletes", "installs", "force_push",
           "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off"}
-_ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export\s+-p)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|Get-Item|gi|dir|ls)\s+env:(?![A-Za-z_])|"
+_ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export(?:\s+-p)?|declare\s+-[xp]+|typeset\s+-x|compgen\s+-e)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|Get-Item|gi|dir|ls)\s+env:(?![A-Za-z_])|"
                        r"\[Environment\]::GetEnvironmentVariables|/proc/[\w*]+/environ", re.I | re.M)
 # python -c / -m and node -e / -p take their code from the line and read the download only as data (a JSON check)
 _RUNS_STDIN = (r"(?:sh|bash|zsh|dash|iex|Invoke-Expression|pwsh|powershell|"
                r"(?:python3?|node)(?![\w.-])(?!(?:\s+-[A-Za-z]+)*?\s+-[cmep]\b))\b")
 _PIPE_SHELL = re.compile(r"\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n;]*\|\s*(?:sudo\s+)?" + _RUNS_STDIN + "|"
                          r"\b(?:iex|Invoke-Expression)\b[^\n;]*\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b|"
-                         r"\b(?:ba|z)?sh\s+<\(\s*(?:curl|wget)\b|"
+                         r"(?:\b(?:ba|z)?sh|\bsource|(?:^|[;&|(]\s*)\.)\s+<\(\s*(?:curl|wget)\b|"
+                         r"\beval\b[^\n;]*\$\(\s*(?:curl|wget)\b|"
+                         r"\[scriptblock\]::Create\([^\n]*\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b|"
                          r"https?://[^\n;|]*\|\s*(?:sudo\s+)?" + _RUNS_STDIN,
                          re.I)                         # (the last: any web address piped into a shell, whatever fetched it)
 _ENCODED = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*\s-e(?:c|n\w*)?\s+[A-Za-z0-9+/=]{16,}|"

@@ -38,6 +38,7 @@ def guard_summary(session_id: str) -> dict | None:
             "keys_seen": sum(1 for e in entries if e.get("event") == "key_seen"),
             "strict": any(e.get("strict") for e in entries if e.get("event") == "start"),
             "inventory": {k: inv.get(k) for k in ("items", "first", "new", "changed", "removed") if k in inv} if inv else None,
+            "checked": sum(1 for e in entries if e.get("event") == "pre"),
             "blocked": sum(1 for x in steps.values() if x["decision"] == "blocked"),
             "asked": sum(1 for x in steps.values() if x["decision"] == "asked"),
             "allowed": sum(1 for x in steps.values() if x.get("allowed")),

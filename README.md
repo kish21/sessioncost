@@ -56,7 +56,7 @@ You need two. Type them in a chat, in any agent (Claude Code, Codex, Cursor, Ant
 | In a chat | What it does |
 |---|---|
 | `/sessioncost` | Builds the report of this chat, gives you its link and names the top fix. Say "fix it" and your agent fixes the waste, after your yes |
-| `/liveguard off` | [The guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) is on from install, for every chat, in every agent: it checks each step before it runs, blocks the dangerous ones and asks before the risky ones. `/liveguard off` turns it off, `/liveguard` turns it back on |
+| `/liveguard off` | [The guard](https://kish21.github.io/sessioncost-help/guard/what-it-does/) is on from install, for every chat, in every agent: it checks each step before it runs, blocks the dangerous ones and asks before the risky ones. It is a safety net for an agent's mistakes, not a wall against a determined attacker. `/liveguard off` turns it off, `/liveguard` turns it back on |
 
 Everything else is optional. When the guard asks about a step that is normal for your project, its message gives you
 the exact line to send so it stops asking; you do not need to remember it.

@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 
 from . import fixes as fixmod, rules
+from .fixes.overlap import combine, shared
 from . import __version__, prices as pricemod
 from .model import Call, Session
 from .readers._util import clean_cmd
@@ -239,7 +240,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
                   "export_partial": s.agent == "cursor" and not s.tokens_exact and
                                     any(n.startswith("Tokens from Cursor's usage export") for n in s.notes),
                   "subscription": subscription, "unchecked_models": sorted(P.unchecked), "why": why,
-                  "tokens_exact": s.tokens_exact, "write_split_known": split_known,
+                  "tokens_exact": s.tokens_exact, "write_split_known": split_known, "counts_note": s.counts_note,
                   "own_cost_usd": s.own_cost_usd,
                   # the price per million of each kind of token, for each model of the session (the report explains them)
                   "rates": {m: {k: P.rates(next(c for c in s.all_calls if c.model == m)).get(k, 0.0)
@@ -274,12 +275,19 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     engines = engines if engines is not None else fixmod.load_engines()
     out["fix_engines"] = [getattr(e, "name", "built-in") for e in engines]
     s.fixes = fixmod.find(s, P, engines)
+    # all fixes together, each token counted once (fixes/overlap.py)
+    ctx = {(c.agent, c.n): (c.usage.context, c.turn) for c in s.all_calls}
+    both = combine(s.fixes, ctx)
+    pairs = shared(s.fixes, ctx, both["overlaps"])
+    out["saving"] = {k: v for k, v in both.items() if k != "overlaps"}
+    out["saving"]["per_turn"] = {str(k): v for k, v in both["per_turn"].items()}
     call_ix = {(d["agent"], d["n"]): i for i, d in enumerate(calls)}
     out["fixes"] = [{"id": f.id, "title": f.title, "why": f.why, "saving_usd": f.saving_usd,
                      "saving_tokens": f.saving_tokens, "where": f.where, "turns": f.turns, "items": f.items,
                      "source": f.source, "per_turn": {str(k): v for k, v in f.per_turn.items()},
                      "calls": [call_ix[k] for k in f.calls if k in call_ix], "how": f.how, "paste": f.paste,
-                     "targets": list(f.targets), "per_target": dict(f.per_target)}
+                     "targets": list(f.targets), "per_target": dict(f.per_target),
+                     "overlaps": both["overlaps"].get(f.id, []), "shared": pairs.get(f.id, {})}
                     for f in s.fixes]
     for f in s.fixes:
         for tr in turn_rows:

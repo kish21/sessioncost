@@ -153,6 +153,8 @@ def _switched(event: str, said: str, plain: bool = False) -> dict:
 
 def on_prompt(inp: dict) -> dict | None:
     sid = inp.get("session_id")
+    if inp.get("_turn") and (_read(state_path(sid), None) or {}).get("turn_key") == inp["_turn"]:
+        return None                           # Antigravity: the same message again before the next model call
     switched = _switch(inp)
     new = not state_path(sid).exists()
     st = _state(inp)
@@ -171,7 +173,7 @@ def on_prompt(inp: dict) -> dict | None:
         st["learned"] = sorted(set(st.get("learned", [])) | set(wait["keys"]))
     if not st.get("strict"):
         st["untrusted"] = None                # your message is the checkpoint (strict: it stays for the whole chat)
-    st["turn"] = int(st.get("turn", 0)) + 1
+    st["turn"], st["turn_key"] = int(st.get("turn", 0)) + 1, inp.get("_turn")
     st["asked_turn"] = st["blocked_turn"] = 0
     note = _take_inventory(st, inp) if new else ""    # guarded from this message on (a chat that started before the switch)
     _write(state_path(sid), st)
@@ -183,7 +185,6 @@ def on_prompt(inp: dict) -> dict | None:
         out["hookSpecificOutput"]["additionalContext"] = CONTEXT + " " + out["hookSpecificOutput"]["additionalContext"] + st.get("warn", "")
         return out
     return _on_line(st, inp, "UserPromptSubmit", note) if new else None
-
 
 
 def on_pre(inp: dict) -> dict | None:
@@ -260,7 +261,7 @@ def on_post(inp: dict) -> dict | None:
         st["untrusted"] = {"id": a.id, "what": (a.label or a.tool).replace("`", "")[:80], "signs": signs}
         append_log(sid, {"event": "injection", "id": a.id, "tool": a.tool, "signs": signs})
         changed = True
-    if st.get("fails") and (a.kind in ("edit", "write") or (a.kind == "command" and _fail_key(a.target) in st["fails"])):
+    if st.get("fails") and not inp.get("_failed") and (a.kind in ("edit", "write") or (a.kind == "command" and _fail_key(a.target) in st["fails"])):
         st["fails"] = {} if a.kind != "command" else {k: v for k, v in st["fails"].items() if k != _fail_key(a.target)}
         changed = True                        # a file changed (a fair new try), or the command passed
     keys = (st.get("asked") or {}).pop(a.id, None)
@@ -313,7 +314,6 @@ def on_fail(inp: dict) -> dict | None:
     return None
 
 
-
 def on_stop(inp: dict) -> dict | None:
     st = _read(state_path(inp.get("session_id")), None)
     if not st:
@@ -348,13 +348,14 @@ EVENTS = {"session-start": on_session_start, "prompt": on_prompt, "pre": on_pre,
           "stop": on_stop, "end": on_end}
 
 
-
 def _run(event: str, inp: dict, agent: str) -> dict | None:
     if agent == "cursor" and event == "read":           # a file Cursor is about to read: check it, then look inside it
         out = on_pre(inp)
         if not out:
             on_post(inp)
         return out
+    if event == "post" and inp.get("_failed"):          # a result that says it failed (agents without a failure hook)
+        return (on_post(inp), on_fail(inp))[0]
     return EVENTS[event](inp) if event in EVENTS else None
 
 
@@ -362,8 +363,8 @@ def _answer(event: str, out: dict | None, agent: str, gate: bool) -> str:
     if agent == "cursor":
         if event == "session-start" and (ctx := ((out or {}).get("hookSpecificOutput") or {}).get("additionalContext")):
             return json.dumps({"additional_context": ctx})      # Cursor shows the user nothing from sessionStart
-        if not gate:
-            return ""
+        if not gate:                                    # beforeSubmitPrompt must say continue; the rest is a note
+            return json.dumps({"continue": True}) if event == "prompt" else ""
         hs = (out or {}).get("hookSpecificOutput") or {}
         perm = hs.get("permissionDecision") or "allow"
         if event == "read" and perm == "ask":
@@ -448,7 +449,6 @@ def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
         return 0, _answer(event, None, agent, gate or (agent == "cursor" and event == "gate"))
 
 
-
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["hook"] and len(argv) > 1:
@@ -485,10 +485,10 @@ def main(argv: list[str] | None = None) -> int:
         print(command(f"auto-{argv[1]}", os.getcwd(), strict="strict" in argv[2:]))
         return 0
     print(command(argv[0] if argv else "status", os.getcwd(), strict="strict" in argv[1:]))
+    if not argv or argv[0] == "status":       # the guard's state, then the token tips' (status.py)
+        from .status import short
+        print(short())
     return 0
-
-
-
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .. import prices as pricemod
 from ..model import Call, Fix, Session
-from .common import setup_tokens, turns_where
+from .common import Ledger, setup_tokens, turns_where
 
 MIN_REWRITTEN_TOKENS = 20_000
 
@@ -46,6 +46,7 @@ def cache_break(s: Session, pr) -> Fix | None:
     reasons: list[str] = []
     total_tok = 0
     total_usd = 0.0
+    led = Ledger()
 
     for i in range(1, len(calls)):
         prev, c = calls[i - 1], calls[i]
@@ -66,6 +67,7 @@ def cache_break(s: Session, pr) -> Fix | None:
         total_tok += rewritten
         total_usd += extra
         per_turn[c.turn] = per_turn.get(c.turn, 0) + rewritten
+        led.add(("rewrite", c.agent, c.n), c, 0, extra, kind="price")   # the same tokens, cheaper: none cut
         hit_calls.append(("main", c.n))
         items.append(f"call #{c.n} (turn {c.turn}) — ~{rewritten:,} tokens of earlier conversation sent again "
                      f"at the full new-input rate ({reason})")
@@ -83,7 +85,7 @@ def cache_break(s: Session, pr) -> Fix | None:
         why=(f"Normally the earlier conversation is re-read from the prompt cache at ~{pct}% of the input price. "
              f"On {n} call{'s' if n != 1 else ''} ({top_reason}), the cache missed and ~{total_tok:,} tokens "
              f"had to be written again at full price."),
-        saving_usd=total_usd, saving_tokens=total_tok,
+        saving_usd=total_usd, saving_tokens=total_tok, claims=led.claims,
         where=turns_where(turns), turns=turns, items=items[:6], per_turn=per_turn, calls=hit_calls,
         how=("1. Before a long pause, finish the current step or run /compact (or start a new chat) when you return.\n"
              "2. Avoid changing MCP servers, tool sets, or models in the middle of a long chat."),

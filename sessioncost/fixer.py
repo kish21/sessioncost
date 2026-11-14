@@ -21,11 +21,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import practices
 from .fixer_plan import Plan, plan
 from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_ASK, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
-                          NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _tok, _ts,
+                          NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _size, _tok, _ts, _usd,
                           auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
-                          live_file, offered_file, project_key, start_folder)
+                          live_file, offered_file, project_key, project_path, start_folder)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
 from .fixer_plan import for_report, render  # noqa: F401
 from .fixer_store import LONG_CHAT, auto_text, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
@@ -74,7 +75,7 @@ def apply(p: Plan) -> tuple[int, str]:
         mem["applied"] = [r for r in mem.get("applied", []) if r.get("id") not in {i.id for i in todo}] + [
             {"id": i.id, "title": i.title, "at": _now(), "chat": p.chat,
              "files": [str(c.path) for c in [i.change, *i.also]],
-             "before_tokens": i.tokens, "before_calls": p.calls, "backup": bid} for i in todo]
+             "before_tokens": i.tokens, "before_usd": i.usd, "before_calls": p.calls, "backup": bid} for i in todo]
         _save(fixes_file(p.project), mem)
         out.append(f"Applied {len(todo)} fix{'es' if len(todo) != 1 else ''} (backup kept; `sessioncost fix --undo` "
                    "puts it back):")
@@ -86,7 +87,7 @@ def apply(p: Plan) -> tuple[int, str]:
                 except ValueError:
                     where.append(c.path.as_posix())
             out.append(f"  - {i.title}: {'a rule added to' if i.kind == 'rule' else 'set in'} {', '.join(where)}")
-        out.append(f"In this chat they would have cut ~{_tok(sum(i.tokens for i in todo))} tokens. The next reports show "
+        out.append(f"In this chat they would have cut {_size(p.saving_tokens, p.saving_usd)}. The next reports show "
                    "what they save from now on.")
     for i in p.items:
         if i.problem:
@@ -114,7 +115,7 @@ def apply(p: Plan) -> tuple[int, str]:
 
 def undo(project) -> tuple[int, str]:
     """Put back this project's newest fix, unless a file changed since SessionCost wrote it."""
-    project = Path(project).resolve()
+    project = project_path(project)
     mf = backups_dir(project) / "manifest.json"
     man = _load(mf, [])
     if not man:
@@ -166,13 +167,14 @@ def undo(project) -> tuple[int, str]:
 # ---- verify and remember ----
 def record_seen(a: dict, project) -> None:
     """After a chat: note its waste and unused-tool targets, for verify and the 5-chat unused-tool check."""
-    p = fixes_file(Path(project).resolve())
+    p = fixes_file(project_path(project))
     mem = _load(p, {})
     meta = a.get("meta") or {}
     seen = mem.setdefault("seen", {})
     seen[str(meta.get("session_id") or "")] = {
         "started": meta.get("started"), "calls": int((a.get("totals") or {}).get("calls") or 0),
         "waste": {f["id"]: int(f.get("saving_tokens") or 0) for f in a.get("fixes") or []},
+        "waste_usd": {f["id"]: float(f.get("saving_usd") or 0.0) for f in a.get("fixes") or []},
         "unused_targets": {f["id"]: list(f.get("targets") or []) for f in a.get("fixes") or []
                            if f.get("id") in ("unused-tools", "unused-builtin")}}
     if len(seen) > KEEP_SEEN:
@@ -181,7 +183,7 @@ def record_seen(a: dict, project) -> None:
 
 
 def verify(project) -> list[dict]:
-    mem = _load(fixes_file(Path(project).resolve()), {})
+    mem = _load(fixes_file(project_path(project)), {})
     out = []
     for r in {r.get("id"): r for r in mem.get("applied", [])}.values():
         at, day = _ts(r.get("at")), str(r.get("at"))[:10]
@@ -197,9 +199,10 @@ def verify(project) -> list[dict]:
             continue
         newest = max(later, key=lambda s: _ts(s.get("started")))
         back = int((newest.get("waste") or {}).get(r.get("id"), 0))
+        back_usd = float((newest.get("waste_usd") or {}).get(r.get("id"), 0.0))
         if back:
             out.append({**base_, "status": "came back", "tokens": back,
-                        "line": f"{r.get('title')} (fixed {day}): it came back, ~{_tok(back)} tokens of it in your "
+                        "line": f"{r.get('title')} (fixed {day}): it came back, {_size(back, back_usd)} of it in your "
                                 "newest chat."})
             continue
         chats = f"{len(later)} chat{'s' if len(later) != 1 else ''} since"
@@ -211,8 +214,11 @@ def verify(project) -> list[dict]:
         rate = int(r.get("before_tokens") or 0) / max(1, int(r.get("before_calls") or 0))
         saved = sum(max(0, round(rate * int(s.get("calls") or 0)) - int((s.get("waste") or {}).get(r.get("id"), 0)))
                     for s in later)
-        out.append({**base_, "status": "saved", "tokens": saved,
-                    "line": f"{r.get('title')} (fixed {day}): ~{_tok(saved)} fewer tokens sent in {chats}, mostly "
+        # the same money per token as before the fix (an older record has none: tokens only)
+        per_tok = float(r.get("before_usd") or 0.0) / max(1, int(r.get("before_tokens") or 0))
+        money = f" (~{_usd(saved * per_tok)})" if saved * per_tok >= 0.005 else ""
+        out.append({**base_, "status": "saved", "tokens": saved, "usd": saved * per_tok,
+                    "line": f"{r.get('title')} (fixed {day}): ~{_tok(saved)} fewer tokens{money} sent in {chats}, mostly "
                             "cheap cache re-reads (what it sent with each call before the fix, times the calls since)."})
     return out
 
@@ -290,8 +296,10 @@ def _one_line(items: list[dict], same: bool) -> str:
     where = "this chat" if same else "your last chat here"
     parts = []
     if waste:
-        parts.append(f"token waste in {where}: " + "; ".join(f"{i.get('title') or i['id']} (~{_tok(i['tokens'])} tokens)"
-                                                            for i in waste))
+        def one(n: int, i: dict) -> str:
+            bp = practices.get(str(i.get("id"))) if n == 0 else None   # the top item says why, in one short clause
+            return f"{i.get('title') or i['id']} (~{_tok(i['tokens'])} tokens{': ' + bp.short if bp else ''})"
+        parts.append(f"token waste in {where}: " + "; ".join(one(n, i) for n, i in enumerate(waste)))
     if learnt:
         parts.append("a rule your agent found in an earlier chat: " + "; ".join(str(i.get("title") or i["id"])
                                                                               for i in learnt))
@@ -353,9 +361,14 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 of = f"{_q(str(note['chat']))} " if note.get("chat") else ""   # the chat the list came from
                 cmd = f"{run_cmd()} fix -y {of}--only {ids} --project {where}"
                 look = f"{run_cmd()} fix --preview {of}--only {ids} --project {where}"
+                # chat-start text stays in the agent's context for the whole chat (Copilot, Cursor): said once, or the
+                # agent ends every reply with it, even after the fix ran (owner, 2026-11-12)
+                when = ("put this one line only at the end of your first reply in this chat and never repeat it in a "
+                        "later reply (also not after the fix ran or the user said no); in that first reply put it "
+                        if start else "end your reply with this one line, ")
                 out.append(
                     "SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
-                    "all your work for it is done, end your reply with this one line, as written, as a quote block "
+                    f"all your work for it is done, {when}as written, as a quote block "
                     "(begin it with \"> \"), as the very last thing in the reply, so the user sees it where the chat "
                     f"stops:\n{_one_line(items, note.get('chat') == chat)}\n"
                     "Put nothing after that line. Do not end that reply with a question of your own: the user answers this one first. "
@@ -368,6 +381,7 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                     "example), do not try another way: tell the user to type /sessioncost fix and answer yes there. "
                     "If they say no, or say nothing about it, drop it. Never run it without their yes.")
                 st["shown"] = sorted(set(st.get("shown", [])) | {i["id"] for i in items})
+                st["last_tip"] = {"at": time.time(), "line": _one_line(items, note.get("chat") == chat)}   # status.py
                 st["lists"] = int(st.get("lists") or 0) + 1
                 st["pending"] = cmd if turn is not None else ""
                 dirty = True

@@ -309,7 +309,7 @@ class CodexReader:
     name = "codex"
 
     def can_read(self, path: Path) -> bool:
-        return path.suffix == ".jsonl" and bool(_meta(path).get("id"))
+        return path.name.endswith((".jsonl", ".jsonl.zst")) and bool(_meta(path).get("id"))
 
     def read(self, path: Path) -> Session:
         meta = _meta(path)

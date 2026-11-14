@@ -30,6 +30,7 @@ is the project path with every character other than a letter or digit replaced b
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -52,6 +53,8 @@ def session_id(path: Path) -> str:
     the folder its events.jsonl sits in."""
     if path.name == "events.jsonl":
         return path.parent.name
+    if path.name.endswith(".jsonl.zst"):
+        path = path.with_suffix("")                     # rollout-<time>-<id>.jsonl.zst: the id is before .jsonl
     m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", path.stem)
     return m.group(1) if m and path.stem.startswith("rollout-") else path.stem   # (a CursorChat's stem is its id)
 
@@ -77,11 +80,20 @@ def project_dir(project: str | Path | None = None, home: Path | None = None) -> 
 
 def last_stamp(path: Path, tail_bytes: int = 262144, types=("user", "assistant")) -> datetime | None:
     """The timestamp of the newest row that has one. Reading only the end of the file keeps this fast.
-    (Newest by file time can pick an old chat that was merely reopened; its last row stays old.)"""
-    size = path.stat().st_size
-    with path.open("rb") as f:
-        f.seek(max(0, size - tail_bytes))
-        lines = f.read().decode("utf-8", "replace").splitlines()
+    (Newest by file time can pick an old chat that was merely reopened; its last row stays old.)
+    A compressed file cannot be read from its end, so it is unpacked whole."""
+    from .zfile import is_zst, open_text
+    if is_zst(path):
+        try:
+            with open_text(path) as f:
+                lines = f.read()[-tail_bytes:].splitlines()
+        except Exception:
+            return None
+    else:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            f.seek(max(0, size - tail_bytes))
+            lines = f.read().decode("utf-8", "replace").splitlines()
     for line in reversed(lines):
         if '"timestamp"' not in line:
             continue
@@ -106,9 +118,21 @@ def _same_dir(a: str | Path, b: str | Path) -> bool:
 
 
 def codex_meta(path: Path, rows: int = 5) -> dict:
-    """The `session_meta` payload of a Codex file (the first row today; a few rows are read in case that changes)."""
+    """The `session_meta` payload of a Codex file (the first row today; a few rows are read in case that changes).
+    Kept per file size and time: finding a thread's helpers looks at every other thread's header."""
     try:
-        with path.open(encoding="utf-8", errors="replace") as f:
+        st = path.stat()
+    except OSError:
+        return {}
+    return dict(_codex_meta(str(path), st.st_size, st.st_mtime_ns, rows))   # a copy: callers may not change the cache
+
+
+@functools.lru_cache(maxsize=4096)
+def _codex_meta(path_s: str, _size: int, _mtime: int, rows: int) -> dict:
+    from .zfile import open_text
+    path = Path(path_s)
+    try:
+        with open_text(path) as f:
             for _ in range(rows):
                 line = f.readline()
                 if not line:
@@ -119,7 +143,7 @@ def codex_meta(path: Path, rows: int = 5) -> dict:
                     continue
                 if isinstance(row, dict) and row.get("type") == "session_meta" and isinstance(row.get("payload"), dict):
                     return row["payload"]
-    except OSError:
+    except Exception:                                   # unreadable or broken (also a bad .zst): not a thread we can use
         pass
     return {}
 
@@ -134,14 +158,32 @@ def codex_folders(meta: dict) -> list[str]:
     return [x for x in [meta.get("cwd")] + (roots if isinstance(roots, list) else []) if isinstance(x, str) and x]
 
 
-def codex_files(home: Path | None = None) -> list[Path]:
-    """Every Codex thread file, active and archived."""
+def _codex_all(home: Path | None) -> tuple[list[Path], list[Path]]:
     root = home or codex_home()
-    out: list[Path] = []
+    plain: list[Path] = []
+    packed: list[Path] = []
     for sub in ("sessions", "archived_sessions"):
-        if (root / sub).is_dir():
-            out += (root / sub).rglob("rollout-*.jsonl")
-    return out
+        for p in (root / sub).rglob("rollout-*.jsonl*") if (root / sub).is_dir() else []:
+            if p.name.endswith(".jsonl"):
+                plain.append(p)
+            elif p.name.endswith(".jsonl.zst"):
+                packed.append(p)
+    names = {p.name for p in plain}
+    return plain, [p for p in packed if p.name[:-4] not in names]   # kept both ways: the plain copy is used
+
+
+def codex_files(home: Path | None = None) -> list[Path]:
+    """Every Codex thread file, active and archived; older threads Codex compressed (.jsonl.zst) too, when this
+    Python can unpack them."""
+    from .zfile import can_unpack
+    plain, packed = _codex_all(home)
+    return plain + packed if can_unpack() else plain
+
+
+def codex_unreadable(home: Path | None = None) -> int:
+    """How many compressed Codex threads are left out because nothing here can unpack them."""
+    from .zfile import can_unpack
+    return 0 if can_unpack() else len(_codex_all(home)[1])
 
 
 def codex_sessions(project: str | Path | None = None, home: Path | None = None,

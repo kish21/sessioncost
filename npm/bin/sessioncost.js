@@ -102,16 +102,26 @@ function installSteps(venv, what, which = onPath, runner = run) {
           [py, ["-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--force-reinstall", "--no-deps", what]]];
 }
 
-function main(argv = process.argv.slice(2), env = process.env) {
+// Where this version lives and what its stamp must say. The editor extension asks the same (installed, below).
+function where(env = process.env, here = __dirname) {
   const dir = home(env);
   const venv = path.join(dir, "venv");
-  const stamp = path.join(dir, "installed.txt");     // what is in the environment: changes when this package does
-  const what = spec(env);
-  const want = `${VERSION} ${what}`;
-  const py = venvPython(venv);
+  const what = spec(env, here);
+  return { dir, venv, py: venvPython(venv), what, want: `${VERSION} ${what}`,
+           stamp: path.join(dir, "installed.txt") };   // what is in the environment: changes when this package does
+}
+
+// This version is in place and ready to start: its environment exists and its stamp matches.
+function installed(env = process.env, here = __dirname) {
+  const w = where(env, here);
   let have = "";
-  try { have = fs.readFileSync(stamp, "utf8").trim(); } catch (e) { /* first run */ }
-  if (have !== want || !fs.existsSync(py)) {
+  try { have = fs.readFileSync(w.stamp, "utf8").trim(); } catch (e) { /* not installed yet */ }
+  return have === w.want && fs.existsSync(w.py);
+}
+
+function main(argv = process.argv.slice(2), env = process.env) {
+  const { dir, venv, stamp, what, want, py } = where(env);
+  if (!installed(env)) {
     let steps = installSteps(venv, what);
     if (!steps) {
       console.error("SessionCost runs on Python, and this computer has neither Python nor uv: installing uv " +
@@ -147,6 +157,6 @@ function main(argv = process.argv.slice(2), env = process.env) {
   return r.status === null ? 1 : r.status;
 }
 
-module.exports = { spec, findPython, fetchUv, installSteps, venvPython, home, main, VERSION };
+module.exports = { spec, findPython, fetchUv, installSteps, venvPython, home, where, installed, main, VERSION };
 
 if (require.main === module) process.exitCode = main();

@@ -392,6 +392,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[:1] == ["fix"]:        # `sessioncost fix ...`: its own options (see cmd_fix)
         return cmd_fix(argv[1:])
+    if argv[:1] == ["editor"]:     # the editor extension's status bar: one short JSON answer (editor.py)
+        from . import editor
+        return editor.main(argv[1:])
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "

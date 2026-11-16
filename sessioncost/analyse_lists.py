@@ -113,10 +113,14 @@ LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 PATH_RE = re.compile(r"(?<![\w:/\\])(?:[A-Za-z]:[\\/]+|~[\\/]+|[\\/]+)(?:[^\s\\/\"'`()\[\]]+[\\/]+)+([^\s\\/\"'`()\[\]]*)")
 
 
+PASTED_RE = re.compile(r"</?pasted_content\b[^>]*>\s*")
+
+
 def plain(text: str) -> str:
     """What a person reads: markdown links become their text, file paths become their last name
     ("[$architect](C:/Users/me/SKILL.md)" -> "$architect"). Also keeps folder names out of shared screenshots."""
-    text = LINK_RE.sub(lambda m: m.group(1), text or "")
+    text = PASTED_RE.sub("", text or "")     # Claude Code wraps a pasted text in <pasted_content id="…"> tags
+    text = LINK_RE.sub(lambda m: m.group(1), text)
     text = re.sub(r"@\[([^\]]+)\]", lambda m: "@" + re.split(r"[\\/]", m.group(1).rstrip("\\/"))[-1], text)
     return PATH_RE.sub(lambda m: m.group(1) or "folder", text).strip()
 

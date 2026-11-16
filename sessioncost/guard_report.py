@@ -176,7 +176,7 @@ def write(as_json: bool = False, out: Path | None = None, folder: Path | None = 
     r = collect(folder)
     if as_json:
         return json.dumps(r, indent=1)
-    out = out or Path.home() / ".sessioncost" / "reports" / "guard.html"
+    out = out or Path(os.environ.get("SESSIONCOST_DIR") or Path.home() / ".sessioncost") / "reports" / "guard.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     # errors="replace": logs written before 1.1 may hold a broken character (a lone surrogate); show "?", don't crash
     out.write_text(render(r, folder), encoding="utf-8", errors="replace")

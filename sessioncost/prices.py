@@ -66,8 +66,9 @@ def stale_note(prices: dict) -> str:
     if days is not None and days > STALE_DAYS:
         notes.append(f"The price list is {days} days old (checked {checked_day(prices['as_of'])}): run "
                      "`sessioncost prices update`, or set your own with `sessioncost prices set`.")
-    if prices.get("team_problem"):
-        notes.append(prices["team_problem"])
+    for k in ("team_problem", "own_problem"):
+        if prices.get(k):
+            notes.append(prices[k])
     return " ".join(notes)
 
 
@@ -186,9 +187,25 @@ def load(extra_file: str | None = None, user_file=AUTO) -> dict:
         except (OSError, ValueError) as e:
             prices["team_problem"] = f"Your team's price file could not be read ({e}), so list prices were used."
     mine = own_file() if personal else user_file
+    problems = []
     for f, label in ((mine, "your own"), (Path(extra_file).expanduser() if extra_file else None, "--prices")):
         if f and Path(f).is_file():
-            data = json.loads(Path(f).read_text(encoding="utf-8"))
+            try:
+                data = json.loads(Path(f).read_text(encoding="utf-8-sig"))
+                if not isinstance(data, dict) or not isinstance(data.get("models", {}), dict):
+                    raise ValueError('it needs {"models": {"<model>": {"input": .., "output": ..}}}')
+            except (OSError, ValueError) as e:
+                if label == "--prices":       # a file named on the command line: say so and stop
+                    raise ValueError(f"the price file {f} could not be read ({e})") from None
+                problems.append(f"Your own price file {f} could not be read ({e}), so list prices were used: fix "
+                                "it, or delete it and set your prices again with `sessioncost prices set`.")
+                continue
+            bad = [m for m, r in (data.get("models") or {}).items() if not isinstance(r, dict)]
+            if bad:
+                data = {**data, "models": {m: r for m, r in data["models"].items() if m not in bad}}
+                problems.append(f"In the price file {f}, {', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not "
+                                "a list of prices, so list prices were used for "
+                                f"{'it' if len(bad) == 1 else 'them'}.")
             prices = _merge(prices, data)
             for m, r in (data.get("models") or {}).items():
                 set_on = r.get("set_on") if isinstance(r, dict) else None
@@ -196,6 +213,8 @@ def load(extra_file: str | None = None, user_file=AUTO) -> dict:
             own.append(Path(f).name)
     if own:
         prices["own"] = own
+    if problems:
+        prices["own_problem"] = " ".join(problems)
     prices["from"] = src
     return prices
 

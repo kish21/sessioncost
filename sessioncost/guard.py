@@ -51,7 +51,8 @@ from .guard_inventory import _remove_how, _take_inventory, mcp_servers, mcp_tool
 from .guard_setup import SETTINGS, _hooks_file, _launch, _path_arg, command, refresh, setup
 from .guard_store import _default_home as home
 from .names import GUARD_CMD
-from .guard_store import _locked, _read, _write, append_log, guard_on, log_path, state_path, verify_log, verify_status
+from .guard_store import (STATE_WAIT, _locked, _read, _write, append_log, guard_on, log_path, state_path, verify_log,
+                          verify_status)
 
 # Names other modules, tests and tools use as guard.<name>; they live in the guard_* modules above.
 __all__ = ["WHY", "_copilot_in", "_full", "_git", "_hooks_file", "_launch", "_locked", "_path_arg", "_read",
@@ -81,6 +82,12 @@ def _clear_stale() -> None:
     for p in home().glob("*.state.json"):
         try:
             if now - p.stat().st_mtime > STALE_S:
+                p.unlink()
+        except OSError:
+            pass
+    for p in home().glob("*.state.json.lock"):     # a chat's lock, once its state is gone (ended, or stale above)
+        try:
+            if not p.with_suffix("").exists() and now - p.stat().st_mtime > STALE_S:
                 p.unlink()
         except OSError:
             pass
@@ -418,7 +425,10 @@ def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
             raw_cmd = str(inp.get("toolArgs") or "")
             inp = _copilot_in(event, inp)
             inp.setdefault("command", raw_cmd)
-        out = _run(event, inp, agent)
+        # an agent running steps at once runs their hooks at once: each reads the chat's state and writes it back,
+        # so they take turns, or one overwrites what another saved (an injected page's "untrusted" mark, an ask)
+        with _locked(state_path(str(inp.get("session_id") or "")), STATE_WAIT):
+            out = _run(event, inp, agent)
         try:                                  # fix auto's to-do list: never in the way of the guard's own answer
             tip = _fix_tip(raw_event if agent == "antigravity" else event, inp, raw_in, agent)
         except Exception as e:

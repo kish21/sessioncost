@@ -97,27 +97,44 @@ def _pieces(b: bytes, out: dict, depth: int = 0) -> None:
                 _pieces(v, out, depth + 1)
 
 
+_NUM = re.compile(r"^\d+: ")
+
+
 def _lines(b: bytes) -> set[str]:
-    return {re.sub(r"^\d+: ", "", x).strip() for x in b.decode("utf-8", "replace").splitlines() if x.strip()}
-
-
-def _inside(small: bytes, big: bytes) -> bool:
-    """A copy of the same text inside a bigger piece: the model sees a file with "12: " before every line, and the
-    step also keeps the bare file. Every line of the small piece is in the big one."""
-    if small in big:
-        return True
-    s = _lines(small)
-    return bool(s) and len(s & _lines(big)) >= 0.9 * len(s)
+    return {_NUM.sub("", x).strip() for x in b.decode("utf-8", "replace").splitlines() if x.strip()}
 
 
 def _content(rest: bytes, raw: str) -> tuple[int, str]:
     """(characters, fingerprint) of what a tool step returned, without the call's own arguments or the step's ids
-    and times, so the same file read twice gets the same fingerprint."""
+    and times, so the same file read twice gets the same fingerprint.
+
+    A piece that is a copy of a bigger one counts once: it sits inside it, or 90% of its lines are lines of it (the
+    model sees a file with "12: " before every line, and the step also keeps the bare file). A step can hold
+    thousands of pieces, so each is split into lines once, an index finds the bigger pieces sharing its lines, and
+    one search over all bigger pieces (joined with a byte no text holds) replaces one search per piece."""
     found: dict[bytes, bytes] = {}
     _pieces(rest, found)
     found.pop(hashlib.sha1(raw.encode("utf-8", "replace")).digest(), None)
     big = sorted(found.items(), key=lambda kv: -len(kv[1]))
-    keep = [(k, v) for i, (k, v) in enumerate(big) if not any(_inside(v, w) for _, w in big[:i])]
+    keep: list[tuple[bytes, bytes]] = []
+    joined, index = bytearray(), {}            # every bigger piece so far; line -> the pieces that hold it
+    for i, (k, v) in enumerate(big):
+        s = _lines(v)
+        if b"\x00" in v:
+            copy = any(v in w for _, w in big[:i])
+        else:
+            copy = v in joined
+        if not copy and s:
+            shared: dict[int, int] = {}
+            for ln in s:
+                for j in index.get(ln, ()):
+                    shared[j] = shared.get(j, 0) + 1
+            copy = any(n >= 0.9 * len(s) for n in shared.values())
+        if not copy:
+            keep.append((k, v))
+        joined += b"\x00" + v
+        for ln in s:
+            index.setdefault(ln, []).append(i)
     return sum(len(v) for _, v in keep), hashlib.sha1(b"".join(sorted(k for k, _ in keep))).hexdigest()[:16]
 
 

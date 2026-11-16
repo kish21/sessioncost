@@ -380,6 +380,22 @@ def cursor_sessions(project: str | Path | None = None, db: Path | None = None, h
     return out
 
 
+def none_found(project: str | Path | None = None) -> str:
+    """What `last` and `list` say when no chat of the folder is found: where they looked, and the next step."""
+    from . import zfile
+    from .readers.antigravity import antigravity_homes
+    from .readers.copilot import copilot_home
+    from .readers.vscode_chat import vscode_homes
+    where = [claude_home() / "projects", codex_home() / "sessions", codex_home() / "archived_sessions",
+             copilot_home() / "session-state", *(h / "conversations" for h in antigravity_homes()),
+             *(h / "workspaceStorage" for h in vscode_homes())]
+    folder = project or Path.cwd()
+    return (f"No chat found for {folder}: no Claude Code, Codex, Copilot CLI, VS Code Copilot Chat, Antigravity or "
+            f"Cursor chat names this folder (looked in {', '.join(map(str, where))}, and Cursor's chats).\n"
+            "Run SessionCost in the folder you opened your agent in, or name it: "
+            "sessioncost --project <that folder>" + zfile.codex_note("\n"))
+
+
 def sessions(project: str | Path | None = None, home: Path | None = None, codex: Path | None = None,
              antigravity: Path | None = None, cursor: Path | None = None, cursor_dir: Path | None = None,
              unlinked: list | None = None, copilot: Path | None = None,

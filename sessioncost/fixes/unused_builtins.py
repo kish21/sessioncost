@@ -44,4 +44,5 @@ def unused_builtins(s: Session, P) -> Fix | None:
              f"{'them' if len(idle) > 1 else 'it'} in other chats either."),
         saving_usd=usd, saving_tokens=tokens * len(s.calls), where="every call",
         items=[f"{t.what}: ~{tok(t.chars):,} tokens on every call ({BUILTIN_SWITCHES[t.what][0]}, or "
-               f"{BUILTIN_SWITCHES[t.what][1]})" for t in idle], targets=[t.what for t in idle])
+               f"{BUILTIN_SWITCHES[t.what][1]})" for t in idle], targets=[t.what for t in idle],
+        per_target={t.what: tok(t.chars) * len(s.calls) for t in idle})

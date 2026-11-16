@@ -108,20 +108,21 @@ def _prev_hash(p: Path) -> tuple[str, bool]:
 
 
 LOCK_WAIT = 2.0                                 # seconds one hook waits for another hook of the same chat
+STATE_WAIT = 5.0                                # ... for the chat's state: hooks time out at 10 s
 
 
 @contextlib.contextmanager
-def _locked(p: Path):
-    """Hold <log>.lock while one entry is read and written, so two hooks of one chat at once cannot fork the chain;
-    other chats have their own lock. Yields False when the lock could not be had in time. The system lets go of the
-    lock when a process dies holding it."""
+def _locked(p: Path, wait: float | None = None):
+    """Hold <p>.lock while it is read and written, so two hooks of one chat at once cannot fork the log's chain or
+    overwrite each other's state; other chats have their own lock. Yields False when the lock could not be had in
+    time (`wait` seconds, default LOCK_WAIT). The system lets go of the lock when a process dies holding it."""
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(p) + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
     except OSError:
         yield False
         return
-    got, end = False, time.monotonic() + LOCK_WAIT
+    got, end = False, time.monotonic() + (LOCK_WAIT if wait is None else wait)
     try:
         while True:
             try:

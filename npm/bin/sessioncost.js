@@ -119,8 +119,32 @@ function installed(env = process.env, here = __dirname) {
   return have === w.want && fs.existsSync(w.py);
 }
 
+// Runs the install steps (installSteps); true when this version is in place. An older version already there is
+// upgraded in place: its environment is never deleted, because `setup` wrote its Python into every agent's guard
+// hooks (deleting it first left the guard off while installing, and for good when the install failed).
+function install(w, steps, runner = run) {
+  const older = fs.existsSync(w.py);
+  if (!older) {
+    fs.rmSync(w.venv, { recursive: true, force: true });       // a half-made one from an earlier failed try
+    fs.mkdirSync(w.dir, { recursive: true });
+  }
+  for (const [cmd, args] of older ? steps.slice(1) : steps) {   // step 1 makes the environment
+    const r = runner(cmd, args, INSTALL_MS);
+    if (!r.ok) {
+      console.error(`SessionCost could not be installed: ${path.basename(cmd)} ${args.join(" ")}\n${r.err || ""}`.trim());
+      console.error(older ? "The version you had keeps working. Check your internet connection, then run npx sessioncost again."
+                          : "Check your internet connection, then run npx sessioncost again.");
+      if (!older) fs.rmSync(w.venv, { recursive: true, force: true });
+      return false;                                             // the old stamp stays: the next run tries again
+    }
+  }
+  fs.writeFileSync(w.stamp, w.want + "\n");
+  return true;
+}
+
 function main(argv = process.argv.slice(2), env = process.env) {
-  const { dir, venv, stamp, what, want, py } = where(env);
+  const w = where(env);
+  const { venv, what, py } = w;
   if (!installed(env)) {
     let steps = installSteps(venv, what);
     if (!steps) {
@@ -135,19 +159,7 @@ function main(argv = process.argv.slice(2), env = process.env) {
       return 1;
     }
     console.error(`SessionCost ${VERSION}: installing once into ${venv} …`);
-    fs.rmSync(venv, { recursive: true, force: true });
-    fs.mkdirSync(dir, { recursive: true });
-    fs.rmSync(stamp, { force: true });
-    for (const [cmd, args] of steps) {
-      const r = run(cmd, args, INSTALL_MS);
-      if (!r.ok) {
-        console.error(`SessionCost could not be installed: ${path.basename(cmd)} ${args.join(" ")}\n${r.err}`.trim());
-        console.error("Check your internet connection, then run npx sessioncost again.");
-        fs.rmSync(venv, { recursive: true, force: true });
-        return 1;
-      }
-    }
-    fs.writeFileSync(stamp, want + "\n");
+    if (!install(w, steps)) return 1;
   }
   const r = spawnSync(py, ["-m", "sessioncost", ...argv], { stdio: "inherit" });
   if (r.error) {
@@ -157,6 +169,6 @@ function main(argv = process.argv.slice(2), env = process.env) {
   return r.status === null ? 1 : r.status;
 }
 
-module.exports = { spec, findPython, fetchUv, installSteps, venvPython, home, where, installed, main, VERSION };
+module.exports = { spec, findPython, fetchUv, installSteps, install, venvPython, home, where, installed, main, VERSION };
 
 if (require.main === module) process.exitCode = main();

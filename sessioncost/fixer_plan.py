@@ -150,7 +150,23 @@ def _settings(text: str | None, updates: dict) -> tuple[str | None, str]:
                 new[k], changed = have + add, True
         elif new.get(k) != v:
             new[k], changed = v, True
-    return (json.dumps(new, indent=2) + "\n" if changed else text), ""
+    if not changed:
+        return text, ""
+    nl = "\r\n" if text and "\r\n" in text else "\n"           # the file's own line endings and its own letters
+    return json.dumps(new, indent=2, ensure_ascii=False).replace("\n", nl) + nl, ""
+
+
+def _narrow_builtin(it, targets: list[str], per: dict, was: int) -> None:
+    """The built-in tools item after a recent chat of this project used some of them: its title, reason and saving
+    name only the tools still switched off (the setting change already holds only those)."""
+    s = "s" if len(targets) > 1 else ""
+    names = " and ".join(targets)
+    it.title = f"Switch off Claude Code's own {names} tool{s} (not used in this project's recent chats)"
+    it.why = (f"Claude Code's own {names} tool{s} went out with every call and no recent chat of this project used "
+              f"{'them' if s else 'it'}; the other built-in tools are kept, because a recent chat used them.")
+    whole = it.tokens
+    it.tokens = sum(int(per.get(t) or 0) for t in targets) if per else round(whole * len(targets) / max(1, was))
+    it.usd = it.usd * it.tokens / whole if whole else 0.0   # the same share of the money
 
 
 def split_servers(project: Path, targets: list[str]) -> tuple[list[str], list[str]]:
@@ -246,6 +262,8 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
         rule, updates, rest = RULE_OF.get(fid), {}, []
         if fid == "unused-builtin" and agent == "claude-code":
             updates = dict(BUILTIN_SETTING[t] for t in targets if t in BUILTIN_SETTING)
+            if len(targets) < len(f.get("targets") or []):    # a recent chat used one: name and count only the rest
+                _narrow_builtin(it, targets, f.get("per_target") or {}, len(f.get("targets") or []))
         elif fid == "unused-tools" and agent == "claude-code":
             idle, rest = split_servers(project, targets)
             if idle:

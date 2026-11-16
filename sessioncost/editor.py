@@ -13,6 +13,7 @@ rest; it holds no logic of its own. Read on this computer only; nothing is sent 
                 "last_stop": {"ts", "decision", "what", "why"} or null, "last_tip"}
     handover    the handover file to continue from, or null
     watch       files whose change means this answer is out of date (the chat's log, its guard log, the switches)
+    watch_dirs  folders where a new chat of this folder appears (any agent): a new entry there means "ask again"
     error       only when this chat could not be read: why, in plain words
 """
 from __future__ import annotations
@@ -71,6 +72,48 @@ def _chat(project: str) -> tuple[dict | None, str]:
             "last_tip": str(last or "").replace("💡 SessionCost: ", "").strip()}, ""
 
 
+def _nearest(p: Path) -> Path | None:
+    """p, or its closest folder that exists (a folder made later still shows up as a new entry there)."""
+    for q in [p, *p.parents]:
+        if q.is_dir():
+            return q
+    return None
+
+
+def watch_dirs(project: str) -> list[str]:
+    """The folders where a new chat of this project appears, any agent: a new entry there means a new chat may have
+    started. Cursor keeps every chat in one database, which changes all the time; the bar checks it on its timer."""
+    from datetime import datetime
+
+    from . import locate
+    from .readers.antigravity import antigravity_homes
+    from .readers.copilot import copilot_home
+    from .readers.vscode_chat import folder_of, vscode_homes
+    want = [locate.project_dir(project) or locate.claude_home() / "projects",
+            locate.codex_home() / "sessions" / datetime.now().strftime("%Y/%m/%d"),
+            copilot_home() / "session-state"]
+    want += [base / "conversations" for base in antigravity_homes()]
+    for home in vscode_homes():
+        ws = home / "workspaceStorage"
+        for d in sorted(ws.glob("*/chatSessions")) if ws.is_dir() else []:
+            folder = folder_of(d / "x")      # the window's folder, from workspace.json beside chatSessions
+            if folder and locate._same_dir(folder, project):
+                want.append(d)
+    out = []
+    for p in want:
+        q = _nearest(p)
+        if q is not None and q != q.parent and str(q) not in out and q != Path.home():
+            out.append(str(q))
+    return out
+
+
+def _cursor_db() -> list[str]:
+    """Cursor's chat database, when there is one: a new Cursor chat changes it (checked on the bar's timer)."""
+    from .readers.cursor import state_db
+    p = state_db()
+    return [str(p)] if p.is_file() else []
+
+
 def answer(project: str) -> dict:
     from .fixer_store import auto_on, find_handover, project_path
     from .guard_store import _read, guard_on, home, log_path
@@ -81,7 +124,12 @@ def answer(project: str) -> dict:
     out = {"schema": SCHEMA, "version": __version__, "project": project,
            "guard": {"on": guard_on(cfg), "strict": bool(guard_on(cfg) and cfg.get("strict")), "dir": str(home())},
            "tips": {"on": auto_on()}, "chat": chat, "handover": str(h) if h else None,
-           "watch": [str(home() / "config.json")] + ([chat["log"], str(log_path(chat["id"]))] if chat else [])}
+           # Cursor's database changes whenever Cursor is used: watched only when this folder's chat is Cursor's (its
+           # numbers live there) or there is none yet; otherwise the bar's minute timer finds a new Cursor chat
+           "watch": list(dict.fromkeys([str(home() / "config.json")]
+                                       + ([chat["log"], str(log_path(chat["id"]))] if chat else [])
+                                       + (_cursor_db() if not chat or chat["agent"] == "cursor" else []))),
+           "watch_dirs": watch_dirs(project)}
     if error:
         out["error"] = error
     return out

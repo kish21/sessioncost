@@ -82,7 +82,7 @@ def _auto_report(inp: dict, st: dict) -> str:
     if st.get("report_told") or not reports:
         return ""
     st["report_told"] = True
-    where = Path.home() / ".sessioncost" / "reports" / (f"{Path(target).stem}.html" if target != "last" else "")
+    where = Path(os.environ.get("SESSIONCOST_DIR") or Path.home() / ".sessioncost") / "reports" / (f"{Path(target).stem}.html" if target != "last" else "")
     return f"SessionCost report (updated after each answer): {where}"
 
 

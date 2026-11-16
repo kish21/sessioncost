@@ -24,6 +24,7 @@ from pathlib import Path
 
 PUBLIC_ZIP = "https://github.com/kish21/sessioncost/archive/refs/heads/main.zip"   # what the installers use
 NPX_HOME = "/.sessioncost/npm/"    # where `npx sessioncost` keeps its own Python environment (npm/bin/sessioncost.js)
+EDITOR_HOME = "/.sessioncost/editor/"   # the editor extension's own copy: made by uv (no pip), updated by the extension
 WINDOWS = sys.platform == "win32"
 
 
@@ -55,6 +56,8 @@ def plan(home: Path | None = None, exe: str | None = None, here: Path | None = N
     if not in_plugin:
         if NPX_HOME in Path(exe).as_posix().lower():          # npx's own environment: npx installs the new one
             steps.append(Step("Update SessionCost (run with npx): run `npx sessioncost@latest` once"))
+        elif EDITOR_HOME in Path(exe).as_posix().lower():     # the extension installs the matching one when it updates
+            steps.append(Step("SessionCost in your editor updates by itself when the SessionCost extension updates"))
         elif "/uv/tools/sessioncost/" in Path(exe).as_posix().lower() and which("uv"):
             steps.append(Step("Update SessionCost (installed with the install line)",
                               [which("uv"), "pip", "install", "--quiet", "--python", exe, "--reinstall-package",
@@ -162,6 +165,8 @@ def kind(here: Path) -> str:
     for folder, name in ((".claude", "Claude Code plugin"), (".codex", "Codex plugin"), (".cursor", "Cursor plugin")):
         if f"/{folder}/plugins/" in p:
             return name
+    if EDITOR_HOME in p:
+        return "editor extension"
     return "npx" if NPX_HOME in p else "Python package"
 
 

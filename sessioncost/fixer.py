@@ -249,8 +249,15 @@ def mark_shown(p: Plan) -> None:
     if not p.chat or not p.items:
         return
     st = _load(chat_file(p.chat), {})
-    st["shown"] = sorted(set(st.get("shown", [])) | {i.id for i in p.items})
+    _seen(st, [i.id for i in p.items], p.context)
     _save(chat_file(p.chat), st)
+
+
+def _seen(st: dict, ids: list[str], context) -> None:
+    """These items were shown in this chat; the long-chat tip also keeps the size it was shown at (see _quiet)."""
+    st["shown"] = sorted(set(st.get("shown", [])) | set(ids))
+    if "long-chat" in ids and context:
+        st["long_at"] = int(context)
 
 
 def _q(s: str) -> str:
@@ -275,7 +282,9 @@ def _quiet(note: dict, chat: str, cwd: str, st: dict) -> list[dict]:
     out = []
     for i in note.get("items", []):
         iid, tok, kind = str(i.get("id")), int(i.get("tokens") or 0), i.get("kind")
-        if iid in shown or (iid == "long-chat" and not same):
+        # a long chat: said again each time it doubled since it was last said (owner, 2026-11-15)
+        doubled = iid == "long-chat" and int(note.get("context") or 0) >= 2 * int(st.get("long_at") or long_chat())
+        if (iid in shown and not doubled) or (iid == "long-chat" and not same):
             continue                               # once a chat; a long chat only in that chat
         if iid != "long-chat" and time.time() - float(offered.get(iid) or 0) < OFFER_QUIET_S:
             continue                               # offered in this project this week and not fixed: that was a no
@@ -353,7 +362,7 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
             items = _quiet(note, chat, cwd, st)
             if items and ASKED_FIX.search(prompt or ""):
                 # the user asked for the list or the report themselves: it shows the same, so no second list now
-                st["shown"] = sorted(set(st.get("shown", [])) | {i["id"] for i in items})
+                _seen(st, [i["id"] for i in items], note.get("context"))
                 items, dirty = [], True
             if items:
                 ids = ",".join(i["id"] for i in items)
@@ -380,7 +389,7 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                     "it asks you to write a handover, do it. If running it is blocked or refused (auto mode, for "
                     "example), do not try another way: tell the user to type /sessioncost fix and answer yes there. "
                     "If they say no, or say nothing about it, drop it. Never run it without their yes.")
-                st["shown"] = sorted(set(st.get("shown", [])) | {i["id"] for i in items})
+                _seen(st, [i["id"] for i in items], note.get("context"))
                 st["last_tip"] = {"at": time.time(), "line": _one_line(items, note.get("chat") == chat)}   # status.py
                 st["lists"] = int(st.get("lists") or 0) + 1
                 st["pending"] = cmd if turn is not None else ""

@@ -23,13 +23,17 @@ from pathlib import Path
 
 from . import practices
 from .fixer_plan import Plan, plan
-from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_ASK, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
+from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_END, HANDOVER_NAME, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
                           NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _size, _tok, _ts, _usd,
-                          auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
-                          live_file, offered_file, project_key, project_path, start_folder)
+                          asks_handover, auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
+                          live_file, newest_lines, offered_file, project_key, project_path, start_folder)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
 from .fixer_plan import for_report, render  # noqa: F401
 from .fixer_store import LONG_CHAT, auto_text, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
+
+# a user may keep their own notes in the handover file: the newest handover goes first, nothing is lost (owner, 2026-11-17)
+ON_TOP = ("keep everything already in the file below it, and end the new handover with this line, as written, so a "
+          f"new chat reads only the newest one: {HANDOVER_END}")
 
 
 def apply(p: Plan) -> tuple[int, str]:
@@ -98,7 +102,8 @@ def apply(p: Plan) -> tuple[int, str]:
                        + "\n".join("  " + x for x in i.steps.splitlines()))
     if any(i.kind == "handover" for i in p.items):
         h = handover_file(p.project)
-        out.append(f"Handover: write it now in {h.as_posix()} (replace what is there): the goal, what is done, files "
+        out.append(f"Handover: write it now at the top of {h.as_posix()} under a heading with today's date (a new "
+                   f"file if there is none; {ON_TOP}): the goal, what is done, files "
                    "changed, tests run, what is next. Show it in your reply, then tell the user to start a new chat "
                    "and say \"continue from handover\" there.")
         out.append("In the same handover, add a short section \"Other token waste in this chat\": what cost tokens in "
@@ -315,13 +320,12 @@ def _one_line(items: list[dict], same: bool) -> str:
     # its own words, never "Shall I ...?": the agent may have asked its own question higher up the reply, and a bare
     # "yes" would answer either (owner, 2026-11-11). The command is named too, for those who prefer to type it.
     typed = "(or type /sessioncost fix)"
-    line = f"💡 SessionCost: {'. Also '.join(parts)}." if parts else ""
+    line = f'💡 SessionCost: {". Also ".join(parts)}. Say "{SAY_FIX}" {typed} to fix these.' if parts else ""
     if not long:
-        return f'{line} Say "{SAY_FIX}" {typed} to fix these.' if line else ""
-    line = (line + " " if line else "💡 SessionCost: ") + long.get("line", "")
-    if parts:
-        return f'{line} Say "{SAY_FIX}" {typed} to fix these and write a handover, so you can start a fresh chat.'
-    return f'{line} Say "{SAY_HANDOVER}" {typed} so you can start a fresh chat.'
+        return line
+    # the agent writes the handover in the same reply, unasked (owner, 2026-11-17): the line says where it is
+    return ((line + " " if line else "💡 SessionCost: ") + long.get("line", "")
+            + f' A handover is in {HANDOVER_NAME}: start a fresh chat and say "continue from handover".')
 
 
 def _same_agent(hook_agent: str, note_agent: str) -> bool:
@@ -347,9 +351,12 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                        "(keep only the ids they chose) and show the lines it prints. Otherwise ignore this.")
             st["pending"] = ""
     h = find_handover(cwd) if cwd else None
-    if h and prompt and HANDOVER_ASK.search(prompt):
-        out.append(f"The user wants to continue from the handover of an earlier chat: read "
-                   f"{h.as_posix()} first, then carry on from its \"what is next\".")
+    if h and prompt and asks_handover(prompt):
+        n = newest_lines(h)          # the newest handover only: older ones below it would cost tokens for nothing
+        what = (f"read only lines 1-{n} of {h.as_posix()} (the newest handover; do not read the older notes below "
+                "it unless the user asks)" if n else f"read {h.as_posix()} first")
+        out.append(f"The user wants to continue from the handover of an earlier chat: {what}, then carry on from its "
+                   "\"what is next\".")
     elif h and start and time.time() - h.stat().st_mtime < CHAT_KEEP_S:
         out.append(f"A handover from an earlier chat in this project is at {h.as_posix()}. Read it "
                    "only if the user asks to continue from it.")
@@ -365,30 +372,40 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 _seen(st, [i["id"] for i in items], note.get("context"))
                 items, dirty = [], True
             if items:
-                ids = ",".join(i["id"] for i in items)
                 where = _q(Path(cwd).as_posix())
                 of = f"{_q(str(note['chat']))} " if note.get("chat") else ""   # the chat the list came from
-                cmd = f"{run_cmd()} fix -y {of}--only {ids} --project {where}"
-                look = f"{run_cmd()} fix --preview {of}--only {ids} --project {where}"
+                long = any(i["id"] == "long-chat" for i in items)
+                ids = ",".join(i["id"] for i in items if i["id"] != "long-chat")
+                cmd = f"{run_cmd()} fix -y {of}--only {ids} --project {where}" if ids else ""
                 # chat-start text stays in the agent's context for the whole chat (Copilot, Cursor): said once, or the
                 # agent ends every reply with it, even after the fix ran (owner, 2026-11-12)
                 when = ("put this one line only at the end of your first reply in this chat and never repeat it in a "
                         "later reply (also not after the fix ran or the user said no); in that first reply put it "
                         if start else "end your reply with this one line, ")
-                out.append(
-                    "SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
-                    f"all your work for it is done, {when}as written, as a quote block "
-                    "(begin it with \"> \"), as the very last thing in the reply, so the user sees it where the chat "
-                    f"stops:\n{_one_line(items, note.get('chat') == chat)}\n"
-                    "Put nothing after that line. Do not end that reply with a question of your own: the user answers this one first. "
-                    f"If the user asks what these are, run `{look}` and show what it prints. Only if the user says "
-                    f"\"{SAY_FIX}\" or \"{SAY_HANDOVER}\" (or \"fix these\", \"fix all\", \"fix the first one\": all, "
-                    f"or some), run `{cmd}` "
-                    "(keep only the ids they chose) and show the lines it prints. A bare \"yes\" answers your own "
-                    "question, not this line: do not run it then. If "
-                    "it asks you to write a handover, do it. If running it is blocked or refused (auto mode, for "
-                    "example), do not try another way: tell the user to type /sessioncost fix and answer yes there. "
-                    "If they say no, or say nothing about it, drop it. Never run it without their yes.")
+                say = [f"SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
+                       f"all your work for it is done, {when}as written, as a quote block "
+                       "(begin it with \"> \"), as the very last thing in the reply, so the user sees it where the chat "
+                       f"stops:\n{_one_line(items, note.get('chat') == chat)}\n"
+                       "Put nothing after that line."]
+                if long:          # a long chat: the handover is written at once, no yes needed (owner, 2026-11-17)
+                    say.append(f"This chat is long, so write a handover now, without waiting for the user's yes: "
+                               "after your work for the user's message and before that last line, run "
+                               f"`{run_cmd()} fix -y {of}--only long-chat --project {where}` and do what it prints. "
+                               "If running it is blocked or refused, write the handover yourself at the top of "
+                               f"{handover_file(cwd).as_posix()} ({ON_TOP}): the goal, what is done, files "
+                               "changed, tests run, what is next.")
+                if cmd:
+                    look = f"{run_cmd()} fix --preview {of}--only {ids} --project {where}"
+                    say.append(
+                        "Do not end that reply with a question of your own: the user answers this one first. "
+                        f"If the user asks what these are, run `{look}` and show what it prints. Only if the user says "
+                        f"\"{SAY_FIX}\" (or \"fix these\", \"fix all\", \"fix the first one\": all, or some), run "
+                        f"`{cmd}` (keep only the ids they chose) and show the lines it prints. A bare \"yes\" answers "
+                        "your own question, not this line: do not run it then. If running it is blocked or refused "
+                        "(auto mode, for example), do not try another way: tell the user to type /sessioncost fix and "
+                        "answer yes there. If they say no, or say nothing about it, drop it. Never run it without "
+                        "their yes.")
+                out.append(" ".join(say))
                 _seen(st, [i["id"] for i in items], note.get("context"))
                 st["last_tip"] = {"at": time.time(), "line": _one_line(items, note.get("chat") == chat)}   # status.py
                 st["lists"] = int(st.get("lists") or 0) + 1

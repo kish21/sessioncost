@@ -49,10 +49,10 @@ from .guard_decide import (WHY, _fail_key, _full, _git, _raw_never, _step_fp, de
                            step_of, tier)
 from .guard_inventory import _remove_how, _take_inventory, mcp_servers, mcp_tools
 from .guard_setup import SETTINGS, _hooks_file, _launch, _path_arg, command, refresh, setup
-from .guard_store import _default_home as home
+from .guard_store import (STATE_WAIT, _default_home as home, _locked, _read, _write, append_log, guard_on, log_path,
+                          state_path, verify_log, verify_status)
+from .guard_waste import stop as stop_waste
 from .names import GUARD_CMD
-from .guard_store import (STATE_WAIT, _locked, _read, _write, append_log, guard_on, log_path, state_path, verify_log,
-                          verify_status)
 
 # Names other modules, tests and tools use as guard.<name>; they live in the guard_* modules above.
 __all__ = ["WHY", "_copilot_in", "_full", "_git", "_hooks_file", "_launch", "_locked", "_path_arg", "_read",
@@ -79,18 +79,13 @@ STALE_S = 2 * 24 * 3600     # a chat's state left behind (its end hook can be ca
 
 def _clear_stale() -> None:
     now = time.time()
-    for p in home().glob("*.state.json"):
-        try:
-            if now - p.stat().st_mtime > STALE_S:
-                p.unlink()
-        except OSError:
-            pass
-    for p in home().glob("*.state.json.lock"):     # a chat's lock, once its state is gone (ended, or stale above)
-        try:
-            if not p.with_suffix("").exists() and now - p.stat().st_mtime > STALE_S:
-                p.unlink()
-        except OSError:
-            pass
+    for pat in ("*.state.json", "*.waste.json", "*.state.json.lock"):    # a lock: once its chat's state is gone
+        for p in home().glob(pat):
+            try:
+                if now - p.stat().st_mtime > STALE_S and not (pat.endswith(".lock") and p.with_suffix("").exists()):
+                    p.unlink()
+            except OSError:
+                pass
 
 
 def on_session_start(inp: dict) -> dict | None:
@@ -363,6 +358,8 @@ def _run(event: str, inp: dict, agent: str) -> dict | None:
         return out
     if event == "post" and inp.get("_failed"):          # a result that says it failed (agents without a failure hook)
         return (on_post(inp), on_fail(inp))[0]
+    if event == "pre":                                  # the guard first; else a whole read of a big file (guard_waste)
+        return on_pre(inp) or stop_waste(inp)
     return EVENTS[event](inp) if event in EVENTS else None
 
 
@@ -467,17 +464,14 @@ def main(argv: list[str] | None = None) -> int:
             # Agents send UTF-8 JSON; Windows Python would read the pipe as cp1252 and garble any non-English text
             raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace") if sys.stdin else ""
             code, out = hook(argv[1], raw, agent)
-            if out:
-                sys.stdout.write(out)
+            sys.stdout.write(out)
             return code
     if argv[:1] == ["setup"] and len(argv) > 1:
         print(setup(argv[1]))
         return 0
     if argv[:1] == ["allow"]:
-        if argv[1:2] in ([], ["--list"]):
-            print(command("allow-list-rules", os.getcwd()))
-        elif argv[1:2] == ["--clear"]:
-            print(command("allow-clear", os.getcwd()))
+        if argv[1:2] in ([], ["--list"], ["--clear"]):
+            print(command("allow-clear" if argv[1:2] == ["--clear"] else "allow-list-rules", os.getcwd()))
         elif len(argv) >= 3:
             print(command("allow", os.getcwd(), rule=(argv[1], " ".join(argv[2:]))))
         else:

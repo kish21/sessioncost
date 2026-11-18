@@ -17,8 +17,6 @@ _LOCK_NAMES = {
     "cargo.lock", "poetry.lock", "composer.lock", "gemfile.lock",
 }
 _BUILD_SUFFIXES = (".min.js", ".min.css", ".bundle.js", ".chunk.js", ".map")
-BIG_READ_LINES = 2_000
-BIG_READ_BYTES = 80_000
 
 _RANGED_CMD = re.compile(
     r"\b(?:head|tail)\b|"
@@ -138,53 +136,6 @@ def _cmd_search_paths(cmd: str) -> list[str]:
             if "/" in w or "\\" in w or w.startswith(".") or w.startswith("~") or ":" in w:
                 paths.append(w)
     return paths
-
-
-def _file_is_big(raw: str, cwd: str) -> bool:
-    raw = (raw or "").strip()
-    if not raw:
-        return False
-    t = raw.replace("\\", "/").lower()
-    base = t.rsplit("/", 1)[-1]
-    is_lock_or_build = base in _LOCK_NAMES or base.endswith(_BUILD_SUFFIXES) or "/dist/" in f"/{t.lstrip('/')}"
-    p = Path(os.path.expanduser(raw))
-    p = p if p.is_absolute() or not cwd else Path(cwd) / p
-    try:
-        st = p.stat() if p.is_file() else None
-    except OSError:
-        st = None
-    if is_lock_or_build:
-        if st is None or st.st_size >= 12_000:
-            return True
-        try:
-            with p.open(encoding="utf-8", errors="replace") as fh:
-                if sum(1 for _ in fh) >= 200:
-                    return True
-        except OSError:
-            return True
-    elif st is not None:
-        if st.st_size > BIG_READ_BYTES:
-            return True
-        if st.st_size >= BIG_READ_LINES:
-            try:
-                with p.open(encoding="utf-8", errors="replace") as fh:
-                    if sum(1 for _ in fh) > BIG_READ_LINES:
-                        return True
-            except OSError:
-                pass
-    return False
-
-
-def _big_read(a, cwd: str) -> bool:
-    """True when a Read step or shell command reads a whole lockfile, build bundle or >2,000-line file without range limits."""
-    if a.kind == "read":
-        if getattr(a, "ranged", False) or not (a.target or "").strip():
-            return False
-        return any(_file_is_big(raw, cwd) for raw in (a.target or "").splitlines())
-    if a.kind == "command":
-        _, unlimited = _cmd_read_paths(a.target or "")
-        return any(_file_is_big(p, cwd) for p in unlimited)
-    return False
 
 
 def _agent_roots() -> list[str]:
@@ -400,7 +351,6 @@ WHY = {"pipe_to_shell": "runs a script straight from the internet", "encoded_com
        "after_untrusted": "a risky step right after untrusted content", "guardrails": "changes the agent's own rules, settings or memory",
        "git_push": "pushes with git", "deletes": "deletes files", "installs": "installs or fetches packages",
        "outside_project": "changes or reads a file outside the project", "network": "uses the network",
-       "big_read": "reads a whole lockfile, build bundle or large file (>2,000 lines) without a line range (search first with Grep, or pass offset and limit)",
        "inline_script": "runs code written into the command", "injected": "its result showed signs of a prompt injection",
        "mcp_action": "an MCP tool that changes or sends something",
        "poisoned_tool": "a tool of an MCP server whose descriptions showed signs of a prompt injection",

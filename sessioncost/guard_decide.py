@@ -6,7 +6,7 @@ import json
 import os
 import re
 
-from .guard_checks import (INSTEAD, SCRIPT, SCRIPT_MAX, WHY, _big_read, _git, _new_packages,
+from .guard_checks import (INSTEAD, SCRIPT, SCRIPT_MAX, WHY, _git, _new_packages,
                            _outside_read_step, _push_dest, _raw_never, _run_scripts, _secret_commit, _step_fp)
 from .guard_store import _read, home
 from .names import GUARD_CMD
@@ -77,8 +77,6 @@ def learn_key(mark: str, a) -> str:
     if mark == "guardrails" and auto_memory(a):
         m = AUTO_MEMORY.search(t)
         return f"guardrails:memory:{(m.group(1) or 'codex').lower()}"
-    if mark == "big_read":
-        return f"big_read:{os.path.normcase(t)}"
     if mark in ("outside_project", "guardrails"):
         target_dir = getattr(a, "outside_target", "") or t
         return f"{mark}:{os.path.normcase(os.path.dirname(target_dir) if mark == 'outside_project' else t)}"
@@ -212,8 +210,6 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
         if not risks._allowed(a, "outside_project", rules, cwd):
             a.outside_target = out_p
             marks.append("outside_project")
-    if _big_read(a, cwd) and not risks._allowed(a, "big_read", rules, cwd):
-        marks.append("big_read")
     a.risks = list(marks)
     if "git_push" in marks:
         _push_dest(a, cwd)

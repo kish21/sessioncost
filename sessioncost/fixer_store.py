@@ -45,6 +45,13 @@ ASKED_FIX = re.compile(r"^\s*[/$](?:sessioncost:)?sessioncost\b|\bsessioncost fi
 SAY_FIX = "fix it"           # what the user says to the live tip: its own words, not a bare "yes" (owner, 2026-11-11)
 SAY_HANDOVER = "write a handover"    # ... to the long-chat tip
 HANDOVER_ASK = re.compile(r"\b(?:continue|carry on|resume|pick up)\b.{0,40}\bhand-?over\b", re.I | re.S)
+# words just before the ask that make it a mention, not a request: 'instead of saying continue from handover'
+_MENTION = re.compile(r"(?:\bsay(?:s|ing)?|\bsaid|\btypes?|\btyping|\bwords?|[\"'“‘`])\s*$", re.I)
+
+
+def asks_handover(prompt: str) -> bool:
+    """The user asks to continue from the handover (and does not only talk about those words)."""
+    return any(not _MENTION.search(prompt[:m.start()]) for m in HANDOVER_ASK.finditer(prompt or ""))
 
 
 # ---- where things are kept ----
@@ -86,6 +93,20 @@ def backups_dir(project) -> Path:
 
 
 HANDOVER_NAME = "NEXT-SESSION.md"      # in the project, where the user can find it (owner, 2026-11-12)
+# the last line of each handover: "continue from handover" reads up to the first one only (owner, 2026-11-18)
+HANDOVER_END = "<!-- End of the newest handover. Older notes below: do not read further unless asked. -->"
+
+
+def newest_lines(f: Path) -> int:
+    """How many lines the newest handover takes (up to and with the first end line); 0 when the file has none."""
+    try:
+        with f.open(encoding="utf-8", errors="replace") as fh:
+            for n, line in enumerate(fh, 1):
+                if line.strip() == HANDOVER_END:
+                    return n
+    except OSError:
+        pass
+    return 0
 
 
 def handover_file(project) -> Path:

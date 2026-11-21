@@ -15,7 +15,8 @@ from . import rules
 
 
 
-LONG_CHAT = fixmod.LONG_CHAT            # one number for "this chat is long": the long-chat fix's
+LONG_CHAT = fixmod.LONG_CHAT            # the report's long-chat check (a long chat carried on after a break)
+HANDOVER_AT = 200_000                   # the handover offer, unless the user set their own (owner 2026-11-20: 100k came too soon)
 HEAD = "## SessionCost rules (fewer tokens)"
 SETTINGS = Path(".claude") / "settings.local.json"   # Claude Code's personal project settings: never committed
 BUILTIN_SETTING = {"Artifact": ("enableArtifact", False), "Workflow": ("disableWorkflows", True)}
@@ -232,16 +233,28 @@ def set_auto(on: bool) -> str:
         return ("SessionCost fix auto: on for every chat, every day. After each answer SessionCost looks for new token "
                 "waste; your agent names it in the last line of its next reply and changes nothing until you say "
                 f'"{SAY_FIX}". A chat over {_tok(long_chat())} tokens gets a handover offer: to change that, say "warn '
-                'me at 150k tokens" (or type `sessioncost fix long-chat 150k`). To stop the tips, say "turn token tips '
+                'me at 1m tokens" (or type `sessioncost fix long-chat 1m`). To stop the tips, say "turn token tips '
                 'off" (or type `sessioncost fix auto off`).')
     return ('SessionCost fix auto: off. To start the tips again, say "turn token tips on" (or type `sessioncost fix '
             'auto on`). Say "fix my token waste" (or type `sessioncost fix`) for the to-do list whenever you want.')
 
 
 def long_chat() -> int:
-    """The developer's own "this chat is long" (`sessioncost fix long-chat 150k`), else LONG_CHAT."""
+    """When a chat gets the handover offer: the developer's own number (`sessioncost fix long-chat 1m`), else HANDOVER_AT."""
     v = _load(_config(), {}).get("long_chat")
-    return int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 10_000 else LONG_CHAT
+    return int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 10_000 else HANDOVER_AT
+
+
+def handover_hint_once() -> str:
+    """The first handover offer on this computer says the number can change: without the help site nobody would know.
+    Said once, never again; not said at all to someone who already set their own number (owner 2026-11-20)."""
+    cfg = _config()
+    have = _load(cfg, {})
+    if "long_chat" in have or have.get("long_chat_hint"):
+        return ""
+    _save(cfg, {**have, "long_chat_hint": True})
+    return (f' (The handover comes at {_tok(HANDOVER_AT)} tokens; to change that, say "warn me at 1m tokens" with your '
+            "own number.)")
 
 
 def parse_tokens(text: str) -> int | None:
@@ -258,9 +271,9 @@ def set_long_chat(text: str) -> tuple[int, str]:
         return 2, "sessioncost fix long-chat: give the tokens, 10k or more (for example 150k, or 1m)."
     cfg = _config()
     _save(cfg, {**_load(cfg, {}), "long_chat": n})
-    return 0, (f"SessionCost fix: a chat over {_tok(n)} tokens now gets the handover offer (it was {_tok(LONG_CHAT)} by "
-               'default). To change it, say "warn me at 150k tokens" with your own number (or type `sessioncost fix '
-               "long-chat 150k`).")
+    return 0, (f"SessionCost fix: a chat over {_tok(n)} tokens now gets the handover offer (it was {_tok(HANDOVER_AT)} by "
+               'default). To change it, say "warn me at 1m tokens" with your own number (or type `sessioncost fix '
+               "long-chat 1m`).")
 
 
 def budget_usd() -> float | None:

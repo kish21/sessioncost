@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 1.2.2) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have".
+description: (SessionCost 1.2.3) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -20,6 +20,9 @@ it, fetches SessionCost's price list).
    `run.py` is in this plugin's root folder: two folders above this SKILL.md. In Claude Code that is
    `${CLAUDE_PLUGIN_ROOT}`; in Codex or Cursor (where that variable is not set) use the full path of the folder two
    levels above this file instead.
+
+   If it says it could not write to its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once for
+   permission to write there and run the same command again with it. Do not try other ways or other folders.
 
    If `python` is not found (or opens the Microsoft Store, or is older than 3.10), try `py` in its place (Windows),
    then `python3`. If none of them works, get a Python through uv (it puts one in its own folder and changes nothing
@@ -70,8 +73,8 @@ how to do one of these, give the words to say first and the command in brackets.
   alone): run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix auto on`,
   `... fix auto off` or `... fix auto` and show the line it prints. While it is on, a SessionCost to-do list can
   arrive with the user's message: follow the instructions that come with it. Right after turning it on, ask once:
-  "A handover is offered when a chat passes 100k tokens. Keep 100k, or another number?" If they give a number, run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix long-chat <number>` (for example 150k) and show the line it prints.
+  "A handover is offered when a chat passes 200k tokens. Keep 200k, or another number, like 1m?" If they give a number, run
+  `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix long-chat <number>` (for example 1m) and show the line it prints.
 - "warn me at 150k tokens" (or "/sessioncost fix long-chat <number>"): run
   `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix long-chat <number>` and show the line it prints.
 - "set my budget to $5", "clear my budget" or "what is my budget?" (or "/sessioncost fix budget 5", "... off" or
@@ -111,6 +114,16 @@ how to do one of these, give the words to say first and the command in brackets.
   or "/sessioncost auto off"), run
   `python "${CLAUDE_PLUGIN_ROOT}/run.py" auto on` or `... auto off` and show the line it prints. It is on by default.
 - All of these take the same fallbacks as step 1.
+
+## Help
+
+- When the user asks for SessionCost's help ("show me the SessionCost help", "what can SessionCost do?", or
+  "/sessioncost help"), run `python "${CLAUDE_PLUGIN_ROOT}/run.py" help` and show its output as printed, as a quote
+  block. If the guard already put that list in this chat for this message, show it from there and run nothing.
+- When the user asks how to do something with SessionCost ("how do I stop the pop-ups?", "how do I see my
+  tokens?"), answer in one to three lines: what to say in the chat (or the command to type), from this skill or that
+  list. If you are not sure, say so and point to the guide, https://kish21.github.io/sessioncost-help/ . Never
+  make up a command.
 
 ## Never
 

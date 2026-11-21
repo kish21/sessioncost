@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have".
+description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -20,6 +20,9 @@ Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and
    If that fails because the program is missing, try `sessioncost last --brief`. If that fails too, tell the user
    SessionCost is not installed and to install it from https://github.com/kish21/sessioncost#install, then stop. Do
    not run an installer yourself.
+
+   If it says it could not write to its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once for
+   permission to write there and run the same command again with it. Do not try other ways or other folders.
 
 2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
    printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own
@@ -54,8 +57,8 @@ how to do one of these, give the words to say first and the command in brackets.
   alone): run `{{RUN}} fix auto on`, `{{RUN}} fix auto off` or
   `{{RUN}} fix auto` and show the line it prints. While it is on, a SessionCost to-do list can arrive with the
   user's message: follow the instructions that come with it. Right after turning it on, ask once: "A handover is
-  offered when a chat passes 100k tokens. Keep 100k, or another number?" If they give a number, run
-  `{{RUN}} fix long-chat <number>` (for example 150k) and show the line it prints.
+  offered when a chat passes 200k tokens. Keep 200k, or another number, like 1m?" If they give a number, run
+  `{{RUN}} fix long-chat <number>` (for example 1m) and show the line it prints.
 - "warn me at 150k tokens" (or "/sessioncost fix long-chat <number>"): run `{{RUN}} fix long-chat <number>` and show
   the line it prints.
 - "set my budget to $5", "clear my budget" or "what is my budget?" (or "/sessioncost fix budget 5", "... off" or
@@ -92,6 +95,16 @@ how to do one of these, give the words to say first and the command in brackets.
   or "/sessioncost auto off"), run
   `{{RUN}} auto on` or `{{RUN}} auto off` and show the line it prints. It is on by default.
 - All of these take the same fallbacks as step 1.
+
+## Help
+
+- When the user asks for SessionCost's help ("show me the SessionCost help", "what can SessionCost do?", or
+  "/sessioncost help"), run `{{RUN}} help` and show its output as printed, as a quote block. If the guard already put
+  that list in this chat for this message, show it from there and run nothing.
+- When the user asks how to do something with SessionCost ("how do I stop the pop-ups?", "how do I see my
+  tokens?"), answer in one to three lines: what to say in the chat (or the command to type), from this skill or that
+  list. If you are not sure, say so and point to the guide, https://kish21.github.io/sessioncost-help/ . Never
+  make up a command.
 
 ## Never
 

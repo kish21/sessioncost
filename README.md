@@ -76,6 +76,9 @@ Terminal commands, report options and the guard's settings:
 
 - Reads your agent's log on your computer. No AI model is called.
 - Nothing is sent anywhere: the report is one file on your computer.
+- One exception, in the guard: when the agent installs a package, the guard sends that package's name to its registry
+  (pypi.org or registry.npmjs.org) to check how new that version is. Nothing else. To stop it:
+  `sessioncost guard fresh-releases off`.
 
 More: **[Privacy and security](https://kish21.github.io/sessioncost-help/reference/privacy/)**.
 

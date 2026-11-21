@@ -1,7 +1,8 @@
 # Security
 
 SessionCost runs on your computer and reads your agent's session logs. It calls no AI model, and it sends nothing
-anywhere.
+anywhere, with one exception: when the agent installs a package, the guard sends that package's name to its registry
+(pypi.org or registry.npmjs.org) to check how new that version is. `sessioncost guard fresh-releases off` stops it.
 
 ## Reporting a problem
 

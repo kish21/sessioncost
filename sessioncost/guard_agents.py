@@ -199,3 +199,39 @@ def _copilot_in(event: str, inp: dict) -> dict:
         srv = next((s for s in known if name.startswith(s + "-")), name.rsplit("-", 1)[0])
         return {**out, "tool_name": f"mcp__{srv}__{name[len(srv) + 1:]}", "tool_input": args}
     return {**out, "tool_name": name, "tool_input": args}
+
+
+def _answer(event: str, out: dict | None, agent: str, gate: bool) -> str:
+    if agent == "cursor":
+        if event == "session-start" and (ctx := ((out or {}).get("hookSpecificOutput") or {}).get("additionalContext")):
+            return json.dumps({"additional_context": ctx})      # Cursor shows the user nothing from sessionStart
+        if not gate:                                    # beforeSubmitPrompt must say continue; the rest is a note
+            return json.dumps({"continue": True}) if event == "prompt" else ""
+        hs = (out or {}).get("hookSpecificOutput") or {}
+        perm = hs.get("permissionDecision") or "allow"
+        if event == "read" and perm == "ask":
+            perm = "deny"                               # reading a file has no ask in Cursor
+        reason = hs.get("permissionDecisionReason", "")
+        return json.dumps({"permission": perm, **({"user_message": (out or {}).get("systemMessage") or reason,
+                                                   "agent_message": reason} if reason else {})})
+    if agent == "antigravity":
+        if event == "pre":
+            hs = (out or {}).get("hookSpecificOutput") or {}
+            perm = {"deny": "deny", "ask": "force_ask"}.get(hs.get("permissionDecision"), "allow")
+            reason = hs.get("permissionDecisionReason", "")
+            return json.dumps({"decision": perm, **({"reason": reason} if reason else {})})
+        return json.dumps({"decision": "stop"}) if event == "stop" else "{}"   # a Stop hook: any decision but "continue" ends the turn
+    if agent == "copilot":
+        hs = (out or {}).get("hookSpecificOutput") or {}
+        if event == "pre" and hs.get("permissionDecision") in ("deny", "ask"):
+            return json.dumps({"permissionDecision": hs["permissionDecision"],
+                               "permissionDecisionReason": hs.get("permissionDecisionReason", "")})
+        if event == "session-start" and hs.get("additionalContext"):
+            return json.dumps({"additionalContext": hs["additionalContext"]})
+        return ""                                       # nothing to say: Copilot's own permissions decide
+    if agent == "codex":
+        if event == "stop":
+            return "{}"                                 # Codex reads JSON from a Stop hook that exits 0
+        if out and "systemMessage" in out and event in ("session-start", "prompt", "pre"):   # the agent says it instead
+            out = {k: v for k, v in out.items() if k != "systemMessage"}
+    return json.dumps(out) if out else ""

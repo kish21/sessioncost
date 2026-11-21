@@ -6,7 +6,7 @@ import json
 import os
 import re
 
-from .guard_checks import (INSTEAD, SCRIPT, SCRIPT_MAX, WHY, _git, _new_packages,
+from .guard_checks import (INSTEAD, SCRIPT, SCRIPT_MAX, WHY, _git, _new_packages, rule_for,
                            _outside_read_step, _push_dest, _raw_never, _run_scripts, _secret_commit, _step_fp)
 from .guard_store import _read, home
 from .names import GUARD_CMD
@@ -14,7 +14,8 @@ from .names import GUARD_CMD
 __all__ = ["INSTEAD", "SCRIPT_MAX", "WHY", "_fail_key", "_full", "_git", "_raw_never", "_step_fp", "auto_memory", "decide",
            "every_time", "learn_key", "look_up_sites", "step_of", "tier"]
 
-ALWAYS_ASK = {"after_untrusted", "secrets", "guardrails", "staged_script", "privilege", "new_package", "repeat_fail"}   # your rules, settings, memory: every time
+ALWAYS_ASK = {"after_untrusted", "secrets", "guardrails", "staged_script", "privilege", "new_package", "repeat_fail",
+              "url_leak", "prompt_leak", "memory_poison"}   # your rules, settings, memory: every time
 # the agent's own automatic memory folder (Claude Code, Codex): one yes covers it for the rest of the chat
 AUTO_MEMORY = re.compile(r"[\\/]\.claude[\\/]projects[\\/]([^\\/\s'\"]+)[\\/]memory\b|[\\/]\.codex[\\/](memor)", re.I)
 # after a page with no signs of an injection, these are judged as usual (asked once each); sending out, pushing,
@@ -25,6 +26,7 @@ CLEAN_PAGE_OK = {"deletes", "installs"}
 LOOK_UP_SITES = ("docs.python.org", "pypi.org", "npmjs.com", "developer.mozilla.org", "github.com", "raw.githubusercontent.com",
                  "stackoverflow.com", "learn.microsoft.com", "readthedocs.io", "docs.rs", "crates.io", "pkg.go.dev",
                  "code.claude.com", "docs.anthropic.com", "platform.claude.com", "en.wikipedia.org")
+_URL_PARAMS = re.compile(r"https?://[^\s'\"]*[?&#][^\s'\"=]+=", re.I)   # a web address that carries values
 _MEMORY_HIT = re.compile(r"MEMORY\.md|(?:\.claude[\\/])?projects[\\/][^\\/\s]+[\\/]memory|\.codex[\\/]memor", re.I)
 
 
@@ -66,6 +68,10 @@ def learn_key(mark: str, a) -> str:
         return f"mcp_action:{a.tool}"
     if mark == "new_or_changed":
         return f"fresh:{_fresh_key(a)}"
+    if mark == "runaway":
+        return f"runaway:{_step_fp(a)}"         # one yes: this step may go on repeating in this chat
+    if mark == "fresh_release":
+        return f"fresh_release:{'|'.join(getattr(a, 'fresh', None) or [])}"   # these versions, not any later one
     if mark == "git_push":
         return f"git_push:{'|'.join(getattr(a, 'push_to', None) or ['(default)'])}"   # yes to origin is not yes to any remote
     if mark == "key_in_output" and getattr(a, "script_fp", ""):
@@ -188,12 +194,16 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     doc = re.search(r"\.(?:md|mdx|markdown|txt|rst|adoc|html?)\s*$", a.target or "", re.I)
     if "guard_tamper" not in marks and not doc and risks.tamper_write(a.target or "", getattr(a, "written", "") or "",
                                                                       getattr(a, "replaced", None), cwd):
-        marks.append("guard_tamper")          # writing disableAllHooks or guard off into a file, or the guard folder
-                                              # where the hooks read it (a document that only mentions them runs
-                                              # nothing: help pages, notes, TESTING.md)
+        # owner 2026-11-18: editing a code file runs nothing, so it is never asked; running a script that holds a
+        # dangerous step is (below). Settings, hook and env files are what the agent reads: still blocked
+        from .risk_patterns import _HASH_CODE, _SLASH_CODE
+        if not (a.kind in ("edit", "write") and any(rx.search((a.target or "").strip()) for rx in (SCRIPT, _HASH_CODE, _SLASH_CODE))):
+            marks.append("guard_tamper")
     if "guard_tamper" in marks:               # the allow file cannot excuse changing the guard: it is what it protects
+        read = (" If you only wanted to read the guard's logs, a script cannot be checked for that; read them with "
+                "cat, grep, head or jq (those pass), not with a script." if a.kind == "command" else "")
         return "deny", marks, ("SessionCost guard blocked this step: it would change or switch off the guard or the rules "
-                               "the user set. Only the user changes those. Tell them what you wanted and why.")
+                               f"the user set. Only the user changes those.{read} Tell them what you wanted and why.")
     if (srv := _server(a.tool)) and srv in (st.get("bad_servers") or []):
         return "deny", marks + ["poisoned_tool"], (f"SessionCost guard blocked this step: the MCP server {srv} showed signs of a "
                                                    "prompt injection in its tool descriptions, so its tools are not used in this "
@@ -210,14 +220,13 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
         if not risks._allowed(a, "outside_project", rules, cwd):
             a.outside_target = out_p
             marks.append("outside_project")
+    from .guard_owasp import marks as owasp_marks      # the five OWASP-based guards (guard_owasp.py)
+    marks += [m for m in owasp_marks(st, a, cwd, marks) if not risks._allowed(a, m, rules, cwd)]
     a.risks = list(marks)
     if "git_push" in marks:
         _push_dest(a, cwd)
     body = _run_scripts(a.target or "", cwd) if a.kind == "command" else ""
-    if a.kind in ("edit", "write") and SCRIPT.search(a.target or "") and \
-            _raw_never(risks.code_text(a.target or "", getattr(a, "written", "") or "")):
-        marks.append("staged_script")         # a script written now, with a never-list step in it, to run later
-    elif a.kind == "command" and _raw_never(body):
+    if a.kind == "command" and _raw_never(body):
         marks.append("staged_script")         # running a script file that holds a never-list step: asked once per version
     if body and ("staged_script" in marks or risks.prints_key(body)):
         a.script_fp = hashlib.sha1(body.encode("utf-8", "replace")).hexdigest()[:16]
@@ -227,11 +236,16 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     if key and any(k in fresh for k in key.split("|")):
         marks.append("new_or_changed")
     if st.get("key_seen") and "key_in_output" not in marks and (
-            risks._sends_out(a) or {"git_push", "mcp_action"} & set(marks) or ("network" in marks and not _look_up(a))):
+            risks._sends_out(a) or {"git_push", "mcp_action"} & set(marks) or
+            ("network" in marks and not _look_up(a) and _URL_PARAMS.search(a.target or ""))):
+        # owner 2026-11-19: a plain page read, a web search or a status check sends nothing: only steps that can
+        # carry data out (upload, post, push, an MCP action, a web address with ?x=...) ask after a key was seen
         marks.append("key_in_output")         # a key came into this chat earlier: anything that sends data out asks
     src = st.get("untrusted") or st.get("poisoned") or {}
     sinks = risks._SINKS if src.get("signs") else risks._SINKS - CLEAN_PAGE_OK
-    sink = bool(sinks & set(marks) or risks._sends_out(a))
+    # an MCP action, or any site after content with injection signs, is how stolen data leaves: judged as a sink
+    sink = bool(sinks & set(marks) or risks._sends_out(a) or "mcp_action" in marks or
+                ("network" in marks and src.get("signs") and not _look_up(a)))
     if src and sink and not risks._allowed(a, "after_untrusted", rules, cwd):
         marks.append("after_untrusted")
         if src.get("signs"):                  # the content showed signs of an injection: block, do not ask
@@ -246,30 +260,62 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
         named = f" ({', '.join(a.secret_files[:5])})" if getattr(a, "secret_files", None) else ""
         return "deny", marks, (f"SessionCost guard blocked this step: {'; '.join(WHY.get(m, m) for m in bad)}{named}. This is on the "
                                f"never list. {instead + ' ' if instead else ''}Tell the user what you wanted to do, why it was "
-                               "stopped and the safer way, and do not try another way to do the same thing. If they really want "
-                               "it, they can allow it in .sessioncost-allow in the project.")
+                               "stopped and the safer way, and do not try another way to do the same thing.")
     if t == "ask":
         learned = set(st.get("learned", []))
-        quiet = {"network"} if _look_up(a) else set()
-        if "deletes" in marks and _deletes_only_made(a, cwd, st.get("made") or []):
-            quiet.add("deletes")
+        quiet = _quiet(st, a, marks, cwd)
         open_ = [m for m in marks if (risks.SEVERITY.get(m) in ("high", "review") or m in ("new_or_changed", "staged_script"))
                  and m not in quiet and (every_time(m, a) or learn_key(m, a) not in learned)]
         if not open_:
-            return "log", marks, "allowed earlier in this chat" if not quiet else "a look-up site, or a file made in this chat"
-        extra = f" (after {src.get('what', 'untrusted content')} came in this turn)" if "after_untrusted" in open_ else ""
+            if "repeat_fail" in marks:        # a tip to the agent, never a pop-up (on_pre shows it once)
+                return "tip", marks, ("SessionCost tip: this command already failed twice the same way, with no file "
+                                      "changed in between. Read the error and change the approach instead of running it "
+                                      "again. If you really need to run it unchanged, run it again: it will go through.")
+            return "log", marks, "recorded: no threat sign, or the user asked for it, or allowed earlier in this chat"
+        extra = "" if "after_untrusted" not in open_ else (
+            f" (Antigravity does not let the guard read {src.get('what', 'that page')}, so risky steps after it ask)"
+            if src.get("unread") else f" (after {src.get('what', 'untrusted content')} came in this turn)")
         if "git_push" in open_ and getattr(a, "push_to", None):
             raw = ", a web address that is not one of this repo's remotes" if a.push_raw else ""
             extra += f" (to {', '.join(a.push_to)}{raw})"
         if "new_package" in open_:
-            extra += f" ({', '.join(a.new_pkgs[:5])}: check each name is real and spelled right)"
+            typos = getattr(a, "typos", None)         # strict asks for every new name; else only a likely misspelling
+            extra += (f" ({', '.join(f'{n} looks like a misspelling of {p}' for n, p in typos[:5])}: check the name is right)"
+                      if typos else f" ({', '.join(a.new_pkgs[:5])}: check each name is real and spelled right)")
+        from .guard_owasp import extra as owasp_extra
+        extra += owasp_extra(open_, a)
         a.allow_rule = allow_rule(open_, a)   # on_pre keeps it: the user's next message "allow it" saves this rule
-        return "ask", marks, f"SessionCost guard: {'; '.join(WHY.get(m, m) for m in open_)}{extra}. Allow it?{_allow_hint(open_, a)}"
+        return "ask", marks, (f"SessionCost guard: {'; '.join(WHY.get(m, m) for m in open_)}{extra}.{rule_for(open_)} "
+                              f"Allow it?{_allow_hint(open_, a)}")
     if _read(home() / "config.json", {}).get("allow_list") and _changes(a) and not risks._allowed(a, "step", rules, cwd, _changes) \
             and learn_key("unlisted", a) not in set(st.get("learned", [])):
         return "ask", marks + ["unlisted"], ("SessionCost guard (allow-list mode): this step is not in the project's "
-                                             ".sessioncost-allow. Allow it?")
+                                             f".sessioncost-allow.{rule_for(['unlisted'])} Allow it?")
     return "log", marks, why
+
+
+def _quiet(st: dict, a, marks: list[str], cwd: str) -> set[str]:
+    """The marks of this step that are recorded, not asked (guard_quiet.py: no needless pop-up)."""
+    from .guard_quiet import RECORD, cannot_undo, covered, misspelled, weakens
+    quiet = {"network"} if _look_up(a) else set()
+    if "deletes" in marks and _deletes_only_made(a, cwd, st.get("made") or []):
+        quiet.add("deletes")
+    if st.get("strict"):                      # strict: every risky step asks, as before (your choice: /liveguard strict)
+        return quiet
+    raw = bool(getattr(a, "push_raw", False))
+    if not raw and not {"after_untrusted", "key_in_output"} & set(marks) and not cannot_undo(a, marks):
+        quiet |= RECORD                       # no threat sign and it can be undone: the agent asks itself
+    if "guardrails" in marks and "after_untrusted" not in marks and not weakens(a):
+        quiet.add("guardrails")
+    if "new_package" in marks:
+        a.typos = misspelled(getattr(a, "new_pkgs", None) or [])
+        if not a.typos:
+            quiet.add("new_package")
+    quiet.add("repeat_fail")
+    kinds, base = set(st.get("said") or []), [m for m in marks if m in RECORD | {"guardrails"}]
+    if kinds and base and not raw and all(covered(m, a, kinds) for m in base):     # the user's own message asked for it
+        quiet |= set(base) | {"after_untrusted", "memory_poison"} | (set() if getattr(a, "script_fp", "") else {"key_in_output"})
+    return quiet
 
 
 def allow_rule(open_: list[str], a) -> tuple[str, str] | None:

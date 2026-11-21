@@ -29,7 +29,7 @@ from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_END, 
                           live_file, newest_lines, offered_file, project_key, project_path, start_folder)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
 from .fixer_plan import for_report, render  # noqa: F401
-from .fixer_store import LONG_CHAT, auto_text, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
+from .fixer_store import HANDOVER_AT, LONG_CHAT, auto_text, handover_hint_once, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
 
 # a user may keep their own notes in the handover file: the newest handover goes first, nothing is lost (owner, 2026-11-17)
 ON_TOP = ("keep everything already in the file below it, and end the new handover with this line, as written, so a "
@@ -303,7 +303,7 @@ def _quiet(note: dict, chat: str, cwd: str, st: dict) -> list[dict]:
     return out
 
 
-def _one_line(items: list[dict], same: bool) -> str:
+def _one_line(items: list[dict], same: bool, hint: str = "") -> str:
     waste = [i for i in items if i.get("id") != "long-chat" and i.get("kind") != "learned"]
     learnt = [i for i in items if i.get("kind") == "learned"]
     long = next((i for i in items if i.get("id") == "long-chat"), None)
@@ -323,9 +323,11 @@ def _one_line(items: list[dict], same: bool) -> str:
     line = f'💡 SessionCost: {". Also ".join(parts)}. Say "{SAY_FIX}" {typed} to fix these.' if parts else ""
     if not long:
         return line
-    # the agent writes the handover in the same reply, unasked (owner, 2026-11-17): the line says where it is
-    return ((line + " " if line else "💡 SessionCost: ") + long.get("line", "")
-            + f' A handover is in {HANDOVER_NAME}: start a fresh chat and say "continue from handover".')
+    # the agent writes the handover in the same reply, unasked (owner, 2026-11-17): the line says where it goes. It
+    # says what the agent does, not that the file is there: a blocked write made "is in" untrue (a Codex chat, 2026-11-18)
+    return ((line + " " if line else "💡 SessionCost: ") + long.get("line", "") + hint
+            + f' Your agent writes a handover to {HANDOVER_NAME}: once it is there, start a fresh chat and say '
+              '"continue from handover".')
 
 
 def _same_agent(hook_agent: str, note_agent: str) -> bool:
@@ -375,7 +377,8 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 where = _q(Path(cwd).as_posix())
                 of = f"{_q(str(note['chat']))} " if note.get("chat") else ""   # the chat the list came from
                 long = any(i["id"] == "long-chat" for i in items)
-                ids = ",".join(i["id"] for i in items if i["id"] != "long-chat")
+                one = _one_line(items, note.get("chat") == chat, handover_hint_once() if long else "")
+                ids =",".join(i["id"] for i in items if i["id"] != "long-chat")
                 cmd = f"{run_cmd()} fix -y {of}--only {ids} --project {where}" if ids else ""
                 # chat-start text stays in the agent's context for the whole chat (Copilot, Cursor): said once, or the
                 # agent ends every reply with it, even after the fix ran (owner, 2026-11-12)
@@ -385,7 +388,7 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 say = [f"SessionCost (fix auto is on) found token waste. Answer the user's message as usual first; when "
                        f"all your work for it is done, {when}as written, as a quote block "
                        "(begin it with \"> \"), as the very last thing in the reply, so the user sees it where the chat "
-                       f"stops:\n{_one_line(items, note.get('chat') == chat)}\n"
+                       f"stops:\n{one}\n"
                        "Put nothing after that line."]
                 if long:          # a long chat: the handover is written at once, no yes needed (owner, 2026-11-17)
                     say.append(f"This chat is long, so write a handover now, without waiting for the user's yes: "
@@ -393,7 +396,10 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                                f"`{run_cmd()} fix -y {of}--only long-chat --project {where}` and do what it prints. "
                                "If running it is blocked or refused, write the handover yourself at the top of "
                                f"{handover_file(cwd).as_posix()} ({ON_TOP}): the goal, what is done, files "
-                               "changed, tests run, what is next.")
+                               "changed, tests run, what is next. Write it with your own file-edit tool, not a script "
+                               "(a script that writes files can be blocked). If the handover could not be written at "
+                               "all, end that last line with \"The handover could not be written: \" and the reason in "
+                               "a few words, instead of its sentence about the handover.")
                 if cmd:
                     look = f"{run_cmd()} fix --preview {of}--only {ids} --project {where}"
                     say.append(
@@ -407,7 +413,7 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                         "their yes.")
                 out.append(" ".join(say))
                 _seen(st, [i["id"] for i in items], note.get("context"))
-                st["last_tip"] = {"at": time.time(), "line": _one_line(items, note.get("chat") == chat)}   # status.py
+                st["last_tip"] = {"at": time.time(), "line": one}   # status.py
                 st["lists"] = int(st.get("lists") or 0) + 1
                 st["pending"] = cmd if turn is not None else ""
                 dirty = True

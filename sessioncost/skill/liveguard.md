@@ -1,6 +1,6 @@
 ---
 name: liveguard
-description: '(SessionCost {{VERSION}}) Turn the live guard on for every chat until "/liveguard off": every tool step is checked before it runs; never-list steps are blocked and risky ones ask the user first. Use when the user runs /liveguard, "/liveguard strict" or "/liveguard off", says "turn the guard on", "guard strict", "turn the guard off", "show my allowed steps" or "clear my allowed steps", or asks to guard, watch or protect their sessions live.'
+description: '(SessionCost {{VERSION}}) Turn the live guard on for every chat until "/liveguard off": every tool step is checked before it runs; dangerous steps are stopped and risky ones wait for the user's yes. Use when the user runs /liveguard, "/liveguard strict" or "/liveguard off", says "turn the guard on", "guard strict", "turn the guard off", "show my allowed steps" or "clear my allowed steps", or asks to guard, watch or protect their sessions live.'
 ---
 
 # /liveguard: the SessionCost guard

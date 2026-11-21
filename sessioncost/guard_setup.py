@@ -19,12 +19,18 @@ SETTINGS = {"fail-closed": ("fail_closed", "If the guard itself breaks, every st
                            "write, the web, an MCP tool) asks you unless the project's .sessioncost-allow lists it "
                            "(a line like `step  pytest *`); reads and searches pass. What you allow is remembered for "
                            "that exact step in this chat.",
-                           "Only risky steps ask you.")}
+                           "Only risky steps ask you."),
+            # on by default (owner 2026-11-19): config.json has "fresh_check": false only when you switch it off
+            "fresh-releases": ("fresh_check", "Installing a package version released in the last few days pauses first. "
+                               "To check, the guard sends the package's name to its registry (pypi.org, "
+                               "registry.npmjs.org), nothing else.",
+                               "Package versions are not looked up: nothing is sent anywhere.")}
 # never allowed by a saved project rule: keys stay out of the chat whatever the rule says
-NO_PROJECT_ALLOW = {"secrets", "key_in_output"}
+NO_PROJECT_ALLOW = {"secrets", "key_in_output", "fresh_release", "runaway"}
 def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | None = None) -> str:
     cfg = home() / "config.json"
-    keep = {k: v for k, v in _read(cfg, {}).items() if k in ("auto", "fix_auto", "long_chat", "budget_usd")}   # reports, fix auto, budgets: your choice stays
+    keep = {k: v for k, v in _read(cfg, {}).items() if k in ("auto", "fix_auto", "long_chat", "long_chat_hint", "help_shown", "budget_usd",
+                                                                  "fresh_check", "fresh_days")}   # reports, fix auto, budgets: your choice stays
     if arg == "allow" and rule:
         from .risks import NEVER, SEVERITY
         mark, pat = rule[0].strip(), rule[1].strip()
@@ -88,7 +94,7 @@ def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | No
                 "SessionCost auto: off. Reports are built only when you run /sessioncost. `sessioncost auto on` starts it again.")
     c = _read(cfg, {})
     live = len(list(home().glob("*.state.json"))) if home().exists() else 0
-    extra = "".join(f", {n}" for n, (k, *_) in SETTINGS.items() if c.get(k)) + (", reports after each answer" if reports_on() else "")
+    extra = "".join(f", {n}" for n, (k, *_) in SETTINGS.items() if c.get(k, k == "fresh_check")) + (", reports after each answer" if reports_on() else "")
     return f"SessionCost guard: {'on for every chat' if guard_on(c) else 'off'}{extra}; {live} chat(s) guarded now. Logs: {home()}"
 
 

@@ -1,7 +1,9 @@
 # SessionCost
 
 See how many tokens each turn of your coding-agent chat sends, why, and what to cut. Claude Code, Codex, Cursor,
-Antigravity and GitHub Copilot. Local: it reads log files on your computer and sends nothing anywhere.
+Antigravity and GitHub Copilot. Local: it reads log files on your computer and sends nothing anywhere (one
+exception, in the guard: a package's name goes to its registry when the agent installs it, to check how new that
+version is; `sessioncost guard fresh-releases off` stops it).
 
 ```
 npx sessioncost            # the report of the newest chat in this folder

@@ -56,6 +56,21 @@ def _with_tip(event: str, out: dict | None, tip: str, agent: str) -> dict | None
     return out
 
 
+def codex_carry(event: str, inp: dict, out: dict | None) -> dict | None:
+    """Codex shows no hook line, so a Stop hook's line (the report's path, the guard's count) reached nobody (a Mac
+    user, 2026-11-19). It is kept, and at the chat's next message the agent is given it to say in its reply."""
+    p, sid = home() / "codex_lines.json", _safe_id(inp.get("session_id"))
+    if event == "stop" and (line := (out or {}).get("systemMessage")):
+        kept = {k: v for k, v in _read(p, {}).items() if k != sid}
+        _write(p, dict(list(kept.items())[-50:]) | {sid: line})
+    elif event == "prompt" and (line := (kept := _read(p, {})).pop(sid, None)):
+        _write(p, kept)
+        return _with_tip(event, out, "SessionCost: after your last answer, this line could not be shown to the user. "
+                                     f'Put it in this reply, as written, as a quote block (begin it with "> "): {line}',
+                         "codex")
+    return out
+
+
 def _auto_report(inp: dict, st: dict) -> str:
     """Auto mode: build this chat's report in the background after each answer (never waits for it). The first
     time in a chat it returns a line naming where the report is."""

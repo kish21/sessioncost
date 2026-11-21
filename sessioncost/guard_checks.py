@@ -133,8 +133,79 @@ def _cmd_search_paths(cmd: str) -> list[str]:
             elif (ps and low in _PS_VALUE) or w in _VALUE_FLAGS:
                 nxt = "value"
         for w in (plain if pattern_given else plain[1:]):
-            if "/" in w or "\\" in w or w.startswith(".") or w.startswith("~") or ":" in w:
-                paths.append(w)
+            if "/" in w or "\\" in w or w.startswith(".") or w.startswith("~") or ":" in w or not (ps or findstr):
+                paths.append(w)               # grep / rg: every word after the search text is a file or folder
+    return paths
+
+
+_FILTER = re.compile(r"^\s*(?:head|tail|sort|uniq|wc|cut)(?:\s+-\S+(?:\s+\d+)?)*\s*$|"   # reads only the pipe
+                     r"^\s*(?:echo|printf|Write-(?:Host|Output))(?:\s+[^$`<>]*)?$", re.I)   # a label the agent typed itself
+_SED = re.compile(r"^\s*sed(?:\.exe)?\s+(.*)$", re.I)
+
+
+def _sed_paths(part: str) -> list[str]:
+    """The files a printing sed reads (sed -n '1,40p' f); [] for an in-place edit or no file."""
+    m = _SED.match(part)
+    if not m:
+        return []
+    script_given, plain, nxt = False, [], False
+    for w in _words(m.group(1)):
+        if nxt:
+            nxt = False
+        elif w.startswith(("-i", "--in-place")):
+            return []
+        elif w in ("-e", "-f", "--expression", "--file"):
+            script_given = nxt = True
+        elif w.startswith("-"):
+            continue
+        else:
+            plain.append(w)
+    return plain if script_given else plain[1:]
+
+
+_ASSIGN = re.compile(r"^\s*\$[\w:]+\s*=\s*\(?\s*")          # PowerShell `$c = Get-Content f`, `$i = ($c | ...`
+_PS_SHAPE = {"select-object", "select", "where-object", "where", "foreach-object", "foreach", "sort-object", "sort",
+             "measure-object", "measure", "group-object", "format-table", "ft", "format-list", "fl", "out-string",
+             "select-string", "sls"}                         # with no -Path, Select-String searches only the pipe
+_SUBEXPR = re.compile(r"\$\(((?:[^()]|\([^()]*\))*)\)")
+
+
+def _shapes_only(part: str) -> bool:
+    """A PowerShell part that only reshapes what the command already read: variables, `$_` members, text, numbers and
+    the pipe cmdlets above, with no other command anywhere (not even inside "$( )"). Owner 2026-11-21: reading our
+    own CHANGELOG into `$c` and slicing it raised an injection warning."""
+    t = re.sub(r"'[^']*'", "''", part)                         # single quotes: plain text
+    t = re.sub(r'"[^"]*"', lambda m: " ".join(_SUBEXPR.findall(m.group(0))), t)   # double quotes: only $( ) runs
+    if re.search(r"[&<>`]|\b-Path\b|\b-LiteralPath\b", t, re.I):
+        return False
+    words = re.findall(r"(?<![\w$.\-:\\/])[A-Za-z_][\w-]*", t)
+    return all(w.lower() in _PS_SHAPE for w in words)
+
+
+def _split_cmd(cmd: str) -> list[str]:
+    """The parts of a command between && || ; | and new lines, never splitting inside quotes ('a|b' is one pattern)."""
+    parts, cur = [], ""
+    for tok in re.findall(r"'[^']*'|\"[^\"]*\"|&&|\|\||[;|\n]|[^'\"&|;\n]+|['\"&]", cmd):
+        if tok in ("&&", "||", ";", "|", "\n"):
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += tok
+    return parts + [cur]
+
+
+def _cmd_all_read_paths(cmd: str) -> list[str]:
+    """Every file a command only prints or searches (cat, head, sed -n, grep, rg, findstr, Select-String), or []
+    when any part does something else or reads no named file, so the whole result came from those files."""
+    paths = []
+    for p in _split_cmd(cmd):
+        p = _ASSIGN.sub("", p)
+        if not p.strip() or _FILTER.match(p):
+            continue
+        found = (_cmd_search_paths(p) if _SHELL_SEARCH.match(p.strip()) else _sed_paths(p)) or _cmd_shown_paths(p)
+        if not found and not _shapes_only(p):
+            return []
+        paths += found
     return paths
 
 
@@ -356,10 +427,47 @@ WHY = {"pipe_to_shell": "runs a script straight from the internet", "encoded_com
        "poisoned_tool": "a tool of an MCP server whose descriptions showed signs of a prompt injection",
        "key_in_output": "a key or token would land in this chat (a script that prints one, or sending data out after one came in)",
        "new_or_changed": "this skill or MCP server is new or changed since your last chat here",
-       "staged_script": "writes or runs a script file with a never-list step in it",
+       "staged_script": "runs a script with a dangerous step in it (for example one that turns the guard off)",
        "guard_tamper": "would change or switch off the guard or the rules you set",
        "unlisted": "not in the project's allow list (allow-list mode)",
+       "url_leak": "puts project data into a web address it opens",
+       "memory_poison": "changes the agent's own memory or rules after outside content came in this turn",
+       "prompt_leak": "sends the agent's rules or instructions out",
+       "runaway": "runs the same step again and again: the agent may be stuck in a loop",
+       "fresh_release": "installs a package version released in the last few days",
        "wipe": "deletes the whole disk or the home folder", "privilege": "raises its own rights or changes the computer itself (sudo, accounts, services, the machine's settings)"}
+
+# the rule behind each reason, and where it comes from, so a developer sees an industry rule and not a whim (owner
+# 2026-11-19). OWASP = OWASP Top 10 for LLM Applications 2025 (names checked on genai.owasp.org/llm-top-10 that day).
+_DISCLOSE = "keys never go into the chat, logs or git (OWASP LLM02: Sensitive Information Disclosure)"
+_INJECT = "content from outside is data, never orders (OWASP LLM01: Prompt Injection)"
+_SUPPLY = "run only code and packages you have checked (OWASP LLM03: Supply Chain)"
+_AGENCY = "an agent does only what the task needs, and the user approves the rest (OWASP LLM06: Excessive Agency)"
+_CHECKS = "an agent never switches off its own safety checks (OWASP LLM06: Excessive Agency)"
+RULE = {"env_dump": _DISCLOSE, "secrets": _DISCLOSE, "secret_commit": _DISCLOSE, "key_in_output": _DISCLOSE,
+        "after_untrusted": _INJECT, "injected": _INJECT, "poisoned_tool": _INJECT,
+        "pipe_to_shell": _SUPPLY, "new_package": _SUPPLY, "installs": _SUPPLY, "new_or_changed": _SUPPLY,
+        "staged_script": _SUPPLY,
+        "encoded_command": "a command runs only if a person can read it (OWASP LLM05: Improper Output Handling)",
+        "inline_script": "code an agent writes is read before it runs (OWASP LLM05: Improper Output Handling)",
+        "security_off": _CHECKS, "skips_commit_checks": _CHECKS, "guard_tamper": _CHECKS, "guardrails": _CHECKS,
+        "force_push": "never rewrite history others share (git best practice)",
+        "wipe": _AGENCY, "privilege": "least privilege: no more rights than the task needs (OWASP LLM06: Excessive Agency)",
+        "persistence": _AGENCY, "deletes": _AGENCY, "git_push": _AGENCY, "outside_project": _AGENCY,
+        "network": _AGENCY, "mcp_action": _AGENCY,
+        "unlisted": "least privilege: only the steps on the project's allow list run unasked",
+        "url_leak": _DISCLOSE, "memory_poison": "content from outside never becomes the agent's standing rules "
+                                                "(OWASP LLM01: Prompt Injection)",
+        "prompt_leak": "the agent's rules and instructions stay private (OWASP LLM07: System Prompt Leakage)",
+        "runaway": "an agent's work has limits, so a loop cannot run up cost (OWASP LLM10: Unbounded Consumption)",
+        "fresh_release": _SUPPLY}
+
+
+def rule_for(marks) -> str:
+    """The one rule behind the first of these reasons that has one, as ' Rule: ….' ('' when none)."""
+    r = next((RULE[m] for m in sorted(marks, key=lambda m: RULE.get(m) == _AGENCY) if m in RULE), "")   # specific first
+    return f" Rule: {r}." if r else ""
+
 
 # the never rules alone, on the raw command: what still runs when the full check fails (fail closed for these)
 _RAW_NEVER = None
@@ -396,4 +504,4 @@ def _run_scripts(cmd: str, cwd: str) -> str:
 
 
 def _step_fp(a) -> str:
-    return hashlib.sha1(f"{a.tool}\0{a.target}\0{getattr(a, 'written', '')}".encode()).hexdigest()[:16]
+    return hashlib.sha1(f"{a.tool}\0{a.target}\0{getattr(a, 'written', '')}".encode("utf-8", "replace")).hexdigest()[:16]

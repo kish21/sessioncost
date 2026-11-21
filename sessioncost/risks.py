@@ -30,7 +30,8 @@ pipe_to_shell    ran a script straight from the internet: curl ... | sh, iex (iw
 encoded_command  ran a hidden command: powershell -EncodedCommand, base64 -d ... | sh
 force_push       rewrote shared history: git push --force / -f / --force-with-lease, git filter-branch / filter-repo
 persistence      set itself up to run again later: crontab, schtasks /create, Register-ScheduledTask, a Run key, a
-                 startup folder, systemctl enable, launchctl load, a shell start-up file (~/.bashrc, $PROFILE)
+                 startup folder, systemctl enable, launchctl load, a shell start-up file (~/.bashrc, $PROFILE), a
+                 file put in a log-in place (~/Library/LaunchAgents, ~/.config/autostart, the Startup folder)
 security_off     switched off a security tool: Defender, the firewall, SELinux, Gatekeeper
 wipe             deleted the whole disk or the home folder: rm -rf / or ~ or $HOME, Remove-Item on a drive or $env:USERPROFILE,
                  format, diskpart, mkfs, dd onto a disk
@@ -82,11 +83,12 @@ from .risk_patterns import (_DB_CLIENT, _DB_WIPE, _DELETE, _ENCODED, _ENV_DUMP, 
                             _READ_ONLY, _SCRIPT_ENV, _SEC_OFF, _SECRET, _SECRET_CMD, _SECRET_VALUE, _SECRET_VAR, _SEND,
                             _SEND_ONLY, _SINKS, _SQL_DESTROY, _TAMPER_CMD, _TAMPER_PATH, _TO_PLUGINS, _VENDOR, _WIPE,
                             _WRITES, ALLOW_FILE, SEVERITY, _direct, _downloads_then_runs, _inner_cmds, _rules_file)
-from .risk_shell import (_LOOK_ONLY, _NAMES_ONLY, _RUNS_BODY, _moves_out, _no_prose, _outside, _parts, _quoted_secret,
-                         _reads_secret, _shell_part, _split_outside_quotes, _unquote, _without_searches)
+from .risk_shell import (_LOOK_ONLY, _NAMES_ONLY, _RUNS_BODY, _moves_out, _no_prose, doc_bodies_out, _outside, _parts, _quoted_secret,
+                         _reads_secret, _shell_part, _split_outside_quotes, _unquote, _without_searches,
+                         search_safe_parts)
 # Names other modules and tests use as risks.<name>; they live in risk_patterns.py.
 from .risk_patterns import (_COMMIT, _RULES_NAME, NEVER, WATCH, _norm, mark_commit_check_skips,  # noqa: F401
-                            code_text, prints_key, tamper_write)
+                            code_text, prints_key, real_key, tamper_write)
 
 
 def watch_marks(a, cwd: str) -> list[str]:
@@ -106,21 +108,24 @@ def watch_marks(a, cwd: str) -> list[str]:
     run = _without_searches(_shell_part(full), [_shell_part(i) for i in _inner_cmds(_shell_part(full))]) if a.kind == "command" else t
     if a.kind in ("edit", "write") and any(_outside(p, cwd) for p in full.splitlines()):
         out.append("outside_project")
-    if a.kind == "web" or tool.startswith("mcp__") or tool in _OUTWARD_TOOLS or (a.kind == "command" and _NET_CMD.search(run)):
+    from .guard_scan import own_app_tool
+    own_app = own_app_tool(a)                 # the agent's own plan, to-do, docs and schedule tools: the user's own app
+    if not own_app and (a.kind == "web" or tool.startswith("mcp__") or tool in _OUTWARD_TOOLS or
+                        (a.kind == "command" and _NET_CMD.search(run))):
         out.append("network")
     if a.kind == "command" and _INLINE.search(full):
         out.append("inline_script")
     if a.kind == "command":                               # a part that opens or sends the file, not one that lists it
         hit = not _NAMES_ONLY.fullmatch(t.strip()) and (      # names only, no values: not a secret read
-            any(_SECRET.search(p) and not _LOOK_ONLY.search(p) for p in _parts(_no_prose(t))) or
-            any(_quoted_secret(p) for p in _parts(t)) or
+            any(_SECRET.search(p) and not _LOOK_ONLY.search(p) for p in search_safe_parts(_no_prose(t))) or
+            any(_quoted_secret(p) for p in search_safe_parts(t)) or
             bool(_INLINE.search(full) and _RUNS_BODY.search(t) and _reads_secret(full)))
     else:
         hit = a.kind != "search" and bool(_SECRET.search(t))      # a search pattern that mentions .env reads no secret
         hit = hit or (tool in ("grep", "grep_search") and bool(_SECRET.search(" " + str(getattr(a, "paths", "") or ""))))   # searching inside one does
-    if hit or "secrets" in by_script or ((a.kind in ("command", "web") or tool.startswith("mcp__")) and _SECRET_VALUE.search(full)):
+    if hit or "secrets" in by_script or ((a.kind in ("command", "web") or tool.startswith("mcp__")) and real_key(full)):
         out.append("secrets")
-    if tool.startswith("mcp__"):
+    if tool.startswith("mcp__") and not own_app:
         out += _mcp_marks(tool.split("__")[-1], full, cwd)
     if a.kind == "command" and (_DELETE.search(run) or _moves_out(run, cwd) or "deletes" in by_script or
                                 (_DB_CLIENT.search(run) and (_SQL_DESTROY.search(full) or _DB_WIPE.search(full)))):
@@ -170,6 +175,7 @@ def _tampers(a, full: str, shell: str) -> bool:
     if a.kind in ("edit", "write"):
         return any(_TAMPER_PATH.search(p.strip()) for p in full.splitlines())
     if a.kind == "command":
+        full = doc_bodies_out(full)           # text only written into a document runs nothing (a handover's notes)
         if _TAMPER_CMD.search(_no_prose(full)):
             return True
         bare = _no_prose(shell)
@@ -186,7 +192,8 @@ def _tampers(a, full: str, shell: str) -> bool:
         # an installed plugin: running its scripts is how skills work; a write, move or delete aimed at its files is not
         return any(_PLUGINS_PATH.search(p) and (_DELETE.search(p) or _TO_PLUGINS.search(_QUIET.sub(" ", p))) for p in parts)
     if (a.tool or "").startswith("mcp__"):
-        return bool(_TAMPER_PATH.search(full) or _TAMPER_CMD.search(full))
+        from .guard_scan import own_app_tool  # the agent's own docs and plans: text about the guard changes nothing
+        return not own_app_tool(a) and bool(_TAMPER_PATH.search(full) or _TAMPER_CMD.search(full))
     return False
 
 
@@ -219,15 +226,18 @@ def _mcp_marks(name: str, args: str, cwd: str) -> list[str]:
 
 
 def _untrusted_in(a, cwd: str, strict: bool = False) -> bool:
-    """A step that brought content the user did not write into the chat: the web, an MCP or network result, a file
-    from outside the project, any result showing signs of an injection; strict: also a file from a folder of other
-    people's code (node_modules, vendor, site-packages…)."""
+    """A step that brought content the user did not write into the chat: the web, an MCP or network result, any
+    result showing signs of an injection; strict: also a file from outside the project or from a folder of other
+    people's code (node_modules, vendor, site-packages…). The user's own files elsewhere are not untrusted (owner
+    2026-11-18: memory notes and handovers were the source of most needless asks). A web page, network command output
+    or the agent's own app tools count only in strict mode: otherwise their words are scanned (guard_scan.py)."""
+    from .guard_scan import scan_only
     if {"injection", "hidden_text"} & set(getattr(a, "result_flags", None) or []) or "injected" in a.risks:
         return True
-    if "network" in a.risks and (a.tool or "").lower() not in _SEND_ONLY:      # it brought something back
-        return True
+    if "network" in a.risks and (a.tool or "").lower() not in _SEND_ONLY and (strict or not scan_only(a)):
+        return True                                                             # it brought something back
     paths = (a.target or "").splitlines()
-    return a.kind == "read" and any(_outside(p, cwd) or (strict and _VENDOR.search(p)) for p in paths)
+    return strict and a.kind == "read" and any(_outside(p, cwd) or _VENDOR.search(p) for p in paths)
 
 
 def _sends_out(a) -> bool:

@@ -27,6 +27,10 @@ TEXT = {
     "inline_script": "Ran code written into the command",
     "key_in_output": "A key or token reached the chat (a tool result showed one, or a script printed one)",
     "poisoned_tool": "Used a tool of an MCP server whose descriptions showed signs of a prompt injection",
+    "url_leak": "Put project data into a web address it opened",
+    "memory_poison": "Changed the agent's memory or rules after outside content came in",
+    "prompt_leak": "Sent the agent's rules or instructions out", "runaway": "Ran the same step again and again",
+    "fresh_release": "Installed a package version released in the last few days",
 }
 OWASP = {   # OWASP Top 10 for LLM Applications 2025 (genai.owasp.org/llm-top-10) and for Agentic Applications 2026
     "injected": ["LLM01:2025", "ASI01"], "after_untrusted": ["LLM01:2025", "LLM06:2025", "ASI01", "ASI02"],
@@ -36,6 +40,8 @@ OWASP = {   # OWASP Top 10 for LLM Applications 2025 (genai.owasp.org/llm-top-10
     "installs": ["LLM03:2025", "ASI04"], "git_push": ["LLM06:2025"], "force_push": ["LLM06:2025"], "deletes": ["LLM06:2025"],
     "outside_project": ["LLM06:2025"], "skips_commit_checks": ["LLM06:2025"],
     "wipe": ["LLM06:2025", "ASI02"], "privilege": ["LLM06:2025", "ASI03"],
+    "url_leak": ["LLM02:2025"], "memory_poison": ["LLM01:2025"], "prompt_leak": ["LLM07:2025"], "runaway": ["LLM10:2025"],
+    "fresh_release": ["LLM03:2025"],
 }
 
 

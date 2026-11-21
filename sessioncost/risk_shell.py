@@ -12,7 +12,7 @@ from .risk_patterns import _MOVE, _QUOTED, _SECRET, _norm
 _HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_]\w*)['\"]?")
 _HERE_STRING = re.compile(r"@(['\"])\s*$")        # PowerShell: @' or @" at the end of a line opens a here-string
 # the written-in code is run (piped or fed to an interpreter, or python -c): its text counts, not only the shell's
-_RUNS_BODY = re.compile(r"(?:^|[|;&(]\s*)(?:python3?|py|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\b"
+_RUNS_BODY = re.compile(r"(?:^|[|;&(]\s*)(?:&\s*)?(?:['\"]?[\w.~:\\/ -]*[\\/])?(?:python3?|py|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\b"
                         r"(?=[^|;&\n]*(?:\s-(?:\s|$|c\b|e\b|Command\b)|<<))|\|\s*(?:python3?|py|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\b",
                         re.I | re.M)
 # in a script's text, a secret counts when it is the file a read call opens (open('.env'), Get-Content .env), not
@@ -41,7 +41,7 @@ def _reads_secret(text: str) -> bool:
         if _READ_CALL.search(text[max(start, m.start() - 120): m.start() + 1]):
             return True
     return False
-_SCRIPT_ARG = re.compile(r"""((?:python3?|py|node|ruby|perl|php)\s+(?:-[a-zA-Z]+\s+)*-[ce]\s+)("(?:[^"\\]|\\.)*"|'[^']*')""",
+_SCRIPT_ARG = re.compile(r"""((?:python3?|py|node|ruby|perl|php)(?:\.exe)?\s+(?:-[a-zA-Z]+\s+)*-[ce]\s+)("(?:[^"\\]|\\.)*"|'[^']*')""",
                          re.I | re.S)
 
 
@@ -68,6 +68,39 @@ def _shell_part(cmd: str) -> str:
     return _SCRIPT_ARG.sub(lambda m: m.group(1) + "''", "\n".join(out))
 
 
+_DOC = r"""(?:'[^'\n]+|"[^"\n]+|[^\s'"<>|;&$`]+)\.(?:md|mdx|markdown|txt|rst|adoc)['"]?"""
+# a line that only writes the text below it into a document: cat > notes.md <<'EOF', tee -a notes.md <<'EOF'
+_DOC_WRITE = re.compile(rf"""(?:^|&&|;)\s*(?:cat|tee)(?:\s+(?:-a|>>?\s*/dev/null|>>?\s*{_DOC}|{_DOC}|"""
+                        r"""<<-?\s*(?:'\w+'|"\w+"|\\?\w+)))+\s*$""", re.I)
+# PowerShell: @' … '@ | Set-Content notes.md (single quotes: nothing in it is expanded)
+_PS_DOC_WRITE = re.compile(rf"""^\s*'@\s*\|\s*(?:Set-Content|Add-Content|Out-File|sc|ac)(?:\s+(?:-(?:Path|LiteralPath|FilePath)\s+)?"""
+                           rf"""{_DOC}|\s+-(?:Encoding\s+\w+|Append|NoNewline|Force))+\s*$""", re.I)
+
+
+def doc_bodies_out(cmd: str) -> str:
+    """The command without the text it only writes into a document (cat > notes.md <<'EOF' … EOF, @' … '@ |
+    Set-Content notes.md): that text runs nothing, so a handover that names ~/.sessioncost or the guard's switch is no
+    step on the guard (a Codex handover was blocked, 2026-11-18). A body that can run something stays: an unquoted end
+    word with $( or ` in the body, or a line that does more than write the document."""
+    lines, out, i = cmd.splitlines(), [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        if (m := _HERE_STRING.search(line)) and m.group(1) == "'" and not line[:m.start()].strip():
+            j = next((k for k in range(i, len(lines)) if lines[k].lstrip().startswith("'@")), None)
+            if j is not None and _PS_DOC_WRITE.search(lines[j]):
+                out.append(lines[j])
+                i = j + 1
+        elif (m := _HEREDOC.search(line)) and _DOC_WRITE.search(line):
+            j = next((k for k in range(i, len(lines)) if lines[k].strip() == m.group(1)), None)
+            quoted = bool(re.search(r"<<-?\s*(?:['\"]|\\)", line))
+            if j is not None and (quoted or not re.search(r"\$\(|`", "\n".join(lines[i:j]))):
+                out.append(lines[j])
+                i = j + 1
+    return "\n".join(out)
+
+
 _PROSE = re.compile(r"(?:-m|--message)\s+(?:\"(?:[^\"\\]|\\.)*\"|'[^']*')|\"[^\"\n]*\s[^\"\n]*\"|'[^'\n]*\s[^'\n]*'")
 _LOOK_ONLY = re.compile(r"^\s*(?:ls|dir|stat|test|\[|Test-Path|touch|file|wc\s+-l|git\s+(?:check-ignore|ls-files))\b", re.I)
 
@@ -90,6 +123,40 @@ def _split_outside_quotes(cmd: str) -> list[str]:
         start = m.end()
     out.append(cmd[start:])
     return [p for p in out if p.strip()]
+
+
+_PATTERN_OPT = re.compile(r"-e|--regexp|-Pattern", re.I)         # the next word is what it looks for
+_PATH_OPT = re.compile(r"-Path|-LiteralPath|-g|--glob", re.I)    # the next word is a file it reads
+
+
+def search_files(part: str) -> str:
+    """A search without the words it looks for: `grep -iE ".env|x"` reads no file, `grep KEY .env` reads .env."""
+    if not _SEARCH.match(part):
+        return part
+    words = re.findall(r"\"[^\"]*\"|'[^']*'|\S+", part)
+    cmd = 2 if words[0].lower() == "git" else 1
+    keep, found, nxt = words[:cmd], False, ""
+    for w in words[cmd:]:
+        if nxt:
+            if nxt == "path":
+                keep.append(w)
+            nxt = ""
+        elif _PATTERN_OPT.fullmatch(w):
+            nxt, found = "pattern", True
+        elif _PATH_OPT.fullmatch(w):
+            nxt = "path"
+        elif w.startswith("-"):
+            continue                          # a flag: -i, -E, --name-only
+        elif not found:
+            found = True                      # the first plain word is the pattern
+        else:
+            keep.append(w)
+    return " ".join(keep)
+
+
+def search_safe_parts(cmd: str) -> list[str]:
+    """The parts of a command, split outside quotes, each search without its pattern (the secrets check)."""
+    return [search_files(p) for p in _split_outside_quotes(cmd)]
 
 
 def _without_searches(cmd: str, inner: list[str]) -> str:

@@ -3401,7 +3401,7 @@ function drawSky(){
       (G.inventory ? ` · ${G.inventory.first ? `${G.inventory.items} skills, plugins and MCP servers recorded` : (G.inventory.new || []).length + (G.inventory.changed || []).length
         ? `<b>new or changed since the last chat: ${esc([...(G.inventory.new || []), ...(G.inventory.changed || [])].map(k => k.replace(':', ' ')).join(', '))}</b>` : `${G.inventory.items} skills, plugins and MCP servers unchanged`}` : '') + ' · ' +
       (G.intact ? `<span class="ok">log intact ✓</span> <span class="muted">(${G.lines} lines, each chained to the one before)</span>` : `<b style="color:var(--alarm)">${{incomplete: 'log cut off ✗: its last line was not written in full', unreadable: 'log could not be read ✗: it cannot be checked'}[G.status] || 'log changed ✗: a line was edited or removed after it was written'}</b>`) + '</span>'
-    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Say "turn the guard on" (or type <code>/liveguard</code>) in any agent's chat and every chat is guarded again: never-list steps are blocked and risky ones ask you first, as they happen.</span>`;
+    : `<span class="gico off" aria-hidden="true">⛨</span><span class="muted">The live guard was off in this chat. Say "turn the guard on" (or type <code>/liveguard</code>) in any agent's chat and every chat is guarded again: dangerous steps are stopped and risky ones wait for your yes, each time with the reason.</span>`;
   const trace = !!t && sky.view === 'trace';
   box.classList.toggle('trace', trace);
   box.classList.toggle('allchains', sky.mark === 'after_untrusted');

@@ -5,7 +5,6 @@ import argparse
 import json
 import os
 import sys
-import webbrowser
 from pathlib import Path
 
 from . import __version__, locate, prices as pricemod, readers, report, zfile
@@ -281,7 +280,7 @@ def cmd_fix(argv: list[str]) -> int:
     if argv[:1] == ["long-chat"]:  # when a chat counts as long: the handover offer
         if len(argv) < 2:
             print(f"SessionCost fix: a chat over {fixer._tok(fixer.long_chat())} tokens gets the handover offer. "
-                  'To change it, say "warn me at 150k tokens" (or type `sessioncost fix long-chat 150k`).')
+                  'To change it, say "warn me at 1m tokens" (or type `sessioncost fix long-chat 1m`).')
             return 0
         code, msg = fixer.set_long_chat(argv[1])
         print(msg)
@@ -396,6 +395,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if argv[:1] == ["fix"]:        # `sessioncost fix ...`: its own options (see cmd_fix)
         return cmd_fix(argv[1:])
+    if argv[:1] == ["help"]:       # what you can say in the chat, and the guide's address (help_menu.py)
+        from . import help_menu
+        return help_menu.main(argv[1:])
     if argv[:1] == ["editor"]:     # the editor extension's status bar: one short JSON answer (editor.py)
         from . import editor
         return editor.main(argv[1:])
@@ -446,6 +448,10 @@ def main(argv: list[str] | None = None) -> int:
     except (readers.NotSupported, ValueError) as e:
         print(f"sessioncost: {e}")
         return 2
+    except PermissionError as e:   # an agent's sandbox (Codex) refused the write: one line, no retries (2026-11-18)
+        print(f"sessioncost: could not write to {REPORTS.parent} ({e.strerror or e}). If your agent runs commands in "
+              "a sandbox (Codex does), allow it to write to that folder and run this again.", flush=True)
+        return 3
     if args.live:                  # after an answer, in the background: the to-do list for the next reply
         from . import fixer
         if fixer.auto_on():
@@ -466,7 +472,8 @@ def main(argv: list[str] | None = None) -> int:
     if gone:
         print(f"Old reports: deleted {gone} ({size(freed)}); the newest {KEEP_REPORTS} are kept.")
     if out and not args.no_open:
-        webbrowser.open(out.resolve().as_uri())
+        from .opener import open_report     # returns at once: the agent is not kept waiting on the browser
+        open_report(out)
     return 0
 
 

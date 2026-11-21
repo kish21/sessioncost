@@ -13,13 +13,18 @@ from .model import Session
 
 WATCH = ("guard_tamper", "wipe", "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off", "force_push", "privilege",
          "injected", "after_untrusted", "poisoned_tool", "key_in_output", "guardrails", "mcp_action", "secrets", "secret_commit", "skips_commit_checks",
-         "git_push", "deletes", "installs", "new_package", "repeat_fail", "outside_project", "big_read", "network", "inline_script")
+         "git_push", "deletes", "installs", "new_package", "repeat_fail", "outside_project", "big_read", "network", "inline_script",
+         "url_leak", "memory_poison", "prompt_leak", "runaway", "fresh_release")
 SEVERITY = {"guard_tamper": "high", "wipe": "high", "privilege": "high", "pipe_to_shell": "high", "encoded_command": "high", "env_dump": "high", "persistence": "high",
             "security_off": "high", "force_push": "high", "injected": "high", "poisoned_tool": "high", "key_in_output": "high", "mcp_action": "review",
             "after_untrusted": "high", "guardrails": "high", "secrets": "high", "secret_commit": "high", "skips_commit_checks": "high",
             "git_push": "review", "deletes": "review", "installs": "review", "new_package": "review", "repeat_fail": "review",
-            "outside_project": "review", "big_read": "review",
-            "network": "review", "inline_script": "info"}
+            # outside the project: shown in the report, never asked (owner 2026-11-18: the ask protected almost
+            # nothing; secrets, the agent's rules, start-up files and sending out keep their own checks)
+            "outside_project": "info", "big_read": "review",
+            "network": "review", "inline_script": "info",
+            # the five OWASP-based guards (guard_owasp.py, 2026-11-19): each pauses with its reason
+            "url_leak": "high", "memory_poison": "high", "prompt_leak": "high", "runaway": "review", "fresh_release": "high"}
 NEVER = {"guard_tamper", "wipe", "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off", "force_push",
          "skips_commit_checks", "secret_commit"}      # the live guard blocks these (reading a secret too: see guard.tier)
 ALLOW_FILE = ".sessioncost-allow"
@@ -53,8 +58,9 @@ def mark_commit_check_skips(s: Session) -> None:
                 a.risks.append("skips_commit_checks")
 
 
-_OUTWARD_TOOLS = {"webfetch", "websearch", "artifact", "senduserfile", "pushnotification",
-                  "remotetrigger", "sendmessage", "web_search", "web_fetch", "read_url_content", "search_web"}
+# SendMessage (to the agent's own helpers), SendUserFile and PushNotification (to the user) are not network (owner
+# 2026-11-18: the replay found them asked as "network")
+_OUTWARD_TOOLS = {"webfetch", "websearch", "artifact", "remotetrigger", "web_search", "web_fetch", "read_url_content", "search_web"}
 _SEND_ONLY = {"senduserfile", "pushnotification", "sendmessage", "remotetrigger"}   # network out, nothing comes back in
 _NET_CMD = re.compile(r"(?:^|[\s;&|(`])(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|ssh|scp|sftp|rsync|ftp|"
                       r"gh\s+\w+|git\s+(?:-c\s+\S+\s+)*(?:clone|fetch|pull)|nslookup|dig|Resolve-DnsName|"
@@ -141,6 +147,16 @@ _GUARD_IN_CMD = re.compile(r"(?:MEMORY\.md|\.cursorrules|\.mcp\.json|\.pre-commi
 _SECRET_VALUE = re.compile(r"\b(?:sk-(?:ant-|proj-|live-)?[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|"
                            r"AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|xox[abprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{20,}|"
                            r"npm_[A-Za-z0-9]{36})\b|-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP |ENCRYPTED )?PRIVATE KEY-----")
+# well-known sample keys in docs and tests (AWS's own doc key ending in EXAMPLE, sk-...EXAMPLE, xxxx…): not a key
+# (owner 2026-11-18)
+_SAMPLE_KEY = re.compile(r"example|x{6,}|0123456789|abcdefghij|placeholder|dummy|redacted", re.I)
+
+
+def real_key(text: str) -> bool:
+    """A key-looking value in the text that is not a well-known sample."""
+    return any(not _SAMPLE_KEY.search(m.group(0)) for m in _SECRET_VALUE.finditer(text or ""))
+
+
 _MCP_ACT = re.compile(r"(?:^|_)(?:delete|remove|drop|destroy|truncate|purge|merge|push|send|post|publish|create|update|"
                       r"write|edit|move|rename|upload|run|exec|execute|deploy|invoke|transfer|revoke|close|archive|"
                       r"approve|comment|reply|query)(?:_|$)", re.I)
@@ -291,7 +307,11 @@ _PERSIST = re.compile(r"\bcrontab\s+(?!-l\b)\S|\bschtasks(?:\.exe)?\s+/create\b|
                       r"\b(?:Set|New)-ItemProperty\b[^\n]*\\CurrentVersion\\Run|\bsystemctl\s+(?:--user\s+)?enable\b|\blaunchctl\s+(?:load|bootstrap)\b|"
                       r"[\\/]Start Menu[\\/]Programs[\\/]Startup\b", re.I)
 _RC_FILE = re.compile(r"(?:^|[\\/])(?:\.bashrc|\.bash_profile|\.zshrc|\.zprofile|\.profile|\.config[\\/]fish[\\/]config\.fish|"
-                      r"Microsoft\.PowerShell_profile\.ps1|profile\.ps1)$|\$PROFILE\b", re.I)
+                      r"Microsoft\.PowerShell_profile\.ps1|profile\.ps1)$|\$PROFILE\b|"
+                      # files that run on their own at log-in (an edit there needs no command): macOS launch agents,
+                      # Linux autostart and systemd user units, the Windows Startup folder
+                      r"[\\/]Library[\\/]Launch(?:Agents|Daemons)[\\/][^\\/\n]+$|[\\/]\.config[\\/](?:autostart|systemd[\\/]user)[\\/][^\\/\n]+$|"
+                      r"[\\/]Start Menu[\\/]Programs[\\/]Startup[\\/][^\\/\n]+$", re.I)
 _QUOTED = re.compile(r"'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\"")      # quoted text: a pattern or a message, not a command
 # printing one secret variable: echo $OPENAI_API_KEY, Write-Output $env:GITHUB_TOKEN, or $env:X_SECRET on its own
 _SECRET_VAR = re.compile(r"(?:^|[;&|(]\s*)(?:echo|printf|print|Write-Output|Write-Host|cat\s+<<<)\b[^;&|\n]*"

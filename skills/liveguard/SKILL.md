@@ -37,9 +37,12 @@ first and the command in brackets.
      ```
 
      Add ` strict` after `on` for "/liveguard strict" (untrusted content then counts for the whole chat, and files
-     from node_modules, vendor or site-packages count as untrusted). If it says SessionCost needs Python, or that it
-     could not write to its folder, your sandbox stopped it: ask the user once for permission and run the same
-     command again with it. If it fails again, show the user the lines it printed and stop.
+     from node_modules, vendor or site-packages count as untrusted). Both write in the user's home folder: if your
+     commands run in a sandbox that cannot write there (Codex does), ask for permission to run outside it on the
+     FIRST try. Run each command once; if it is still running, wait for it, never start it again. If it says
+     SessionCost needs Python, or that it could not write to its folder, your sandbox stopped it: ask the user once
+     for permission and run the same command again with it. If it fails again, show the user the lines it printed
+     and stop.
    - The first command puts the guard's hooks into this agent and keeps the user's other hooks; running it again does
      no harm. If it says "added", tell the user to restart the agent once: the guard checks steps from then on. In
      Codex, also tell them to type `/hooks` once and trust SessionCost's hooks.

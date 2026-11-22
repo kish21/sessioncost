@@ -23,7 +23,18 @@ def _module():
         import zstandard               # optional: pip install zstandard
         return zstandard
     except ImportError:
-        return None
+        pass
+    if sys.flags.no_site:              # the plugin's starter runs Python with -S (fast start): add the package folders
+        import site                    # only, never site.main(): that runs the slow start-up add-ons after all
+        for d in [site.getusersitepackages(), *site.getsitepackages()]:
+            if d not in sys.path:
+                sys.path.append(d)
+        try:
+            import zstandard
+            return zstandard
+        except ImportError:
+            pass
+    return None
 
 
 def can_unpack() -> bool:

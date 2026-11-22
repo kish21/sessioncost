@@ -83,9 +83,16 @@ def _value(con: sqlite3.Connection, key: str) -> dict:
     return v if isinstance(v, dict) else {}
 
 
+def with_prefix(con: sqlite3.Connection, prefix: str, cols: str = "value"):
+    """Rows whose key starts with `prefix`, through the key's index. `key like 'x%'` reads the whole store instead
+    (Cursor's is often hundreds of MB): seconds on a cold disk."""
+    end = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+    return con.execute(f"select {cols} from cursorDiskKV where key >= ? and key < ?", (prefix, end))
+
+
 def chats(con: sqlite3.Connection) -> list[dict]:
     out = []
-    for (v,) in con.execute("select value from cursorDiskKV where key like 'composerData:%'"):
+    for (v,) in with_prefix(con, "composerData:"):
         try:
             d = json.loads(v) if v else None
         except ValueError:
@@ -342,7 +349,7 @@ class CursorReader:
         s = Session(agent=self.name, session_id=cid, source=f"{state_db()}#{cid}", cwd=workspace(d),
                     title=str(d.get("name") or ""), tokens_exact=False)
         bubbles = {}
-        for k, v in con.execute("select key, value from cursorDiskKV where key like ?", (f"bubbleId:{cid}:%",)):
+        for k, v in with_prefix(con, f"bubbleId:{cid}:", "key, value"):
             try:
                 bubbles[k.removeprefix(f"bubbleId:{cid}:")] = json.loads(v)   # ids can hold ':' (".../s:0", ".../t:call-...")
             except (ValueError, TypeError):

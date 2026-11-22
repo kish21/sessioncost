@@ -4,7 +4,7 @@
 # arguments given; "run.sh guard ..." runs the guard. One command, so an agent never has to hunt for Python.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LB="$HOME/.local/bin"
-ok() { "$1" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >/dev/null 2>&1; }
+ok() { "$1" -S -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >/dev/null 2>&1; }
 uvfind() {
   for u in uv "$LB/uv"; do
     p="$("$u" python find --no-project ">=3.10" 2>/dev/null)" && [ -n "$p" ] && { PY="$p"; return 0; }
@@ -31,4 +31,5 @@ if [ -z "$PY" ]; then
   echo "  ~/.local/bin/uv python install 3.12"
   exit 3
 fi
-exec "$PY" "$ROOT/run.py" "$@"
+# -S: SessionCost needs only Python's own library; add-ons that load at every start can take seconds
+exec "$PY" -S "$ROOT/run.py" "$@"

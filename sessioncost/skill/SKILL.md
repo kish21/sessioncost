@@ -21,8 +21,14 @@ Codex, Antigravity or Cursor) and writes an HTML report. It uses no AI model and
    SessionCost is not installed and to install it from https://github.com/kish21/sessioncost#install, then stop. Do
    not run an installer yourself.
 
-   If it says it could not write to its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once for
-   permission to write there and run the same command again with it. Do not try other ways or other folders.
+   Every SessionCost command writes to `~/.sessioncost` in the user's home folder. If your commands run in a sandbox
+   that cannot write there (Codex does), ask for permission to run outside it on the FIRST try of each command: a
+   try inside the sandbox only fails.
+
+   Run each command once. It finishes in seconds but can take up to a minute: if it is still running, wait for it and
+   read its output; never start it again, and never run it a second time to check. If it says it could not write to
+   its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once for permission to write there and run
+   the same command again with it. Do not try other ways or other folders.
 
 2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
    printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own

@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 1.2.4) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
+description: (SessionCost 1.2.5) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -23,9 +23,15 @@ it, fetches SessionCost's price list).
    `<run>` for every command in this skill. It finds Python by itself and fetches one through uv when there is none:
    never look for Python, `py` or uv yourself.
 
-   If it says SessionCost needs Python, or that it could not write to its folder (`~/.sessioncost`), your sandbox
-   stopped it: ask the user once for permission and run the same command again with it. If it fails again, show the
-   user the lines it printed and stop. Do not try other ways or other folders.
+   Every SessionCost command writes to `~/.sessioncost` in the user's home folder. If your commands run in a sandbox
+   that cannot write there (Codex does), ask for permission to run outside it on the FIRST try of each command: a
+   try inside the sandbox only fails.
+
+   Run each command once. It finishes in seconds but can take up to a minute: if it is still running, wait for it and
+   read its output; never start it again, and never run it a second time to check. If it says SessionCost needs
+   Python, or that it could not write to its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once
+   for permission and run the same command again with it. If it fails again, show the user the lines it printed and
+   stop. Do not try other ways or other folders.
 
 2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
    printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own

@@ -11,11 +11,12 @@ if not defined PY for %%F in ("%LB%\python3*.exe") do if not defined PY call :tr
 if not defined PY call :uvfind
 if not defined PY if not defined SESSIONCOST_NO_FETCH call :fetch
 if not defined PY goto nopy
-%PY% "%ROOT%run.py" %*
+rem -S: SessionCost needs only Python's own library; add-ons that load at every start can take seconds
+%PY% -S "%ROOT%run.py" %*
 exit /b
 
 :try
-"%~1" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+"%~1" -S -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if not errorlevel 1 set PY="%~1"
 exit /b 0
 

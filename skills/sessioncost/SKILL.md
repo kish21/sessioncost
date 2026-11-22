@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 1.2.3) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
+description: (SessionCost 1.2.4) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -14,29 +14,18 @@ it, fetches SessionCost's price list).
 1. Run this from the project folder of the current session (one command, nothing else):
 
    ```
-   python "${CLAUDE_PLUGIN_ROOT}/run.py" last --brief
+   <run> last --brief
    ```
 
-   `run.py` is in this plugin's root folder: two folders above this SKILL.md. In Claude Code that is
-   `${CLAUDE_PLUGIN_ROOT}`; in Codex or Cursor (where that variable is not set) use the full path of the folder two
-   levels above this file instead.
+   `<run>` is SessionCost's starter in this plugin's root folder: two folders above this SKILL.md (in Claude Code
+   `${CLAUDE_PLUGIN_ROOT}`; in Codex or Cursor use the full path of that folder). Windows: `run.cmd`, run as
+   `& "<folder>\run.cmd"` in PowerShell or `"<folder>/run.cmd"` in bash. Mac or Linux: `sh "<folder>/run.sh"`. Use
+   `<run>` for every command in this skill. It finds Python by itself and fetches one through uv when there is none:
+   never look for Python, `py` or uv yourself.
 
-   If it says it could not write to its folder (`~/.sessioncost`), your sandbox stopped it: ask the user once for
-   permission to write there and run the same command again with it. Do not try other ways or other folders.
-
-   If `python` is not found (or opens the Microsoft Store, or is older than 3.10), try `py` in its place (Windows),
-   then `python3`. If none of them works, get a Python through uv (it puts one in its own folder and changes nothing
-   else), and do it yourself, without sending the user to another way of installing:
-
-   1. `uv python find --no-project ">=3.10"`. If it prints a path, use that path in place of `python` everywhere in
-      this skill, and skip to step 1 above. If `uv` is not found, try `~/.local/bin/uv` the same way.
-   2. No uv: install it. Windows (PowerShell):
-      `powershell -NoProfile -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"`.
-      Mac or Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. It goes to `~/.local/bin`.
-   3. `uv python install 3.12` (the uv you found, or `~/.local/bin/uv` after step 2), then
-      `uv python find --no-project ">=3.10"` the same way, and use the path it prints in place of `python`.
-
-   Tell the user in one line that you fetched Python for SessionCost through uv.
+   If it says SessionCost needs Python, or that it could not write to its folder (`~/.sessioncost`), your sandbox
+   stopped it: ask the user once for permission and run the same command again with it. If it fails again, show the
+   user the lines it printed and stop. Do not try other ways or other folders.
 
 2. It prints a short "What SessionCost is doing:" block, then `Report: <path>`. Reply with only: that block exactly as
    printed, in a code block; then "The full report: <path>" (the path as a clickable link, on its own
@@ -54,71 +43,78 @@ Every command below also comes in plain words (shown first): the user never has 
 how to do one of these, give the words to say first and the command in brackets.
 
 - Only when the user asks to fix the waste ("fix my token waste", or "/sessioncost fix"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix --preview` and show its output as printed, then end with: Say "fix it"
-  (or "fix 1 and 3") to apply these. Only after they say so, run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix -y` (add
+  `<run> fix --preview` and show its output as printed, then end with: Say "fix it"
+  (or "fix 1 and 3") to apply these. Only after they say so, run `<run> fix -y` (add
   `--only <ids>` when they chose some of them) and show what it prints. Never run `fix -y` without it.
 - If it says a file was not changed (it does not parse, for example), tell the user and stop there: never edit that
   file yourself, not even to repair it, unless the user asks you to in their own words.
 - "/sessioncost fix learn" with nothing after it: write both lines yourself from this chat (what wasted tokens, one
   line; one rule that prevents it, one line), show them, and ask one question: "Record this rule?". Only after their
-  yes, run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix learn "<what happened>" --rule "<the rule>"`. Never ask the
+  yes, run `<run> fix learn "<what happened>" --rule "<the rule>"`. Never ask the
   user to write the lines.
 - If what it prints asks you to write a handover, write it yourself in the file it names: the goal, what is done,
   files changed, tests run, what is next, and the "Other token waste" section it asks for (run the `fix learn` line
   it gives for each new one). Show it in your reply, then tell the user to start a new chat and say "continue from
   handover" there.
-- "undo the fix" (or "/sessioncost fix --undo"): run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix --undo` and show
+- "undo the fix" (or "/sessioncost fix --undo"): run `<run> fix --undo` and show
   the lines it prints.
 - "turn token tips on", "... off" or "are token tips on?" (or "/sessioncost fix auto on", "... off" or "... auto"
-  alone): run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix auto on`,
+  alone): run `<run> fix auto on`,
   `... fix auto off` or `... fix auto` and show the line it prints. While it is on, a SessionCost to-do list can
   arrive with the user's message: follow the instructions that come with it. Right after turning it on, ask once:
   "A handover is offered when a chat passes 200k tokens. Keep 200k, or another number, like 1m?" If they give a number, run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix long-chat <number>` (for example 1m) and show the line it prints.
+  `<run> fix long-chat <number>` (for example 1m) and show the line it prints.
 - "warn me at 150k tokens" (or "/sessioncost fix long-chat <number>"): run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix long-chat <number>` and show the line it prints.
+  `<run> fix long-chat <number>` and show the line it prints.
+- "open the fresh chat for me", "stop opening the fresh chat" or "is the fresh chat on?" (or "/sessioncost fix
+  fresh-chat on", "... off" or "... fresh-chat" alone): run `<run> fix fresh-chat on`, `... off` or `... fresh-chat`
+  and show the line it prints.
 - "set my budget to $5", "clear my budget" or "what is my budget?" (or "/sessioncost fix budget 5", "... off" or
-  "... budget" alone): run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix budget 5`, `... fix budget off` or
+  "... budget" alone): run `<run> fix budget 5`, `... fix budget off` or
   `... fix budget` and show the line it prints.
 - "fix it" or "write a handover" after a SessionCost 💡 line: follow the instructions that came with that line.
-- When the user says "continue from handover": run `python "${CLAUDE_PLUGIN_ROOT}/run.py" fix --handover`. It prints
+- When the user says "continue from handover": run `<run> fix --handover`. It prints
   the handover file's path; read that file and carry on from its "what is next".
 
 ## Prices
 
-- "show my prices" (or "/sessioncost prices"): run `python "${CLAUDE_PLUGIN_ROOT}/run.py" prices` and show its output as printed, in a code
+- "show my prices" (or "/sessioncost prices"): run `<run> prices` and show its output as printed, in a code
   block.
 - When the user gives their own prices in their words (for example "Opus: 4 input, 20 output"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" prices set <model> --input 4 --output 20` (add `--cache-read R` and
+  `<run> prices set <model> --input 4 --output 20` (add `--cache-read R` and
   `--cache-write W` only when they gave those) and show the lines it prints. Use the model name as the report or
   `prices` shows it. Prices are US dollars per million tokens: if they gave another unit, ask before converting.
-- "/sessioncost prices import <file>": run `python "${CLAUDE_PLUGIN_ROOT}/run.py" prices import <file>` (a .csv with
+- "/sessioncost prices import <file>": run `<run> prices import <file>` (a .csv with
   the columns model, input, output, cache_read, cache_write, or a .json) and show what it prints.
-- "/sessioncost prices team <file>" or "... team off": run `python "${CLAUDE_PLUGIN_ROOT}/run.py" prices team <file>`
+- "/sessioncost prices team <file>" or "... team off": run `<run> prices team <file>`
   (or `team off`) and show what it prints.
 - Only when the user asks to update the prices ("update the prices", or "/sessioncost prices update"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" prices update` and show what it prints. It is the only command that goes
+  `<run> prices update` and show what it prints. It is the only command that goes
   online; never run it by yourself.
 
 ## Old reports, updates
 
 - An "Old reports: ..." line: show it as printed and ask nothing. Only when the user asks to delete or clean old
-  reports ("delete my old reports", or "/sessioncost clean"), run `python "${CLAUDE_PLUGIN_ROOT}/run.py" clean` and show the line it
+  reports ("delete my old reports", or "/sessioncost clean"), run `<run> clean` and show the line it
   prints.
 - Only when the user asks to update SessionCost ("update SessionCost", or "/sessioncost update"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" update`, show its output as printed, then tell the user to restart the agent.
+  `<run> update`, show its output as printed, then tell the user to restart the agent.
+- When the user asks to remove or uninstall SessionCost: never run it yourself (it asks a question only a person can
+  answer in a terminal). Tell them to type this in a terminal (PowerShell, Terminal), not in the chat, with the real
+  folder: Windows `& "<folder>\run.cmd" uninstall`, Mac or Linux `sh "<folder>/run.sh" uninstall`. It shows what it
+  takes out, keeps a backup, and lists what only they can remove (this plugin, for one).
 - Only when the user asks which version they have ("which version do I have?", or "/sessioncost version"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" version` and show its output as printed, adding no advice of your own (add
+  `<run> version` and show its output as printed, adding no advice of your own (add
   `--all` only when they ask for every copy).
 - Only when the user asks to turn the report after each answer on or off ("turn the report after each answer off",
   or "/sessioncost auto off"), run
-  `python "${CLAUDE_PLUGIN_ROOT}/run.py" auto on` or `... auto off` and show the line it prints. It is on by default.
+  `<run> auto on` or `... auto off` and show the line it prints. It is on by default.
 - All of these take the same fallbacks as step 1.
 
 ## Help
 
 - When the user asks for SessionCost's help ("show me the SessionCost help", "what can SessionCost do?", or
-  "/sessioncost help"), run `python "${CLAUDE_PLUGIN_ROOT}/run.py" help` and show its output as printed, as a quote
+  "/sessioncost help"), run `<run> help` and show its output as printed, as a quote
   block. If the guard already put that list in this chat for this message, show it from there and run nothing.
 - When the user asks how to do something with SessionCost ("how do I stop the pop-ups?", "how do I see my
   tokens?"), answer in one to three lines: what to say in the chat (or the command to type), from this skill or that

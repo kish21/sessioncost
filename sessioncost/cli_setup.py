@@ -133,3 +133,27 @@ def cmd_setup() -> int:
     print(f'\nRestart the agent if it is open, then type /sessioncost in a chat. The live guard is already on: to turn '
           f'it off, say "turn the guard off" (or type /{GUARD_CMD} off).')
     return 0
+
+
+def fix_hooks(home: Path | None = None) -> list[str]:
+    """`fix auto on` needs the hooks `sessioncost setup` puts into each agent (they read the switch); the guard itself
+    stays as it was. Adds them where they are missing."""
+    from . import guard
+    home = home or Path.home()
+    out = []
+    for agent, folder, _, name in SKILL_HOMES:
+        if not agent_installed(folder, home):
+            continue
+        if name == "claude" and claude_plugin_installed(home):
+            out.append(f"{agent:12} the SessionCost plugin brings the hooks (update it if it is older than this copy)")
+            continue
+        try:
+            text = guard._hooks_file(name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if "sessioncost" in text.lower() and " hook " in text:
+            out.append(f"{agent:12} hooks in place")
+            continue
+        guard.setup(name)
+        out.append(f"{agent:12} hooks added (the guard stays off unless you turn it on); restart {agent}")
+    return out

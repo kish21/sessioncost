@@ -61,6 +61,9 @@ how to do one of these, give the words to say first and the command in brackets.
   `{{RUN}} fix long-chat <number>` (for example 1m) and show the line it prints.
 - "warn me at 150k tokens" (or "/sessioncost fix long-chat <number>"): run `{{RUN}} fix long-chat <number>` and show
   the line it prints.
+- "open the fresh chat for me", "stop opening the fresh chat" or "is the fresh chat on?" (or "/sessioncost fix
+  fresh-chat on", "... off" or "... fresh-chat" alone): run `{{RUN}} fix fresh-chat on`, `... off` or `... fresh-chat`
+  and show the line it prints.
 - "set my budget to $5", "clear my budget" or "what is my budget?" (or "/sessioncost fix budget 5", "... off" or
   "... budget" alone): run `{{RUN}} fix budget 5`, `{{RUN}} fix budget off` or `{{RUN}} fix budget` and show the line
   it prints.
@@ -88,6 +91,9 @@ how to do one of these, give the words to say first and the command in brackets.
   reports ("delete my old reports", or "/sessioncost clean"), run `{{RUN}} clean` and show the line it prints.
 - Only when the user asks to update SessionCost ("update SessionCost", or "/sessioncost update"), run
   `{{RUN}} update`, show its output as printed, then tell the user to restart the agent.
+- When the user asks to remove or uninstall SessionCost: never run it yourself (it asks a question only a person can
+  answer in a terminal). Tell them to type `{{RUN}} uninstall` in a terminal (PowerShell, Terminal), not in the
+  chat. It shows what it takes out, keeps a backup, and lists what only they can remove.
 - Only when the user asks which version they have ("which version do I have?", or "/sessioncost version"), run
   `{{RUN}} version` and show its output as printed, adding no advice of your own (add `--all` only when they ask for
   every copy).

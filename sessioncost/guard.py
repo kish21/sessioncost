@@ -116,13 +116,16 @@ ON_LINE = ("🛡 SessionCost guard is on{}. Normal work on your project files ru
            "deleting your files or reading passwords and keys, are stopped. Risky ones, like pushing code or installing "
            "packages, wait for your yes. Each time, you'll see why. "
            f'To turn it off, say "turn the guard off" (or type /{GUARD_CMD} off).')
+# every later chat (1.2.4, owner 2026-11-21): the full line once is enough; this one costs a third of its tokens
+SHORT_LINE = '🛡 SessionCost guard is on{}: dangerous steps stop, risky ones wait for your yes. Say "turn the guard off" to stop it.'
 
 
 def _on_line(st: dict, inp: dict, event: str, note: str = "") -> dict:
     """A chat that starts guarded says so. No agent reliably shows a hook's own line (Claude Code's VS Code panel and,
-    the owner found, its terminal did not), so every agent is asked to say it, set apart as a quote block."""
-    line = ON_LINE.format(" (strict)" if st.get("strict") else "")
+    the owner found, its terminal did not), so every agent is asked to say it, set apart as a quote block. The first
+    guarded chat on this computer gets the full line and the help list; every later one the short line."""
     menu = menu_once()                    # the first guarded chat on this computer: what you can say (owner 2026-11-21)
+    line = (ON_LINE if menu else SHORT_LINE).format(" (strict)" if st.get("strict") else "")
     tell = (f' Start your first answer in this chat with this line as a quote block (begin it with "> "), then answer '
             f'as usual: "{line}"' if not menu else
             f' Start your first answer in this chat with this line as a quote block (begin it with "> "): "{line}" '
@@ -386,6 +389,7 @@ def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
             raw_cmd = str(inp.get("toolArgs") or "")
             inp = _copilot_in(event, inp)
             inp.setdefault("command", raw_cmd)
+        inp.setdefault("_agent", agent)       # who is asking: a tip only Claude Code can show at once waits for the others
         # an agent running steps at once runs their hooks at once: each reads the chat's state and writes it back,
         # so they take turns, or one overwrites what another saved (an injected page's "untrusted" mark, an ask)
         with _locked(state_path(str(inp.get("session_id") or "")), STATE_WAIT):

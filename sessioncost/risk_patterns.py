@@ -182,7 +182,9 @@ _TAMPER_PATH = re.compile(_OWN_PATH.pattern + "|" + _PLUGINS_PATH.pattern, re.I)
 # a write aimed at an installed plugin: redirected into it, or the last argument of a copy / move / edit
 _TO_PLUGINS = re.compile(r">>?\s*['\"]?[^\s'\"]*[\\/]\.claude[\\/]+plugins[\\/]|"
                          r"\b(?:cp|mv|tee|Copy-Item|Move-Item|Set-Content|Add-Content|Out-File|sed\s+-i)\b.*[\\/]\.claude[\\/]+plugins[\\/][^\s]*\s*$", re.I)
-_TAMPER_CMD = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove|allow(?:-\w+)?)\b|\bdisableAllHooks\b|"
+# `sessioncost uninstall` (1.2.4) takes the guard out with everything else: only the user runs it
+_UNINSTALL = r"\b(?:sessioncost|run\.(?:py|cmd|sh))[\"']?\s+uninstall\b"
+_TAMPER_CMD = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove|allow(?:-\w+)?)\b|\bdisableAllHooks\b|" + _UNINSTALL + "|"
                          r"^\s*hooks\s*=\s*false\b|" + r"(?<![\w$])SESSIONCOST_GUARD_DIR\s*=|\$env:SESSIONCOST_GUARD_DIR\s*=|"
                          r"\b(?:Set-Item|si|New-Item|ni)\s+(?:-Path\s+)?env:SESSIONCOST_GUARD_DIR\b|"
                          r"\b(?:setx|SetEnvironmentVariable)\b[^\n]*\bSESSIONCOST_GUARD_DIR\b", re.I | re.M)
@@ -192,6 +194,7 @@ _TAMPER_CMD = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove|allow(?:-\w+)?
 # environment from (settings, shell start-up and .env files) or made permanent (setx). A test or script that hands
 # its own child process another guard folder cannot reach the real guard.
 _TAMPER_WRITE = re.compile(r"\bguard(?:\.py)?[\"']?\s+(?:off|remove|allow(?:-\w+)?)\b|\bdisableAllHooks\b|^\s*hooks\s*=\s*false\b|"
+                           + _UNINSTALL + "|"
                            r"\b(?:setx|SetEnvironmentVariable)\b[^\n]*\bSESSIONCOST_GUARD_DIR\b", re.I | re.M)
 _ENV_FILE = re.compile(r"(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|\.(?:bash|zsh)rc|\.(?:bash_)?profile|\.zprofile|\.zshenv|"
                        r"[^\\/]*profile\.ps1|settings(?:\.local)?\.json|hooks\.json|config\.toml|environment)$", re.I)

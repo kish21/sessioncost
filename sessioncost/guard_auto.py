@@ -36,13 +36,16 @@ TIP_EVENTS = {"claude": ("prompt", "session-start"), "codex": ("prompt", "sessio
 def _fix_tip(event: str, inp: dict, raw: dict, agent: str) -> str:
     if event not in TIP_EVENTS.get(agent, ()):
         return ""
-    from . import fixer
+    from . import fixer, unsafe_code
     sid = str(inp.get("session_id") or "")
+    code = unsafe_code.take(sid)              # unsafe code written earlier in this chat (unsafe_code.py)
     cwd = fixer.start_folder(sid, str(inp.get("cwd") or ""))    # the project: where the chat started, not where it is now
     if agent == "antigravity":                # runs before every model call: once per user message
         said = str(raw.get("lastUserInput") or "")
-        return fixer.tip(sid, cwd, prompt=said, turn=hashlib.sha1(said.encode()).hexdigest()[:16], agent=agent)
-    return fixer.tip(sid, cwd, prompt=str(inp.get("prompt") or ""), start=event == "session-start", agent=agent)
+        tip = fixer.tip(sid, cwd, prompt=said, turn=hashlib.sha1(said.encode()).hexdigest()[:16], agent=agent)
+    else:
+        tip = fixer.tip(sid, cwd, prompt=str(inp.get("prompt") or ""), start=event == "session-start", agent=agent)
+    return (code + "\n\n" + tip).strip()
 
 
 def _with_tip(event: str, out: dict | None, tip: str, agent: str) -> dict | None:

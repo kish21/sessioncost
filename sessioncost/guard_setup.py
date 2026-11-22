@@ -29,7 +29,7 @@ SETTINGS = {"fail-closed": ("fail_closed", "If the guard itself breaks, every st
 NO_PROJECT_ALLOW = {"secrets", "key_in_output", "fresh_release", "runaway"}
 def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | None = None) -> str:
     cfg = home() / "config.json"
-    keep = {k: v for k, v in _read(cfg, {}).items() if k in ("auto", "fix_auto", "long_chat", "long_chat_hint", "help_shown", "budget_usd",
+    keep = {k: v for k, v in _read(cfg, {}).items() if k in ("auto", "fix_auto", "long_chat", "long_chat_hint", "help_shown", "fresh_chat", "budget_usd",
                                                                   "fresh_check", "fresh_days")}   # reports, fix auto, budgets: your choice stays
     if arg == "allow" and rule:
         from .risks import NEVER, SEVERITY

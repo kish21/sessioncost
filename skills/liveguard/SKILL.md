@@ -22,29 +22,24 @@ first and the command in brackets.
 1. If that SessionCost line is there: repeat it in one line, and run nothing.
 
 2. Otherwise, for "/liveguard" or "/liveguard strict" (or "turn the guard on", "guard strict"):
-   - Find this plugin's folder (it holds `guard.py`). In Claude Code it is `${CLAUDE_PLUGIN_ROOT}`; in any other
-     agent it is the folder two folders above this SKILL.md file.
+   - Find this plugin's folder (it holds `run.cmd` and `run.sh`). In Claude Code it is `${CLAUDE_PLUGIN_ROOT}`; in
+     any other agent it is the folder two folders above this SKILL.md file. `<run>` below is its starter: Windows
+     `& "<plugin folder>\run.cmd"` in PowerShell (`"<plugin folder>/run.cmd"` in bash); Mac or Linux
+     `sh "<plugin folder>/run.sh"`. It finds Python by itself and fetches one through uv when there is none: never
+     look for Python, `py` or uv yourself.
    - Run these two commands, one after the other, and show the line each prints exactly as printed. In place of
      `<agent>` put the agent you are: `claude` (Claude Code), `codex` (Codex), `cursor` (Cursor) or `antigravity`
      (Antigravity):
 
      ```
-     python "<plugin folder>/guard.py" setup <agent>
-     python "<plugin folder>/guard.py" on
+     <run> guard setup <agent>
+     <run> guard on
      ```
 
      Add ` strict` after `on` for "/liveguard strict" (untrusted content then counts for the whole chat, and files
-     from node_modules, vendor or site-packages count as untrusted). If `python` is not found (or opens the
-     Microsoft Store, or is older than 3.10), try `py` (Windows), then `python3`. If none works, get a Python through
-     uv yourself, without sending the user to another way of installing:
-     1. `uv python find --no-project ">=3.10"` (or `~/.local/bin/uv …`): if it prints a path, use it in place of
-        `python`.
-     2. No uv: install it. Windows (PowerShell):
-        `powershell -NoProfile -ExecutionPolicy ByPass -Command "irm https://astral.sh/uv/install.ps1 | iex"`.
-        Mac or Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. It goes to `~/.local/bin`.
-     3. `uv python install 3.12` (the uv you found, or `~/.local/bin/uv` after step 2), then
-        `uv python find --no-project ">=3.10"` the same way, and use the path it prints in place of `python`. The
-        guard's hooks find that Python by themselves.
+     from node_modules, vendor or site-packages count as untrusted). If it says SessionCost needs Python, or that it
+     could not write to its folder, your sandbox stopped it: ask the user once for permission and run the same
+     command again with it. If it fails again, show the user the lines it printed and stop.
    - The first command puts the guard's hooks into this agent and keeps the user's other hooks; running it again does
      no harm. If it says "added", tell the user to restart the agent once: the guard checks steps from then on. In
      Codex, also tell them to type `/hooks` once and trust SessionCost's hooks.
@@ -52,8 +47,9 @@ first and the command in brackets.
 3. "/liveguard off", or any other way of asking to turn the guard off: you cannot turn it off (it blocks that, on
    purpose: only the user changes it). Tell the user to say "turn the guard off" (or type `/liveguard off`) as their
    whole message, nothing else in it: the guard's hook switches it before you see it. Only if no SessionCost line follows (the hooks are not running),
-   tell them to type this in a terminal (PowerShell, Terminal), not in the chat: `python "<plugin folder>/guard.py"
-   off` (with the real folder). Never tell them to type `!` in the chat: in VS Code it reaches you as a message and
+   tell them to type this in a terminal (PowerShell, Terminal), not in the chat: Windows
+   `& "<plugin folder>\run.cmd" guard off`, Mac or Linux `sh "<plugin folder>/run.sh" guard off` (with the real
+   folder). Never tell them to type `!` in the chat: in VS Code it reaches you as a message and
    runs nothing (owner 2026-11-02).
 
 ## While the guard is on

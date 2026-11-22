@@ -101,7 +101,10 @@ def doc_bodies_out(cmd: str) -> str:
     return "\n".join(out)
 
 
-_PROSE = re.compile(r"(?:-m|--message)\s+(?:\"(?:[^\"\\]|\\.)*\"|'[^']*')|\"[^\"\n]*\s[^\"\n]*\"|'[^'\n]*\s[^'\n]*'")
+# every quoted string, left to right, so quotes pair as the shell pairs them; _no_prose drops the ones that are prose.
+# (Matching only strings with a space let the closing quote of 'codex' open a false string up to the next quote, and
+# the real search words after it, 'uninstall|guard remove', then read as a command: owner 2026-11-21.)
+_PROSE = re.compile(r"(?:-m|--message)\s+(?:\"(?:[^\"\\]|\\.)*\"|'[^']*')|\"[^\"\n]*\"|'[^'\n]*'")
 _LOOK_ONLY = re.compile(r"^\s*(?:ls|dir|stat|test|\[|Test-Path|touch|file|wc\s+-l|git\s+(?:check-ignore|ls-files))\b", re.I)
 
 
@@ -170,7 +173,7 @@ def _without_searches(cmd: str, inner: list[str]) -> str:
 def _no_prose(cmd: str) -> str:
     """The command without its prose: commit messages and quoted text with spaces (an echo, a search query) only
     mention things; a quoted single word ("git", '.env') was already unquoted."""
-    return _PROSE.sub("''", cmd)
+    return _PROSE.sub(lambda m: "''" if m.group(0)[0] == "-" or re.search(r"\s", m.group(0)) else m.group(0), cmd)
 
 
 def _unquote(cmd: str) -> str:

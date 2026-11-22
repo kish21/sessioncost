@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__, locate, prices as pricemod, readers, report, zfile
 from .analyse import analyse
 from .readers import cursor
-from .cli_setup import SKILL_HOMES, agent_installed, claude_plugin_installed, cmd_setup
+from .cli_setup import SKILL_HOMES, agent_installed, claude_plugin_installed, cmd_setup, fix_hooks  # noqa: F401
 from .names import GUARD_CMD
 from .cli_setup import LIVE_SKILL, SKILL, plugin_installed, setup  # noqa: F401 (cli.<name> for other modules and tests)
 
@@ -277,6 +277,9 @@ def cmd_fix(argv: list[str]) -> int:
         code, msg = fixer.learn(la.what, la.rule, project, agent=la.agent or newest_agent(project))
         print(msg)
         return code
+    if argv[:1] in (["fresh-chat"], ["open-chat"]):   # a fresh chat after the handover (fresh_chat.py)
+        from . import fresh_chat
+        return fresh_chat.main(argv)
     if argv[:1] == ["long-chat"]:  # when a chat counts as long: the handover offer
         if len(argv) < 2:
             print(f"SessionCost fix: a chat over {fixer._tok(fixer.long_chat())} tokens gets the handover offer. "
@@ -355,30 +358,6 @@ def newest_agent(project) -> str:
         return ""
 
 
-def fix_hooks(home: Path | None = None) -> list[str]:
-    """`fix auto on` needs the hooks `sessioncost setup` puts into each agent (they read the switch); the guard itself
-    stays as it was. Adds them where they are missing."""
-    from . import guard
-    home = home or Path.home()
-    out = []
-    for agent, folder, _, name in SKILL_HOMES:
-        if not agent_installed(folder, home):
-            continue
-        if name == "claude" and claude_plugin_installed(home):
-            out.append(f"{agent:12} the SessionCost plugin brings the hooks (update it if it is older than this copy)")
-            continue
-        try:
-            text = guard._hooks_file(name).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
-        if "sessioncost" in text.lower() and " hook " in text:
-            out.append(f"{agent:12} hooks in place")
-            continue
-        guard.setup(name)
-        out.append(f"{agent:12} hooks added (the guard stays off unless you turn it on); restart {agent}")
-    return out
-
-
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -398,15 +377,15 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["help"]:       # what you can say in the chat, and the guide's address (help_menu.py)
         from . import help_menu
         return help_menu.main(argv[1:])
-    if argv[:1] == ["editor"]:     # the editor extension's status bar: one short JSON answer (editor.py)
-        from . import editor
-        return editor.main(argv[1:])
+    if argv[:1] in (["editor"], ["uninstall"]):   # the editor extension's status bar (editor.py); removing it (uninstall.py)
+        from . import editor, uninstall
+        return (editor if argv[0] == "editor" else uninstall).main(argv[1:])
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local: reads log files on this computer and sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'fix' (this project's token waste and the change for each, applied on your yes with a backup; `sessioncost fix --undo` puts it back; `sessioncost fix auto on|off`: the list after each answer, in the chat), 'list', 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'prices' (the prices used, where each came from and its date; `sessioncost prices set|import|team|update`), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'fix' (this project's token waste and the change for each, applied on your yes with a backup; `sessioncost fix --undo` puts it back; `sessioncost fix auto on|off`: the list after each answer, in the chat), 'list', 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'uninstall' (take SessionCost out of every agent, with a backup; asks first), 'prices' (the prices used, where each came from and its date; `sessioncost prices set|import|team|update`), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--brief", action="store_true", help="print only the report's path, not the summary (for agents: "

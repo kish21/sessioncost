@@ -1,3 +1,5 @@
 *.sh text eol=lf
 # npx runs this on Mac and Linux: a CRLF after "#!/usr/bin/env node" breaks it
 npm/bin/*.js text eol=lf
+# cmd.exe misreads labels in a batch file with LF line endings: stored as is (CRLF), so a zip download keeps them too
+*.cmd -text

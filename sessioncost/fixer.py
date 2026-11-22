@@ -28,6 +28,7 @@ from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_END, 
                           asks_handover, auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
                           live_file, newest_lines, offered_file, project_key, project_path, start_folder)
 # Names other modules and tests use as fixer.<name>; they live in fixer_store.py and fixer_plan.py.
+from . import fresh_chat
 from .fixer_plan import for_report, render  # noqa: F401
 from .fixer_store import HANDOVER_AT, LONG_CHAT, auto_text, handover_hint_once, budget_text, budget_usd, learn, learned, long_chat, set_auto, set_budget, set_long_chat  # noqa: F401
 
@@ -105,7 +106,7 @@ def apply(p: Plan) -> tuple[int, str]:
         out.append(f"Handover: write it now at the top of {h.as_posix()} under a heading with today's date (a new "
                    f"file if there is none; {ON_TOP}): the goal, what is done, files "
                    "changed, tests run, what is next. Show it in your reply, then tell the user to start a new chat "
-                   "and say \"continue from handover\" there.")
+                   "and say \"continue from handover\" there." + fresh_chat.handover_words(p.agent, p.project.as_posix()))
         out.append("In the same handover, add a short section \"Other token waste in this chat\": what cost tokens in "
                    "this chat that SessionCost does not know yet. It knows: " + "; ".join(known()) + ". Leave out "
                    "anything on that list, except what you already recorded in this chat with `fix learn`: list that "

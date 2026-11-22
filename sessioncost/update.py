@@ -33,6 +33,14 @@ class Step:
     what: str                      # plain words
     argv: list[str] | None = None  # the command; None = something the user does by hand (shown, not run)
     manual_after: bool = False     # Windows cannot replace a running .exe: shown for the user to run afterwards
+    retry: list[str] | None = None  # run instead when the first try fails on a known, harmless setting (Codex)
+
+
+# The Codex app writes service_tier = "default" into ~/.codex/config.toml, which Codex's own command line refuses
+# ("unknown variant `default`, expected `fast` or `flex`": owner's PC 2026-11-22). The upgrade runs no model, so the
+# setting does not matter there: override it for that one command, the user's file stays as it is.
+CODEX_TIER_ERROR = "service_tier"
+CODEX_TIER_FIX = ["-c", "service_tier=flex"]
 
 
 def _plugin_keys(home: Path) -> list[str]:
@@ -81,7 +89,8 @@ def plan(home: Path | None = None, exe: str | None = None, here: Path | None = N
     codex_cache = home / ".codex" / "plugins" / "cache"
     if codex_cache.is_dir() and any(codex_cache.glob("*/sessioncost")):
         codex = which("codex")
-        steps.append(Step("Codex plugin: fetch the newest version", [codex, "plugin", "marketplace", "upgrade"])
+        steps.append(Step("Codex plugin: fetch the newest version", [codex, "plugin", "marketplace", "upgrade"],
+                          retry=[codex, *CODEX_TIER_FIX, "plugin", "marketplace", "upgrade"])
                      if codex else Step("Codex plugin: run `codex plugin marketplace upgrade`"))
     cursor_plugins = home / ".cursor" / "plugins"
     if cursor_plugins.is_dir() and any(cursor_plugins.glob("**/sessioncost")):
@@ -194,6 +203,22 @@ def show_versions(every: bool = False) -> int:
     return 0
 
 
+def _run_step(st: Step) -> bool:
+    """Runs a step, its output shown. A step with a retry runs quietly first: when it fails on the known setting, the
+    retry runs (shown) and the first error is never printed; any other failure prints the first try's output."""
+    if not st.retry:
+        return subprocess.run(st.argv).returncode == 0
+    first = subprocess.run(st.argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    said = (first.stdout or "") + (first.stderr or "")
+    if first.returncode == 0:
+        print(said, end="")
+        return True
+    if CODEX_TIER_ERROR in said:
+        return subprocess.run(st.retry).returncode == 0
+    print(said, end="")
+    return False
+
+
 def run(dry_run: bool = False) -> int:
     try:
         sys.stdout.reconfigure(line_buffering=True)   # our step names before each command's own output
@@ -211,7 +236,7 @@ def run(dry_run: bool = False) -> int:
             later.append(st.argv)
             continue
         try:
-            ok = subprocess.run(st.argv).returncode == 0
+            ok = _run_step(st)
         except OSError as e:
             ok = False
             print(f"   could not run it: {e}")

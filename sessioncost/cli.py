@@ -460,6 +460,11 @@ def find_session(args, chat: str | None = None) -> Path | None:
     """The chat's log file: 'last' = the newest session of the project, else a path or a session id's first
     characters. None (and says why) when there is none."""
     target = chat or args.target
+    if target == "last" and not args.project:
+        from .current_chat import chat_file
+        here = chat_file()                     # the agent named its chat: no search through every agent's chats
+        if here:
+            return here
     if target == "last":
         loose: list = []
         found = locate.sessions(args.project, unlinked=loose)

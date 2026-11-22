@@ -129,12 +129,14 @@ def _quiet_python() -> Path:
 def _launch(event: str, agent: str) -> str:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
-    # -S when run from its own file: the guard needs only Python's own library, and add-ons that load at every Python
-    # start are skipped (one seen 2026-11-14: 2 s per step). Installed as a package it needs site-packages: no -S.
+    # -S always: the guard needs only Python's own library, and add-ons that load at every Python start are skipped
+    # (2 s per step seen 2026-11-14; 1.4 s per check, twice a step, 2026-11-22). From the repo or a plugin: its own
+    # guard.py; installed as a package: the package's hook.py, which puts the package on the path itself.
+    if not g.is_file():
+        g = Path(__file__).resolve().parent / "hook.py"
     if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
-        run = f'-S "{g.as_posix()}"' if g.is_file() else "-m sessioncost.guard"
-        return f'"{_quiet_python().as_posix()}" {run} hook {event} claude'
-    run = "-S " + _path_arg(str(g)) if g.is_file() else "-m sessioncost.guard"
+        return f'"{_quiet_python().as_posix()}" -S "{g.as_posix()}" hook {event} claude'
+    run = "-S " + _path_arg(str(g))
     # every agent: python.exe flashes a console window at each step (Copilot's VS Code panel, owner 2026-11-12);
     # bash, cmd.exe and PowerShell (`& exe`) all pass pythonw.exe's input and answer on (checked 2026-11-13)
     quiet = _quiet_python()

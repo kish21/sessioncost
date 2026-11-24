@@ -139,6 +139,8 @@ class Setup:
     known: bool = False
     parts: list[SetupPart] = field(default_factory=list)
     tools: list[SetupPart] = field(default_factory=list)     # one entry per tool definition
+    skills: list[SetupPart] = field(default_factory=list)    # one entry per skill in the skill list (Claude Code)
+    files: list[SetupPart] = field(default_factory=list)     # one entry per instruction file, what = its path
 
     @property
     def chars(self) -> int:
@@ -175,6 +177,7 @@ class Fix:
     calls: list[tuple[str, int]] = field(default_factory=list)  # (thread, call number) of the calls it applies to
     how: str = ""                # what to do, in one or two lines
     paste: bool = False          # `how` is a line to paste into the agent's instruction file
+    ask: str = ""                # a one-time job the user's own agent can do: a request to paste into the chat
     targets: list[str] = field(default_factory=list)   # what a setting switches off (server or tool names), for `fix`
     per_target: dict[str, int] = field(default_factory=dict)   # the tokens of each target, when they differ
     claims: list[Claim] = field(default_factory=list)   # call by call, what it cuts (empty: Step 0 or price only)
@@ -212,6 +215,7 @@ class Session:
     notes: list[str] = field(default_factory=list)
     counts_note: str = ""               # how much the agent counted itself, when tokens are partly estimated
     fixes: list[Fix] = field(default_factory=list)   # filled by the fix engines (see fixes.py)
+    fixes_found: list[Fix] = field(default_factory=list)   # every fix found, before the report keeps the top ones
     added: list[Added] = field(default_factory=list) # setup-like text added after the first call
 
     @property

@@ -195,6 +195,11 @@ def build(path, args) -> tuple[dict, Path | None]:
         fixer.record_seen(a, project)
         a["fix_verify"] = fixer.verify_lines(project)
         a["fix_done"] = {v["id"]: v["at"] for v in fixer.verify(project) if v.get("id") and v.get("at")}
+    from .fixes.unused_tools import settle   # after record_seen: the memory keeps this chat's full unused list
+    settle(a, fixer.earlier_chats(a, project) if project else None)
+    from .fixes.skill_cost import add_history
+    add_history(a, fixer.earlier_chats(a, project) if project else None)
+    if project:
         fixer.for_report(a, project)
     out = None
     if not args.json and not (getattr(args, "live", False) and not guard.reports_on()):
@@ -336,7 +341,7 @@ def cmd_fix(argv: list[str]) -> int:
     fixer.mark_shown(plan)         # the live tip does not list these again in that chat
     if not any(i.can_apply or i.kind == "handover" for i in plan.items) or args.preview:
         return 0
-    if not args.yes:
+    if not args.yes and any(i.can_apply for i in plan.items):   # a handover alone changes no file: no yes needed
         try:
             yes = input("\nApply these? [y/N] ").strip().lower() in ("y", "yes")
         except (KeyboardInterrupt, EOFError):

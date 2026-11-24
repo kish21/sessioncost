@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import fixes as fixmod
+from .fixes.unused_skills import HIDE as SKILL_HIDE, off_steps as skill_steps, plain as plain_skill
 from . import practices, rules
 from .fixer_store import (BUILTIN_SETTING, HANDOVER_NAME, HEAD, LONG_CHAT, RULE_OF, SETTINGS, _first, _load, _size, _tok, _ts, _usd,
                           budget_usd, fixes_file, learned, learned_here, long_chat, project_path)
@@ -131,6 +132,12 @@ def _read(path: Path) -> tuple[str | None, bytes | None, str]:
         return None, raw, f"{path.name} is not UTF-8 text, so it was not changed"
 
 
+UNUSED_IDS = ("unused-tools", "unused-builtin", "unused-skills")   # kept only if recent chats did not use them either
+# report only, never in `fix`: the user's own agent proposes these changes and waits for a yes (skills, helper files)
+REPORT_ONLY = ("long-chat", "model-choice", "helper-model", "skill-cost", "hook-output", "ignore-folders",
+               "large-files", "verbose-tests", "notes-file")
+
+
 def _settings(text: str | None, updates: dict) -> tuple[str | None, str]:
     """(new text, problem). A settings file that does not parse is never overwritten."""
     data: dict = {}
@@ -143,7 +150,12 @@ def _settings(text: str | None, updates: dict) -> tuple[str | None, str]:
             return None, "is not a JSON object, so SessionCost did not change it"
     new, changed = dict(data), False
     for k, v in updates.items():
-        if isinstance(v, list):
+        if isinstance(v, dict):               # e.g. skillOverrides: a value the user set stays as they set it
+            have = new.get(k) if isinstance(new.get(k), dict) else {}
+            add = {x: y for x, y in v.items() if x not in have}
+            if add:
+                new[k], changed = {**have, **add}, True
+        elif isinstance(v, list):
             have = new.get(k) if isinstance(new.get(k), list) else []
             add = [x for x in v if x not in have]
             if add:
@@ -195,6 +207,12 @@ def for_report(a: dict, project) -> None:
             if idle:
                 f["sc_can"] = idle
                 f["how"] = fixmod.turn_off_steps("claude-code", rest) if rest else ""
+        elif f.get("id") == "unused-skills":
+            mine = [t for t in f.get("targets") or [] if plain_skill(t, project)]
+            if mine:
+                f["sc_can"] = mine
+                rest = [t for t in f.get("targets") or [] if not plain_skill(t, project)]
+                f["how"] = skill_steps(rest, project) if rest else ""
 
 
 def plan(a: dict, project, only: set[str] | None = None, home: Path | None = None) -> Plan:
@@ -249,11 +267,12 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
 
     for f in a.get("fixes") or []:
         fid = str(f.get("id") or "")
-        if fid in ("long-chat", "model-choice") or (only is not None and fid not in only):
+        if fid in REPORT_ONLY or (only is not None and fid not in only):
             continue
         targets = list(f.get("targets") or [])
-        if fid in ("unused-tools", "unused-builtin") and targets and recent_seen:
-            targets = [t for t in targets if all(t in (s.get("unused_targets") or {}).get(fid, []) for s in recent_seen)]
+        recent = [s for s in recent_seen if fid != "unused-skills" or s.get("skills_known")]
+        if fid in UNUSED_IDS and targets and recent:
+            targets = [t for t in targets if all(t in (s.get("unused_targets") or {}).get(fid, []) for s in recent)]
             if not targets:
                 continue
         it = Item(id=fid, title=str(f.get("title") or fid), why=_first(f.get("why", "")),
@@ -273,6 +292,18 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
                 it.tokens = (sum(int(per.get(t) or 0) for t in idle) if per else
                              round(it.tokens * len(idle) / max(1, len(idle) + len(rest))))
                 it.usd = it.usd * it.tokens / whole if whole else 0.0   # the same share of the money
+        elif fid == "unused-skills" and agent == "claude-code":
+            idle = [t for t in targets if plain_skill(t, project, home)]
+            rest = [t for t in targets if not plain_skill(t, project, home)]
+            if idle:
+                updates = {"skillOverrides": {t: SKILL_HIDE for t in idle}}
+            per, whole, every = f.get("per_target") or {}, it.tokens, f.get("targets") or []
+            count = idle or targets           # plugin / claude.ai skills the setting cannot hide: not counted
+            if len(count) < len(every):       # a recent chat used some, or some cannot be hidden: count only these
+                it.tokens = (sum(int(per.get(t) or 0) for t in count) if per else
+                             round(whole * len(count) / max(1, len(every))))
+                it.usd = it.usd * it.tokens / whole if whole else 0.0
+                it.title = f"Hide {', '.join(count)} (not used in this project's recent chats)"
         if rule:
             it.kind, it.steps = "rule", ""    # the rule is the change itself: nothing for the user to do by hand
             if in_file.get(rule):
@@ -301,8 +332,12 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
             else:
                 it.change = Change(path, before, after)
                 texts[path] = after
-            it.steps = (f"Not in this project's .mcp.json, so SessionCost cannot switch these off: {', '.join(rest)}.\n"
-                        + fixmod.turn_off_steps(agent, rest)) if rest else ""
+            if fid == "unused-skills":
+                it.steps = (f"SessionCost leaves these to you: {', '.join(rest)}.\n"
+                            + skill_steps(rest, project, home)) if rest else ""
+            else:
+                it.steps = (f"Not in this project's .mcp.json, so SessionCost cannot switch these off: "
+                            f"{', '.join(rest)}.\n" + fixmod.turn_off_steps(agent, rest)) if rest else ""
         elif not it.steps:
             continue
         if (it.kind in ("rule", "setting")) and not it.change and not it.problem:
@@ -345,14 +380,6 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
         ho = Item(id="long-chat", title="Start a fresh chat with a handover", kind="handover",
                   why=why, tokens=int(lc.get("saving_tokens") or 0) if lc else 0,
                   usd=float(lc.get("saving_usd") or 0.0) if lc else 0.0, line=line)
-        gi = project / ".gitignore"
-        if (project / ".git").exists():                # the handover file in the project stays out of git
-            before, prob = current(gi)
-            listed = any(x.strip().lstrip("/") == HANDOVER_NAME for x in (before or "").splitlines())
-            if not prob and not listed:
-                sep = "" if not before or before.endswith(("\n", "\r\n")) else "\n"
-                ho.change = Change(gi, before, f"{before or ''}{sep}{HANDOVER_NAME}\n")
-                texts[gi] = ho.change.after
         p.items.append(ho)
     p.items.sort(key=lambda i: -i.tokens)
     for path, text in texts.items():
@@ -361,6 +388,16 @@ def plan(a: dict, project, only: set[str] | None = None, home: Path | None = Non
         if text is not None and text != old:
             p.finals[str(path)] = text
     return p
+
+
+def handover_unignored(project) -> bool:
+    """A git project whose .gitignore does not list the handover file yet. SessionCost does not write that line
+    itself: auto mode refused a program that edits .gitignore (owner, 2026-11-23); the agent adds it."""
+    project = Path(project)
+    if not (project / ".git").exists():
+        return False
+    before, _raw, prob = _read(project / ".gitignore")
+    return not prob and not any(x.strip().lstrip("/") == HANDOVER_NAME for x in (before or "").splitlines())
 
 
 def render(p: Plan, verify: list[str] | None = None, newest: bool = True) -> str:
@@ -394,9 +431,8 @@ def render(p: Plan, verify: list[str] | None = None, newest: bool = True) -> str
         elif it.kind == "handover":
             out.append(f"   The fix: your agent writes a handover in {HANDOVER_NAME} in this project (goal, what is "
                        "done, files changed, tests run, what is next) and you start a fresh chat."
-                       + (" So it is not committed, it goes into .gitignore:" if it.change else ""))
-            if it.change:
-                out += ["     " + x for x in it.change.diff(p.project).rstrip("\n").splitlines()]
+                       + (f" So it is not committed, your agent will add {HANDOVER_NAME} to .gitignore."
+                          if handover_unignored(p.project) else ""))
         elif it.change:
             out.append("   The change:")
             for c in [it.change, *it.also]:    # the agent's own file first, then every other agent's file here

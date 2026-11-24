@@ -11,11 +11,12 @@ from .model import Session
 
 
 
-WATCH = ("guard_tamper", "wipe", "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off", "force_push", "privilege",
+WATCH = ("guard_tamper", "wipe", "pipe_to_shell", "remote_access", "open_server", "encoded_command", "env_dump", "persistence", "security_off", "force_push", "privilege",
          "injected", "after_untrusted", "poisoned_tool", "key_in_output", "guardrails", "mcp_action", "secrets", "secret_commit", "skips_commit_checks",
          "git_push", "deletes", "installs", "new_package", "repeat_fail", "outside_project", "big_read", "network", "inline_script",
          "url_leak", "memory_poison", "prompt_leak", "runaway", "fresh_release")
-SEVERITY = {"guard_tamper": "high", "wipe": "high", "privilege": "high", "pipe_to_shell": "high", "encoded_command": "high", "env_dump": "high", "persistence": "high",
+SEVERITY = {"guard_tamper": "high", "wipe": "high", "privilege": "high", "pipe_to_shell": "high", "remote_access": "high",
+            "open_server": "high", "encoded_command": "high", "env_dump": "high", "persistence": "high",
             "security_off": "high", "force_push": "high", "injected": "high", "poisoned_tool": "high", "key_in_output": "high", "mcp_action": "review",
             "after_untrusted": "high", "guardrails": "high", "secrets": "high", "secret_commit": "high", "skips_commit_checks": "high",
             "git_push": "review", "deletes": "review", "installs": "review", "new_package": "review", "repeat_fail": "review",
@@ -25,7 +26,7 @@ SEVERITY = {"guard_tamper": "high", "wipe": "high", "privilege": "high", "pipe_t
             "network": "review", "inline_script": "info",
             # the five OWASP-based guards (guard_owasp.py, 2026-11-19): each pauses with its reason
             "url_leak": "high", "memory_poison": "high", "prompt_leak": "high", "runaway": "review", "fresh_release": "high"}
-NEVER = {"guard_tamper", "wipe", "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off", "force_push",
+NEVER = {"guard_tamper", "wipe", "pipe_to_shell", "remote_access", "encoded_command", "env_dump", "persistence", "security_off", "force_push",
          "skips_commit_checks", "secret_commit"}      # the live guard blocks these (reading a secret too: see guard.tier)
 ALLOW_FILE = ".sessioncost-allow"
 
@@ -172,7 +173,7 @@ _SEND = re.compile(r"\b(?:curl|wget)\b[^\n|;&]*\s(?:-d|--data(?:-\w+)?|-F|--form
                    r"\bgh\s+(?:gist\s+create|issue\s+create|pr\s+create|api\b)|\bscp\b|\brsync\b", re.I)
 # the guard and the rules you set: no step of the agent may change them (reading is fine)
 _OWN_PATH = re.compile(r"(?:^|[\\/~\s'\"`=])\.sessioncost(?:[\\/]+guard(?:[\\/]|\b)|[\\/]?(?=['\"`\s)]|$))|"
-                       r"(?:^|[\\/\s'\"`])\.sessioncost-allow\b|"
+                       r"(?:^|[\\/\s'\"`=]|-[A-Za-z]*o)\.sessioncost-allow\b|"     # also -o.sessioncost-allow, --output=
                        r"[\\/]\.(?:codex|cursor)[\\/]+hooks\.json\b|"          # where the guard's hooks live in Codex / Cursor,
                        r"[\\/]\.gemini[\\/]+config[\\/]+hooks\.json\b|(?:^|[\\/\s'\"`])\.agents[\\/]+hooks\.json\b|"   # Antigravity,
                        r"[\\/]\.copilot[\\/]+(?:hooks[\\/]|settings\.json\b)|"                                           # Copilot CLI
@@ -285,11 +286,22 @@ def tamper_write(target: str, written: str, replaced: str | None = None, cwd: st
     written = code_text(target, written)
     return bool(_TAMPER_WRITE.search(written) or
                 (_ENV_FILE.search(target or "") and re.search(r"\bSESSIONCOST_GUARD_DIR\b", written)))
-_READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|grep|rg|findstr|Select-String|ls|dir|"
+_READ_ONLY = re.compile(r"^\s*(?:cat|type|Get-Content|gc|head|tail|less|more|grep|rg(?![^>|;&]*\s--pre\b)|findstr|"
+                        r"Select-String|ls|dir|"     # rg --pre CMD runs CMD on every file it searches
                         r"cd|pushd|Set-Location|sl|jq|"
-                        r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b[^>|;&]*$", re.I)
+                        r"Get-ChildItem|wc|stat|file|python3?\s+-m\s+json\.tool)\b(?![^>|;&]*\()[^>|;&]*$|"
+                        # display only: they shape or print what a read gave, and change nothing (no output file,
+                        # no script block, no $(...), (...) or <(...) inside: those run a command)
+                        r"^\s*(?:echo|printf|Write-Output|Write-Host|Sort-Object|Select-Object|Format-Table|Format-List|"
+                        r"Out-String|Measure-Object|uniq(?=(?:\s+-\w+)*\s*$)|"
+                        r"sort(?![^>|;&]*\s(?:-[A-Za-z]*o|--o[\w-]*|--co[\w-]*)))\b"   # -uo FILE, --out=FILE (GNU takes
+                        # any unique start: --o..., --co... = --compress-program=CMD, which runs CMD)
+                        r"(?![^>|;&]*(?:`|\{|\())[^>|;&]*$", re.I)
+# $g = "<the guard's folder>": naming a path runs nothing; the name is then followed (risks._tampers). Only one
+# word, quoted or bare, with nothing after it: `FOO=1 cp …` and PowerShell's `$x = Set-Content …` run a command
+_SET_VAR = re.compile(r"^\s*\$?([A-Za-z_]\w*)\s*=\s*(\"[^\"`()]*\"|'[^']*'|[^\s;&|`()'\"]+)\s*$")
 _SINKS = {"guard_tamper", "wipe", "privilege", "guardrails", "secrets", "skips_commit_checks", "git_push", "deletes", "installs", "force_push",
-          "pipe_to_shell", "encoded_command", "env_dump", "persistence", "security_off"}
+          "pipe_to_shell", "remote_access", "open_server", "encoded_command", "env_dump", "persistence", "security_off"}
 _ENV_DUMP = re.compile(r"(?:^|[;&|(]\s*)(?:printenv|env|set|export(?:\s+-p)?|declare\s+-[xp]+|typeset\s+-x|compgen\s+-e)\s*(?:$|[;&|>])|\b(?:Get-ChildItem|gci|Get-Item|gi|dir|ls)\s+env:(?![A-Za-z_])|"
                        r"\[Environment\]::GetEnvironmentVariables|/proc/[\w*]+/environ", re.I | re.M)
 # python -c / -m and node -e / -p take their code from the line and read the download only as data (a JSON check)
@@ -351,7 +363,47 @@ _WRAPPED = re.compile(r"(?:^|[\s;&|(`])(?:(?:ba|z|da|k)?sh|pwsh|powershell|cmd)(
                       r"\s+(?:-[a-zA-Z]*c|-Command|/[ck])\s+(\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\n;&|]+)", re.I)
 
 
-def _inner_cmds(cmd: str, depth: int = 3) -> list[str]:
+_DQ = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_TICKS = re.compile(r"`([^`\n]*\s[^`\n]*)`")     # `rm -rf x`: a command with words; PowerShell's `n is one letter
+
+
+def _dq_bodies(cmd: str) -> list[str]:
+    """The text inside double quotes, skipping single-quoted spans (they run nothing in bash or PowerShell, also
+    when they hold a double quote)."""
+    out, i, n = [], 0, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if c == "'":
+            j = cmd.find("'", i + 1)
+            i = n if j < 0 else j + 1
+        elif c == '"':
+            j = i + 1
+            while j < n and cmd[j] != '"':
+                j += 2 if cmd[j] == "\\" else 1
+            out.append(cmd[i + 1:j])
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def _subst(text: str, ticks: bool = True) -> list[str]:
+    """What "$( ... )" and `...` inside double quotes run: the shell runs them, they are not prose. In PowerShell a
+    backtick is an escape letter, not a command (ticks=False)."""
+    out, i = [], 0
+    while (i := text.find("$(", i)) >= 0:
+        depth, j = 1, i + 2
+        while j < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[j], 0)
+            j += 1
+        out.append(text[i + 2:j - 1 if not depth else j])
+        i = j
+    return out + (_TICKS.findall(text) if ticks else [])
+
+
+def _inner_cmds(cmd: str, depth: int = 3, ticks: bool = True) -> list[str]:
+    """The commands run inside this one: bash -c "...", and $( ) or `...` inside double quotes. ticks=False for
+    PowerShell, where a backtick only escapes the next letter."""
     out = []
     for m in _WRAPPED.finditer(cmd or ""):
         body = m.group(1).strip()
@@ -359,7 +411,12 @@ def _inner_cmds(cmd: str, depth: int = 3) -> list[str]:
             body = body[1:-1].replace('\\"', '"') if body[0] == '"' else body[1:-1]
         out.append(body)
         if depth > 1:
-            out += _inner_cmds(body, depth - 1)
+            out += _inner_cmds(body, depth - 1, ticks)
+    for text in _dq_bodies(cmd or ""):          # single quotes run nothing in bash or PowerShell
+        for body in _subst(text.replace('\\"', '"'), ticks):
+            out.append(body)
+            if depth > 1:
+                out += _inner_cmds(body, depth - 1, ticks)
     return out
 
 
@@ -403,6 +460,8 @@ _PRIVILEGE = re.compile(r"(?:^|[;&|(]\s*)(?:sudo|su|doas|runas|gsudo)\b|\bStart-
 _SEC_OFF = re.compile(r"\bSet-MpPreference\b[^\n]*-Disable\w*\s+\$?(?:true|1)\b|\bAdd-MpPreference\b[^\n]*-Exclusion|"
                       r"\bnetsh\s+(?:adv)?firewall\b[^\n]*\bstate\s+off\b|\bufw\s+disable\b|\bsetenforce\s+0\b|"
                       r"\bspctl\s+--master-disable\b|\bsystemctl\s+(?:stop|disable)\s+(?:firewalld|apparmor|auditd)\b", re.I)
+# tunnels, remote shells and open servers: their own module (risk_network.py), named here for risks.py
+from .risk_network import _NC_SHELL, _OPEN_SERVER, _REMOTE, _SSH_FWD_OPT  # noqa: E402,F401
 
 def _norm(p: str) -> str:
     p = os.path.expanduser(p.strip().strip("'\"`"))

@@ -25,16 +25,24 @@ from .confirm_turns import confirm_turns, skill_in_use  # noqa: F401
 from .error_loop import error_loop
 from .helper_polling import helper_polling
 from .helper_rereads import helper_rereads
+from .hook_output import hook_output
+from .ignore_folders import ignore_folders
 from .images import images
+from .large_files import large_files
+from .notes_file import notes_file
+from .verbose_tests import verbose_tests
 from .long_chat import LONG_BREAK_S, LONG_CHAT, SUMMARY, long_chat, new_chat_steps, task_starts  # noqa: F401
 from .long_output import long_output
+from .helper_model import helper_model
 from .model_choice import model_choice
 from .repeated_reads import repeated_reads
 from .repeated_writes import repeated_writes
 from .reruns import is_test, test_reruns, untested_edits  # noqa: F401 (not test_*.py: pytest would collect it)
+from .skill_cost import skill_cost
 from .stale_context import stale_context
 from .startup_bloat import startup_bloat
 from .unused_builtins import unused_builtins
+from .unused_skills import unused_skills
 from .unused_tools import server_name, server_of, turn_off_steps, unused_tools  # noqa: F401
 
 MAX_FIXES = 6
@@ -52,6 +60,7 @@ class BasicFixes:
 
     def find(self, session: Session, pricer) -> list[Fix]:
         return [f for f in (unused_tools(session, pricer), unused_builtins(session, pricer),
+                            unused_skills(session, pricer),
                             repeated_reads(session, pricer), repeated_writes(session, pricer),
                             error_loop(session, pricer), helper_polling(session, pricer),
                             test_reruns(session, pricer),
@@ -60,7 +69,11 @@ class BasicFixes:
                             cache_break(session, pricer), stale_context(session, pricer),
                             big_results(session, pricer), startup_bloat(session, pricer),
                             images(session, pricer), long_output(session, pricer),
-                            helper_rereads(session, pricer), model_choice(session, pricer)) if f]
+                            helper_rereads(session, pricer), model_choice(session, pricer),
+                            helper_model(session, pricer), skill_cost(session, pricer),
+                            hook_output(session, pricer), ignore_folders(session, pricer),
+                            large_files(session, pricer), verbose_tests(session, pricer),
+                            notes_file(session, pricer)) if f]
 
 
 def load_engines() -> list:
@@ -84,6 +97,7 @@ def find(session: Session, pricer, engines: list | None = None) -> list[Fix]:
             out.append(f)
     out = [f for f in out if f.saving_usd > 0]
     out.sort(key=lambda f: (-f.saving_tokens, -f.saving_usd))   # tokens cut first; money follows
+    session.fixes_found = list(out)       # before the cut: what each chat left unused is remembered (fixer.record_seen)
     top = out[:MAX_FIXES]
     by_usd = {id(f) for f in sorted(out, key=lambda f: -f.saving_usd)[:MAX_FIXES]}
     for f in out[MAX_FIXES:]:

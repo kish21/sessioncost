@@ -82,6 +82,11 @@ PRACTICES: dict[str, Practice] = {
         "The agent's own big tools are described on every message, even in chats that never call them.",
         "Switch off the built-in tools your work never uses. You can switch them on again any time.",
         "their descriptions ride along with every message"),
+    "unused-skills": Practice(
+        "Hide skills a project does not use",
+        "Every skill's name and description is sent with every message, used or not.",
+        "Hide the skills a project never uses from the agent. You can still type /name to run one.",
+        "every skill's description rides along with every message"),
     "stale-context": Practice(
         "Don't let old output linger",
         "A big result the agent no longer needs (a long log, a big file) stays in the chat and is sent with every "
@@ -127,6 +132,51 @@ PRACTICES: dict[str, Practice] = {
         "Pick the model at the start of a chat for the work it holds, or hand routine steps to a helper on a "
         "smaller model. Switching models mid-chat breaks the prompt cache.",
         "routine reads and searches do not need the top-tier price"),
+    "helper-model": Practice(
+        "Give read and review helpers a cheaper model",
+        "A helper with no model of its own takes the chat's model, often the most expensive one, even when it only "
+        "reads files, searches or reviews a change.",
+        "Set a cheaper model in the helper's own file, or have the step that starts it name one. Keep the top model "
+        "for a review whose findings matter more than the cost.",
+        "a helper that only reads does not need the top-tier price"),
+    "skill-cost": Practice(
+        "Keep your skills lean",
+        "A skill runs the same steps every time: each one-at-a-time read sends the whole chat again, its helpers "
+        "take the chat's model, and a review at high effort costs more on every ticket.",
+        "Batch reads in the skill's steps, hand routine reads to a cheaper helper, name a cheaper model for its "
+        "helpers, match the review effort to the ticket, and start a new chat after each finished ticket.",
+        "a skill repeats its token use on every run"),
+    "hook-output": Practice(
+        "Keep hook output to one line",
+        "Whatever a hook prints for the agent stays in the chat and is sent again with every later message, so a "
+        "long hook output is paid for many times.",
+        "Have each hook print one short line for the agent and write any detail to a log file.",
+        "hook output stays in the chat and is re-sent with every message"),
+    "ignore-folders": Practice(
+        "Keep the agent out of installed and generated folders",
+        "Folders like node_modules, dist or .venv hold files the agent rarely needs. What it reads there stays in "
+        "the chat and is sent again with every later message.",
+        "Add a firm rule never to read or search them, and where the agent supports it, block them in its settings.",
+        "reads inside installed or generated folders are rarely needed"),
+    "large-files": Practice(
+        "Read long files in parts",
+        "A long file read whole puts all of it in the chat, and reading it whole again after each edit adds another "
+        "full copy each time.",
+        "Search for the place first and read only those lines. Split very long files by job so a task needs one "
+        "small file.",
+        "each whole re-read of a long file adds another full copy"),
+    "verbose-tests": Practice(
+        "Keep test output short",
+        "A verbose test run prints every passing test. Only the failures and the summary matter, but all of it stays "
+        "in the chat.",
+        "Run tests quietly, run only the tests of the changed code, and let a helper run long commands and send back "
+        "only the lines that matter.",
+        "only failures and the summary of a test run are needed"),
+    "notes-file": Practice(
+        "Keep handover and notes files short",
+        "A notes file that keeps growing is read whole when work continues, though only the newest note is needed.",
+        "Keep the newest note at the top, move older ones to an archive file, and read only the newest note.",
+        "only the newest note of a growing notes file is needed"),
 }
 
 

@@ -123,11 +123,72 @@ def unused_tools(s: Session, P) -> Fix | None:
         by_server.setdefault(server_name(server_of(t.what)), []).append(t)
     items = [f"{sv}: {len(ts)} tool{'s' if len(ts) != 1 else ''}, ~{sum(tok(t.chars) for t in ts):,} tokens on every call"
              for sv, ts in sorted(by_server.items(), key=lambda x: -sum(t.chars for t in x[1]))] + late_items
-    names = ", ".join(server_name(x) for x in idle_servers)
     return Fix(how=turn_off_steps(s.agent, idle_servers), paste=False,   # a setting the user changes, not a rule
-        id="unused-tools", title="Turn off MCP servers and connectors this project does not use",
-        why=(f"Never used in this session: {names}. Their tool lists and instructions went out with every call "
-             f"after they were connected. If this project does not need them, turning them off saves this much on a "
-             "session like this one. (The agent's own built-in tools come with it and are not counted.)"),
+        id="unused-tools", title=TITLE, why=_why([server_name(x) for x in idle_servers], saving // len(s.calls), None),
         saving_usd=usd, saving_tokens=saving, where="every call", items=items[:8], targets=list(idle_servers),
         per_target={k: v for k, v in per.items() if k})
+
+
+TITLE = "MCP servers and connectors you have not used lately"
+MIN_PER_CALL = 2_000     # proposed (owner 2026-11-23): less than this on each call is not worth a card
+RECENT = 2               # earlier chats in this project that must also leave a server unused
+
+
+def _why(names: list[str], per_call: int, recent: int | None) -> str:
+    when = f"this chat or your last {recent} chats in this project" if recent else "this chat"
+    return (f"Not used in {when}: {', '.join(names)}. Their tool lists and instructions go out with every call "
+            f"(~{per_call:,} tokens each time). Turn one off only if you do not need it; you can turn it back on any "
+            "time. (The agent's own built-in tools come with it and are not counted.)")
+
+
+def _less_saving(a: dict, f: dict, whole: int, now: int) -> None:
+    """The report's total for all fixes together (analyse: each token counted once) loses what this card no longer
+    claims. The part it shared with other cards stays: those cards still claim it."""
+    sav = a.get("saving")
+    gone = max(0, whole - now)
+    if not isinstance(sav, dict) or not whole or not gone:
+        return
+    share = sum(int(v or 0) for v in (f.get("shared") or {}).values()) * gone / whole
+    cut = max(0, int(gone - share))
+    usd = float(f.get("saving_usd") or 0.0) * cut / whole
+    for k in ("tokens", "setup_tokens"):
+        if k in sav:
+            sav[k] = max(0, int(sav[k] or 0) - cut)
+    if "usd" in sav:
+        sav["usd"] = max(0.0, float(sav["usd"] or 0.0) - usd)
+
+
+def settle(a: dict, earlier: list[dict] | None) -> None:
+    """The report's card (owner 2026-11-23: one chat is not enough to say a project does not need a server): keep
+    only servers the last RECENT chats here left unused too, and only if they cost MIN_PER_CALL tokens a call.
+    `earlier`: the project's remembered chats, newest first, without this one; None when there is no project."""
+    fs = a.get("fixes") or []
+    f = next((x for x in fs if x.get("id") == "unused-tools"), None)
+    if not f:
+        return
+    calls = max(1, int((a.get("totals") or {}).get("calls") or 0))
+    keep = list(f.get("targets") or [])
+    if earlier is not None:
+        last = [s for s in earlier if isinstance(s, dict) and "unused_targets" in s][:RECENT]
+        keep = [t for t in keep if len(last) == RECENT and
+                all(t in ((s.get("unused_targets") or {}).get("unused-tools") or []) for s in last)]
+    per = f.get("per_target") or {}
+    whole = int(f.get("saving_tokens") or 0)
+    tokens = sum(int(per.get(t) or 0) for t in keep) if per else (whole if keep else 0)
+    if not keep or tokens / calls < MIN_PER_CALL:
+        _less_saving(a, f, whole, 0)
+        a["fixes"] = [x for x in fs if x is not f]
+        for x in a["fixes"]:                  # no other card names the one that is gone
+            x["overlaps"] = [i for i in x.get("overlaps") or [] if i != f["id"]]
+            x["shared"] = {k: v for k, v in (x.get("shared") or {}).items() if k != f["id"]}
+        for row in list(a.get("turns") or []) + list(a.get("agents") or []):
+            if isinstance(row, dict) and isinstance(row.get("fixes"), list):
+                row["fixes"] = [i for i in row["fixes"] if i != f["id"]]
+        return
+    _less_saving(a, f, whole, tokens)
+    names = [server_name(x) for x in keep]
+    f.update(title=TITLE, why=_why(names, tokens // calls, RECENT if earlier is not None else None),
+             how=turn_off_steps(str((a.get("meta") or {}).get("agent") or ""), keep),
+             saving_usd=float(f.get("saving_usd") or 0.0) * tokens / whole if whole else 0.0, saving_tokens=tokens,
+             items=[i for i in f.get("items") or [] if any(n in i for n in names)], targets=keep,
+             per_target={t: per[t] for t in keep if t in per})

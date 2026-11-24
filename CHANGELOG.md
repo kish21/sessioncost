@@ -1,5 +1,9 @@
 # What's new
 
+## 1.2.8
+
+- New features and fixes.
+
 ## 1.2.7
 
 - New features and fixes.

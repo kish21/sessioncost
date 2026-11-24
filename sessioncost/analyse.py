@@ -13,6 +13,7 @@ from datetime import datetime
 
 from . import fixes as fixmod, rules
 from .fixes.overlap import combine, shared
+from .helper_agent import RULES_FILE
 from . import __version__, prices as pricemod
 from .model import Call, Session
 from .readers._util import clean_cmd
@@ -226,10 +227,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "date": s.started.astimezone().strftime("%d %b %Y") if s.started else "",
             # the file each agent reads at the start of every chat (Cursor: AGENTS.md in the project root; a plain
             # file in .cursor/rules is ignored, those need Cursor's .mdc format)
-            "rules_file": {"claude-code": "CLAUDE.md", "codex": "AGENTS.md", "cursor": ".cursor/rules/sessioncost.mdc",
-                           "antigravity": "GEMINI.md", "copilot": ".github/copilot-instructions.md",
-                           "copilot-vscode": ".github/copilot-instructions.md"}.get(
-                               s.agent, "the agent's instruction file"),
+            "rules_file": RULES_FILE.get(s.agent, "the agent's instruction file"),
             # which recommended rules are already in the instruction files (read here, never sent)
             "rules_check": rules.check(s.agent, s.cwd),
         },
@@ -285,10 +283,13 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
     out["fixes"] = [{"id": f.id, "title": f.title, "why": f.why, "saving_usd": f.saving_usd,
                      "saving_tokens": f.saving_tokens, "where": f.where, "turns": f.turns, "items": f.items,
                      "source": f.source, "per_turn": {str(k): v for k, v in f.per_turn.items()},
-                     "calls": [call_ix[k] for k in f.calls if k in call_ix], "how": f.how, "paste": f.paste,
+                     "calls": [call_ix[k] for k in f.calls if k in call_ix], "how": f.how, "paste": f.paste, "ask": f.ask,
                      "targets": list(f.targets), "per_target": dict(f.per_target),
                      "overlaps": both["overlaps"].get(f.id, []), "shared": pairs.get(f.id, {})}
                     for f in s.fixes]
+    # every fix found, also those the top cut left out: earlier chats' unused servers and skills (fixer.record_seen)
+    out["fixes_found"] = {f.id: {"targets": list(f.targets), "per_target": dict(f.per_target)}
+                          for f in s.fixes_found or s.fixes}
     for f in s.fixes:
         for tr in turn_rows:
             if tr["n"] in f.turns:

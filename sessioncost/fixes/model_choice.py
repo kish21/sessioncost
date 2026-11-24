@@ -1,6 +1,8 @@
 """Check 8 (1.1): report-only check when a top-tier model is used for many small mechanical steps."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from .. import prices as pricemod
 from ..model import Call, Fix, Session
 from .common import turns_where
@@ -35,7 +37,7 @@ def _is_mechanical(c: Call) -> bool:
     return True
 
 
-def model_choice(s: Session, pr) -> Fix | None:
+def model_choice(s: Session, pr, home: Path | None = None) -> Fix | None:
     calls = s.calls
     if len(calls) < MIN_MECHANICAL_CALLS:
         return None
@@ -46,9 +48,12 @@ def model_choice(s: Session, pr) -> Fix | None:
     src_model = ""
     dst_model = ""
 
+    from .skill_cost import skill_cost
+    sc = skill_cost(s, pr, home)                           # one-step calls it counted: not counted here again
+    claimed = {cl.call for cl in (sc.claims if sc else []) if cl.source[:1] == ("skill-single",)}
     for c in calls:
         peer = _cheaper_peer(c.model)
-        if not peer or not _is_mechanical(c):
+        if not peer or not _is_mechanical(c) or (c.agent, c.n) in claimed:
             continue
         cur_usd = pr.total(c)
         peer_rates, _, _ = pricemod.rates(peer, pr.prices)
@@ -69,14 +74,36 @@ def model_choice(s: Session, pr) -> Fix | None:
         return None
     turns = sorted(turns_set)
     n = len(hit_calls)
+    from .. import workspace
+    from ..helper_agent import make_stick, prompt
+    ws = workspace.of(s, home)
+    have = ws.helper_file("reader")
+    if have:                    # set up before, not used: firm wording from the user's own files, not a second helper
+        title = f"Use the reader helper you already have ({n} simple steps ran on {src_model})"
+        why = (f"{n} steps in this chat only read files, searched or ran a quick command, on the most expensive "
+               f"model, though this project has a reader helper on a cheaper model. The agent picks a helper from its "
+               "description and your rules: soft or missing words there let it do the reads itself.")
+        ask = make_stick(s.agent, ws.show(have), n, ws)
+        from .common import before_change_note, changed_after_start
+        why += before_change_note([ws.show(Path(p)) for p in changed_after_start(s, [have, *ws.instruction_files])])
+    else:
+        title = f"Hand simple steps to a cheaper helper ({n} ran on {src_model})"
+        why = (f"{n} steps in this chat only read files, searched or ran a quick command, on the most expensive "
+               f"model. A helper on a cheaper model ({dst_model} or similar) does that work for much less, and its "
+               "long outputs stay out of the main chat.")
+        ask = prompt(s.agent, "reader", ws)
+    how = ("Switch the model only when you start a new chat: `/model` in the middle of a chat sends the whole chat "
+           "again, uncached.")
+    default = ws.setting("model")
+    if default and (_cheaper_peer(str(default[1])) or str(default[1]).lower() in ("opus", "fable")):
+        how = (f"{default[0].quote()} makes the most expensive model the default for every chat. Best practice: a "
+               "cheaper default (`\"model\": \"sonnet\"`), and the top model chosen with /model at the start of a "
+               "design or debugging chat. " + how)
     return Fix(
         id="model-choice",
-        title=f"{n} routine read/search/command steps ran on {src_model} (${total_diff:.2f} cheaper on {dst_model})",
-        why=(f"{n} calls in this chat only read files, searched, or ran a quick command with short output, "
-             f"where {dst_model} costs much less per cached token than {src_model}."),
+        title=title, why=why,
         saving_usd=total_diff, saving_tokens=0,
         where=turns_where(turns), turns=turns, items=items[:6],
         per_turn={t: 0 for t in turns}, calls=hit_calls,
-        how=f"Use `/model {dst_model}` (or a subagent on {dst_model}) for routine file reading, searching, and test runs, and switch to {src_model} for hard design or debugging.",
-        paste=False,
+        how=how, paste=False, ask=ask,
     )

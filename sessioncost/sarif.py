@@ -14,7 +14,9 @@ from .risks import SEVERITY
 LEVEL = {"high": "error", "review": "warning", "info": "note"}
 TEXT = {
     "guard_tamper": "Tried to change or switch off the SessionCost guard or the rules the user set",
-    "pipe_to_shell": "Ran a script straight from the internet", "encoded_command": "Ran a hidden (encoded) command",
+    "pipe_to_shell": "Ran a script straight from the internet",
+    "remote_access": "Opened this computer to others (a public tunnel or a remote shell)",
+    "open_server": "Started a server others on the network can reach (0.0.0.0)", "encoded_command": "Ran a hidden (encoded) command",
     "env_dump": "Printed every environment variable", "persistence": "Set something up to run again later",
     "security_off": "Switched off a security tool", "force_push": "Rewrote shared git history",
     "injected": "A result showed signs of a prompt injection",
@@ -36,7 +38,7 @@ OWASP = {   # OWASP Top 10 for LLM Applications 2025 (genai.owasp.org/llm-top-10
     "injected": ["LLM01:2025", "ASI01"], "after_untrusted": ["LLM01:2025", "LLM06:2025", "ASI01", "ASI02"],
     "guardrails": ["ASI06"], "guard_tamper": ["LLM06:2025", "ASI10"], "secrets": ["LLM02:2025", "ASI03"],
     "env_dump": ["LLM02:2025"], "key_in_output": ["LLM02:2025", "ASI03"], "poisoned_tool": ["LLM01:2025", "ASI04"], "pipe_to_shell": ["ASI05"], "encoded_command": ["ASI05"], "inline_script": ["ASI05"],
-    "persistence": ["ASI10"], "security_off": ["LLM06:2025"], "mcp_action": ["ASI02"], "network": ["ASI02"],
+    "persistence": ["ASI10"], "security_off": ["LLM06:2025"], "remote_access": ["LLM06:2025"], "open_server": ["LLM06:2025"], "mcp_action": ["ASI02"], "network": ["ASI02"],
     "installs": ["LLM03:2025", "ASI04"], "git_push": ["LLM06:2025"], "force_push": ["LLM06:2025"], "deletes": ["LLM06:2025"],
     "outside_project": ["LLM06:2025"], "skips_commit_checks": ["LLM06:2025"],
     "wipe": ["LLM06:2025", "ASI02"], "privilege": ["LLM06:2025", "ASI03"],

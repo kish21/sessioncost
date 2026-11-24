@@ -76,6 +76,15 @@ def big_results(s: Session, pr) -> Fix | None:
 
     if not items:
         return None
+    ask = ""
+    if "cmd" in kinds_hit:      # long command output: the digester helper sends back only the lines that matter
+        from .. import workspace
+        from ..helper_agent import make_stick, prompt
+        ws = workspace.of(s)
+        have = ws.helper_file("digester")
+        n_cmd = sum(1 for x in items if x.endswith("tool output)"))
+        ask = (make_stick(s.agent, ws.show(have), n_cmd, ws, "digester") if have
+               else prompt(s.agent, "digester", ws))
     total_tok, per_turn = led.tokens, led.per_turn()
     turns = sorted(hit_turns)
     n = len(items)
@@ -94,5 +103,5 @@ def big_results(s: Session, pr) -> Fix | None:
         saving_usd=led.usd, saving_tokens=total_tok, claims=led.claims,
         where=turns_where(turns), turns=turns, items=items[:6], per_turn=per_turn, calls=hit_calls,
         how="Keep command output short: use head/tail or a quiet flag, or write long output to a file and read only the lines you need.",
-        paste=True,
+        paste=True, ask=ask,
     )

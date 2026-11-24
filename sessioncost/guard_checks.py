@@ -9,205 +9,7 @@ import re
 from pathlib import Path
 
 from .risk_shell import _inside, _outside
-
-SCRIPT = re.compile(r"\.(?:sh|bash|zsh|ps1|psm1|bat|cmd|py|js|mjs|rb|pl)$|(?:^|[\\/])(?:Makefile|Dockerfile|package\.json)$", re.I)
-
-_LOCK_NAMES = {
-    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "uv.lock",
-    "cargo.lock", "poetry.lock", "composer.lock", "gemfile.lock",
-}
-_BUILD_SUFFIXES = (".min.js", ".min.css", ".bundle.js", ".chunk.js", ".map")
-
-_RANGED_CMD = re.compile(
-    r"\b(?:head|tail)\b|"
-    r"-(?:TotalCount|Head|Tail)\b|"
-    r"\b(?:Select-Object|select)\b[^\n;&|]*-(?:First|Last)\b",
-    re.I,
-)
-_SHELL_READ = re.compile(
-    r"^\s*(?:&\s*)?(?:cat|type|Get-Content|gc|more|less)(?:\.exe)?\s+(.*)$",
-    re.I,
-)
-_SHELL_SEARCH = re.compile(
-    r"^\s*(?:&\s*)?(?:grep|rg|findstr|Select-String|sls)(?:\.exe)?\s+(.*)$",
-    re.I,
-)
-
-
-def _words(s: str) -> list[str]:
-    return [w.strip("'\"`") for w in re.findall(r'[^\s"\'`]+|"[^"]*"|\'[^\']*\'|`[^`]*`', s)]
-
-
-def _cmd_read_paths(cmd: str) -> tuple[list[str], list[str]]:
-    """(every file a shell command reads whole, those of them read with no line limit in their own pipeline).
-    A head/tail elsewhere in the command (or git's HEAD) limits nothing."""
-    paths, unlimited = [], []
-    for seg in re.split(r"&&|\|\||;|\n", cmd):
-        found = _pipeline_read_paths(seg)
-        paths += found
-        if not _RANGED_CMD.search(re.sub(r"\bHEAD\b", "", seg)):
-            unlimited += found
-    return paths, unlimited
-
-
-_HEAD_TAIL = re.compile(r"^\s*(?:head|tail)(?:\.exe)?\s+(.*)$", re.I)
-
-
-def _cmd_shown_paths(cmd: str) -> list[str]:
-    """Every file a shell command prints, whole or a head/tail of it ([] when any part runs something else)."""
-    paths = []
-    for p in re.split(r"&&|\|\||;|\n|\|", cmd):
-        if not p.strip():
-            continue
-        if m := _HEAD_TAIL.match(p):
-            words, skip = _words(m.group(1)), False
-            for w in words:
-                if skip or w.startswith("-") or w.isdigit():
-                    skip = w in ("-n", "-c")
-                    continue
-                paths.append(w)
-        elif found := _pipeline_read_paths(p):
-            paths += found
-        else:
-            return []
-    return paths
-
-
-def _pipeline_read_paths(cmd: str) -> list[str]:
-    paths = []
-    for p in cmd.split("|"):
-        if m := _SHELL_READ.match(p.strip()):
-            words = _words(m.group(1))
-            skip = False
-            for w in words:
-                if skip:
-                    skip = False
-                    paths.append(w)
-                elif w in ("-Path", "-LiteralPath", "-p"):
-                    skip = True
-                elif not w.startswith("-") and not (w.startswith("/") and len(w) <= 2):
-                    paths.append(w)
-    return paths
-
-
-# search flags whose next word is the search text, a path, or some other value (grep/rg are case-sensitive,
-# Select-String parameters and findstr options are not)
-_PATTERN_FLAGS = {"-e", "--regexp"}
-_PATH_FLAGS = {"-f", "--file"}
-_VALUE_FLAGS = {"-A", "-B", "-C", "-m", "-g", "-t", "-T", "--max-count", "--glob", "--type", "--type-not",
-                "--include", "--exclude", "--exclude-dir", "--context", "--after-context", "--before-context"}
-_PS_PATTERN, _PS_PATH, _PS_VALUE = {"-pattern"}, {"-path", "-literalpath"}, {"-encoding", "-context", "-include", "-exclude"}
-
-
-def _cmd_search_paths(cmd: str) -> list[str]:
-    """The places a shell search (grep, rg, findstr, Select-String) looks in: never the search text itself,
-    which is the first plain word unless -e / -Pattern / /C: gave it."""
-    paths = []
-    for p in re.split(r"&&|\|\||;|\n|\|", cmd):
-        m = _SHELL_SEARCH.match(p.strip())
-        if not m:
-            continue
-        ps = re.match(r"\s*(?:&\s*)?(?:Select-String|sls)\b", p.strip(), re.I) is not None
-        findstr = re.match(r"\s*(?:&\s*)?findstr\b", p.strip(), re.I) is not None   # only findstr takes /x options
-        pattern_given, plain, nxt, opts_done = False, [], None, False
-        for w in _words(m.group(1)):
-            low = w.lower()
-            if nxt:
-                if nxt == "path":
-                    paths.append(w)
-                nxt = None
-            elif opts_done or not (w.startswith("-") or (findstr and re.match(r"/[A-Za-z?](?::|$)", w))):
-                plain.append(w)
-            elif w == "--":
-                opts_done = True
-            elif (ps and low in _PS_PATTERN) or w in _PATTERN_FLAGS or low in ("/c:", "/g:"):
-                pattern_given, nxt = True, ("path" if low == "/g:" else "pattern")
-            elif not ps and (re.match(r"--regexp=|-e.", w) or re.match(r"/c:.", w, re.I)):
-                pattern_given = True                      # -e/api, --regexp=/api, findstr /C:text
-            elif not ps and w.startswith("--file="):     # grep/rg read their patterns from that file
-                pattern_given = True
-                paths.append(w.split("=", 1)[1])
-            elif (ps and low in _PS_PATH) or w in _PATH_FLAGS:
-                pattern_given = pattern_given or not ps      # grep/rg -f: the patterns come from the file
-                nxt = "path"
-            elif (ps and low in _PS_VALUE) or w in _VALUE_FLAGS:
-                nxt = "value"
-        for w in (plain if pattern_given else plain[1:]):
-            if "/" in w or "\\" in w or w.startswith(".") or w.startswith("~") or ":" in w or not (ps or findstr):
-                paths.append(w)               # grep / rg: every word after the search text is a file or folder
-    return paths
-
-
-_FILTER = re.compile(r"^\s*(?:head|tail|sort|uniq|wc|cut)(?:\s+-\S+(?:\s+\d+)?)*\s*$|"   # reads only the pipe
-                     r"^\s*(?:echo|printf|Write-(?:Host|Output))(?:\s+[^$`<>]*)?$", re.I)   # a label the agent typed itself
-_SED = re.compile(r"^\s*sed(?:\.exe)?\s+(.*)$", re.I)
-
-
-def _sed_paths(part: str) -> list[str]:
-    """The files a printing sed reads (sed -n '1,40p' f); [] for an in-place edit or no file."""
-    m = _SED.match(part)
-    if not m:
-        return []
-    script_given, plain, nxt = False, [], False
-    for w in _words(m.group(1)):
-        if nxt:
-            nxt = False
-        elif w.startswith(("-i", "--in-place")):
-            return []
-        elif w in ("-e", "-f", "--expression", "--file"):
-            script_given = nxt = True
-        elif w.startswith("-"):
-            continue
-        else:
-            plain.append(w)
-    return plain if script_given else plain[1:]
-
-
-_ASSIGN = re.compile(r"^\s*\$[\w:]+\s*=\s*\(?\s*")          # PowerShell `$c = Get-Content f`, `$i = ($c | ...`
-_PS_SHAPE = {"select-object", "select", "where-object", "where", "foreach-object", "foreach", "sort-object", "sort",
-             "measure-object", "measure", "group-object", "format-table", "ft", "format-list", "fl", "out-string",
-             "select-string", "sls"}                         # with no -Path, Select-String searches only the pipe
-_SUBEXPR = re.compile(r"\$\(((?:[^()]|\([^()]*\))*)\)")
-
-
-def _shapes_only(part: str) -> bool:
-    """A PowerShell part that only reshapes what the command already read: variables, `$_` members, text, numbers and
-    the pipe cmdlets above, with no other command anywhere (not even inside "$( )"). Owner 2026-11-21: reading our
-    own CHANGELOG into `$c` and slicing it raised an injection warning."""
-    t = re.sub(r"'[^']*'", "''", part)                         # single quotes: plain text
-    t = re.sub(r'"[^"]*"', lambda m: " ".join(_SUBEXPR.findall(m.group(0))), t)   # double quotes: only $( ) runs
-    if re.search(r"[&<>`]|\b-Path\b|\b-LiteralPath\b", t, re.I):
-        return False
-    words = re.findall(r"(?<![\w$.\-:\\/])[A-Za-z_][\w-]*", t)
-    return all(w.lower() in _PS_SHAPE for w in words)
-
-
-def _split_cmd(cmd: str) -> list[str]:
-    """The parts of a command between && || ; | and new lines, never splitting inside quotes ('a|b' is one pattern)."""
-    parts, cur = [], ""
-    for tok in re.findall(r"'[^']*'|\"[^\"]*\"|&&|\|\||[;|\n]|[^'\"&|;\n]+|['\"&]", cmd):
-        if tok in ("&&", "||", ";", "|", "\n"):
-            parts.append(cur)
-            cur = ""
-        else:
-            cur += tok
-    return parts + [cur]
-
-
-def _cmd_all_read_paths(cmd: str) -> list[str]:
-    """Every file a command only prints or searches (cat, head, sed -n, grep, rg, findstr, Select-String), or []
-    when any part does something else or reads no named file, so the whole result came from those files."""
-    paths = []
-    for p in _split_cmd(cmd):
-        p = _ASSIGN.sub("", p)
-        if not p.strip() or _FILTER.match(p):
-            continue
-        found = (_cmd_search_paths(p) if _SHELL_SEARCH.match(p.strip()) else _sed_paths(p)) or _cmd_shown_paths(p)
-        if not found and not _shapes_only(p):
-            return []
-        paths += found
-    return paths
-
+from .guard_reads import SCRIPT, _BUILD_SUFFIXES, _LOCK_NAMES, _cmd_all_read_paths, _cmd_read_paths, _cmd_search_paths  # noqa: F401
 
 def _agent_roots() -> list[str]:
     home = Path.home()
@@ -394,6 +196,12 @@ def _new_packages(a, cwd: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# What the user says instead of yes (owner, 2026-11-23: a yes let the agent read .env; the line named no better way)
+USER_NEXT = {
+    "secrets": 'Better than yes: say "use the key names only, never their values, and tell me where to put the key". '
+               "Your agent can then go on without the keys entering this chat.",
+    "env_dump": 'Better than yes: say "check only the names you need, without printing values".',
+}
 # What to do instead of a never-list step: blocking alone stops the work, so each block names the safer way
 INSTEAD = {
     "secrets": "Reading it would send the keys to the AI model and keep them in this chat's log. The values are not needed: "
@@ -401,6 +209,7 @@ INSTEAD = {
                "keys exist, list the names only: cut -d= -f1 .env (PowerShell: Get-Content .env | ForEach-Object "
                "{ ($_ -split '=')[0] }). Keys belong in .env (listed in .gitignore), never in code or in this chat.",
     "pipe_to_shell": "Download the script to a file, show it to the user, and run it only after they have read it.",
+    "remote_access": "Keep it on this computer: bind to 127.0.0.1 (localhost). If others really must reach it, the user opens it.",
     "encoded_command": "Write the command out in plain text so the user can read what it does.",
     "env_dump": "To check that a variable is set, test it without printing its value (for example: test -n \"$NAME\" && echo set).",
     "force_push": "Push without --force; if the history really has to change, the user does it themselves.",
@@ -412,7 +221,9 @@ INSTEAD = {
     "wipe": "Delete only the specific files, and name them to the user first.",
 }
 
-WHY = {"pipe_to_shell": "runs a script straight from the internet", "encoded_command": "runs a hidden (encoded) command",
+WHY = {"pipe_to_shell": "runs a script straight from the internet", "remote_access": "opens this computer to others (a public tunnel or a remote shell)",
+       "open_server": "starts a server others on the network can reach (0.0.0.0); 127.0.0.1 keeps it on this computer",
+       "encoded_command": "runs a hidden (encoded) command",
        "env_dump": "prints every environment variable (tokens and keys live there)", "force_push": "rewrites shared git history",
        "persistence": "sets something up to run again later", "security_off": "switches off a security tool",
        "skips_commit_checks": "switches off the commit checks", "secrets": "touches a secrets file or key",
@@ -453,7 +264,7 @@ RULE = {"env_dump": _DISCLOSE, "secrets": _DISCLOSE, "secret_commit": _DISCLOSE,
         "security_off": _CHECKS, "skips_commit_checks": _CHECKS, "guard_tamper": _CHECKS, "guardrails": _CHECKS,
         "force_push": "never rewrite history others share (git best practice)",
         "wipe": _AGENCY, "privilege": "least privilege: no more rights than the task needs (OWASP LLM06: Excessive Agency)",
-        "persistence": _AGENCY, "deletes": _AGENCY, "git_push": _AGENCY, "outside_project": _AGENCY,
+        "persistence": _AGENCY, "remote_access": _AGENCY, "open_server": _AGENCY, "deletes": _AGENCY, "git_push": _AGENCY, "outside_project": _AGENCY,
         "network": _AGENCY, "mcp_action": _AGENCY,
         "unlisted": "least privilege: only the steps on the project's allow list run unasked",
         "url_leak": _DISCLOSE, "memory_poison": "content from outside never becomes the agent's standing rules "

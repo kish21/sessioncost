@@ -95,7 +95,14 @@ def make_server(args, port: int = 0, token: str | None = None) -> tuple[Threadin
 
         do_PUT = do_DELETE = do_PATCH = do_POST
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    class Server(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            import sys
+            if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+                return                          # the page closed or reloaded mid-answer: nothing went wrong
+            super().handle_error(request, client_address)
+
+    srv = Server(("127.0.0.1", port), Handler)
     return srv, f"http://127.0.0.1:{srv.server_port}/{token}/"
 
 

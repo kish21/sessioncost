@@ -18,7 +18,7 @@ from pathlib import Path
 from ..textflags import fingerprint, text_flags
 from ..model import Action, Call, Event, Helper, Session, Setup, SetupPart, Turn
 from .claude_text import (SETUP_ATTACHMENTS, _added, _merge_usage, _parse_answers, _result_text, _usage, _written,
-                          classify_text, describe, short, ts)
+                          classify_text, describe, instruction_files, short, skill_entries, ts)
 
 
 class _Thread:
@@ -141,6 +141,8 @@ class ClaudeCodeReader:
         last_agent_ts = None
         snapshot = None
         setup_extra: dict[str, int] = {}
+        skills: list[SetupPart] = []        # each skill of the first skill list, and each instruction file
+        files: list[SetupPart] = []
 
         def current() -> Turn:
             if not turns:
@@ -177,7 +179,17 @@ class ClaudeCodeReader:
                     ad = _added(a, len(main.order))
                     if ad is not None:
                         s.added.append(ad)
-                        current().events.append(Event("injected", "Claude Code added " + ad.label, "", ad.chars, rts))
+                        said = ""        # a hook's first words: tells the user's hooks from SessionCost's own
+                        if str(k).startswith("hook"):
+                            c = a.get("content")
+                            said = " ".join(map(str, c)) if isinstance(c, list) else str(c or "")
+                            out = str(a.get("stdout") or "")
+                            said = " ".join((said if said.strip() else out).split())[:120]
+                            if "sessioncost" in str(a.get("command") or "").lower():
+                                said = "SessionCost: " + said
+                            elif k == "hook_system_message" or (said.startswith("{") and "additionalContext" not in out):
+                                said = "to you only: " + said    # a message shown to the user, not the agent's context
+                        current().events.append(Event("injected", "Claude Code added " + ad.label, said, ad.chars, rts))
                 elif k in SETUP_ATTACHMENTS and k not in setup_extra:
                     if k in ("deferred_tools_delta", "mcp_instructions_delta"):
                         # MCP tool names (and server instructions) already there at the first call: unused ones
@@ -189,8 +201,10 @@ class ClaudeCodeReader:
                     if k == "instructions":
                         setup_extra[k] = sum(len(str(f.get("content") or "")) for f in a.get("files") or []
                                              if isinstance(f, dict)) or len(json.dumps(a, ensure_ascii=False))
+                        files = instruction_files(a)
                     elif k == "skill_listing":
                         setup_extra[k] = len(str(a.get("content") or ""))
+                        skills = skill_entries(str(a.get("content") or ""))
                     else:
                         setup_extra[k] = len(json.dumps(a, ensure_ascii=False))
                 elif k == "queued_command":
@@ -278,6 +292,7 @@ class ClaudeCodeReader:
             models[c.model] = models.get(c.model, 0) + 1
         s.model = max(models, key=models.get) if models else ""
         s.setup = _setup(snapshot, setup_extra)
+        s.setup.skills, s.setup.files = skills, files
         if side.order:
             s.helpers.append(Helper(id="sidechain", description="helpers logged inside the main log",
                                     agent_type="helper", calls=side.order))

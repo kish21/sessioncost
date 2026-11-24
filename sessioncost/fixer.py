@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import practices
-from .fixer_plan import Plan, plan
+from .fixer_plan import UNUSED_IDS, Plan, handover_unignored, plan
 from .fixer_store import (ASKED_FIX, BIG_TIP_TOKENS, CHAT_KEEP_S, HANDOVER_END, HANDOVER_NAME, HEAD, KEEP_SEEN, MIN_TIP_TOKENS,
                           NOTE_MAX_AGE_S, OFFER_QUIET_S, RULE_OF, SAY_FIX, SAY_HANDOVER, SETTINGS, _load, _norm, _now, _save, _sha, _size, _tok, _ts, _usd,
                           asks_handover, auto_on, backups_dir, base, chat_file, find_handover, fixes_file, handover_file, known,
@@ -46,7 +46,7 @@ def apply(p: Plan) -> tuple[int, str]:
         now = Path(path).read_bytes() if Path(path).exists() else None
         if now != p.originals.get(path):
             return 1, f"{path} changed while SessionCost was working; nothing was applied. Run `sessioncost fix` again."
-    if p.finals:                               # the fixes, and the handover's .gitignore line
+    if p.finals:                               # the fixes (the handover writes nothing here)
         bid = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
         folder = backups_dir(p.project) / bid
         folder.mkdir(parents=True, exist_ok=True)
@@ -67,13 +67,10 @@ def apply(p: Plan) -> tuple[int, str]:
             entries.append(e)
         mf = backups_dir(p.project) / "manifest.json"
         _save(mf, _load(mf, []) + [{"id": bid, "at": _now(), "chat": p.chat,
-                                    "items": [i.id for i in todo] or ["long-chat"], "entries": entries}])
+                                    "items": [i.id for i in todo], "entries": entries}])
         for path in paths:                     # the backup is on disk before any file changes
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_bytes(data[path])
-    if not todo and p.finals:
-        out.append(f"Added {handover_file(p.project).name} to .gitignore, so the handover is not committed "
-                   "(`sessioncost fix --undo` takes it out).")
     if todo:
         mem = _load(fixes_file(p.project), {})
         mem["project"] = str(p.project)
@@ -107,6 +104,10 @@ def apply(p: Plan) -> tuple[int, str]:
                    f"file if there is none; {ON_TOP}): the goal, what is done, files "
                    "changed, tests run, what is next. Show it in your reply, then tell the user to start a new chat "
                    "and say \"continue from handover\" there." + fresh_chat.handover_words(p.agent, p.project.as_posix()))
+        if handover_unignored(p.project):      # the agent's own edit: SessionCost writes no file here (owner, 2026-11-23)
+            out.append(f"So the handover is not committed: with your own file-edit tool, add the line {h.name} to "
+                       f"{(p.project / '.gitignore').as_posix()} (keep everything already in it; a new file if there "
+                       "is none).")
         out.append("In the same handover, add a short section \"Other token waste in this chat\": what cost tokens in "
                    "this chat that SessionCost does not know yet. It knows: " + "; ".join(known()) + ". Leave out "
                    "anything on that list, except what you already recorded in this chat with `fix learn`: list that "
@@ -177,15 +178,29 @@ def record_seen(a: dict, project) -> None:
     mem = _load(p, {})
     meta = a.get("meta") or {}
     seen = mem.setdefault("seen", {})
+    # all fixes found, not only the top ones shown: a card left out still names what the chat did not use
+    found = a.get("fixes_found")
+    if found is None:
+        found = {f["id"]: f for f in a.get("fixes") or []}
     seen[str(meta.get("session_id") or "")] = {
         "started": meta.get("started"), "calls": int((a.get("totals") or {}).get("calls") or 0),
         "waste": {f["id"]: int(f.get("saving_tokens") or 0) for f in a.get("fixes") or []},
         "waste_usd": {f["id"]: float(f.get("saving_usd") or 0.0) for f in a.get("fixes") or []},
-        "unused_targets": {f["id"]: list(f.get("targets") or []) for f in a.get("fixes") or []
-                           if f.get("id") in ("unused-tools", "unused-builtin")}}
+        "unused_targets": {i: list(f.get("targets") or []) for i, f in found.items() if i in UNUSED_IDS},
+        # a Claude Code chat recorded since unused skills are checked: no "unused-skills" entry means it used them all
+        "skills_known": meta.get("agent") == "claude-code",
+        # tokens of each skill the skill-cost card found (the card's per-skill line over the recent chats)
+        "skill_tokens": dict((found.get("skill-cost") or {}).get("per_target") or {})}
     if len(seen) > KEEP_SEEN:
         mem["seen"] = dict(sorted(seen.items(), key=lambda x: -_ts(x[1].get("started")))[:KEEP_SEEN])
     _save(p, mem)
+
+
+def earlier_chats(a: dict, project) -> list[dict]:
+    """The project's remembered chats, newest first, without this one (for the report's unused-tools card)."""
+    me = str((a.get("meta") or {}).get("session_id") or "")
+    seen = _load(fixes_file(project_path(project)), {}).get("seen") or {}
+    return [s for c, s in sorted(seen.items(), key=lambda x: -_ts(x[1].get("started"))) if c != me]
 
 
 def verify(project) -> list[dict]:
@@ -394,7 +409,8 @@ def tip(chat: str, cwd: str, prompt: str = "", start: bool = False, turn: str | 
                 if long:          # a long chat: the handover is written at once, no yes needed (owner, 2026-11-17)
                     say.append(f"This chat is long, so write a handover now, without waiting for the user's yes: "
                                "after your work for the user's message and before that last line, run "
-                               f"`{run_cmd()} fix -y {of}--only long-chat --project {where}` and do what it prints. "
+                               f"`{run_cmd()} fix {of}--only long-chat --project {where}` (it changes no file, only "
+                               "prints the steps) and do what it prints. "
                                "If running it is blocked or refused, write the handover yourself at the top of "
                                f"{handover_file(cwd).as_posix()} ({ON_TOP}): the goal, what is done, files "
                                "changed, tests run, what is next. Write it with your own file-edit tool, not a script "

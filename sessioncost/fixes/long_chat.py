@@ -12,18 +12,29 @@ LONG_CHAT = 100_000      # a conversation this long, carried into a turn after a
 LONG_BREAK_S = 30 * 60   # a break this long: the cache has usually expired, and the task has often changed
 SUMMARY = 15_000         # what a new chat would carry instead: a short summary of where you are
 
+HANDOVER_ASK = ("Write a handover at the top of NEXT-SESSION.md (keep what is already in the file below it): the goal, "
+                "what is done, files changed, tests run, what is next.")
+# stages make clean stopping points; SessionCost decides from the chat's size whether one becomes a new chat
+# (owner, 2026-11-23: not "one stage per chat": a new chat costs its setup again)
+STAGES_RULE = ("Plan big tasks in stages. After each stage is committed and its tests pass, tell me in a few lines "
+               "what is done and what is next.")
+
+
+def handover_ask(agent: str) -> str:
+    from ..helper_agent import rules_file
+    return f'{HANDOVER_ASK} Also add this line to {rules_file(agent)} if it is not there: "{STAGES_RULE}"'
+
+
 def new_chat_steps(agent: str) -> str:
-    """How to start over with a short summary, in each agent (numbered steps, one per line)."""
-    first = {
-        "claude-code": "Type /compact: Claude Code shrinks the chat to a short summary and carries on. Or type /clear "
-                       "to start a fresh chat.",
-        "codex": "Type /compact to shrink the chat to a summary, or /new to start a fresh chat.",
-        "cursor": "Start a new chat (the + at the top of the chat panel).",
-    }.get(agent, "Start a new chat.")
+    """How to start over from a handover, in each agent (numbered steps, one per line)."""
+    new = {
+        "claude-code": "Type /clear for a new chat",
+        "codex": "Type /new for a new chat",
+        "cursor": "Start a new chat (the + at the top of the chat panel)",
+    }.get(agent, "Start a new chat")
     return "\n".join(f"{i}. {x}" for i, x in enumerate([
-        "Do it when a task is done, or when you come back after a break of half an hour or more.",
-        first,
-        "If you start fresh, tell the agent in two or three lines where you are and what is next.",
+        "When a task is done, or when you come back after a break of half an hour or more, paste the request above.",
+        f'{new} and say "continue from handover": the agent reads only that note, not the old chat.',
     ], 1))
 
 
@@ -60,7 +71,12 @@ def task_starts(s: Session) -> list[tuple]:
     return out
 
 
-def long_chat(s: Session, P) -> Fix | None:
+_NEW_CHAT_RULE = re.compile(r"\b(new|fresh|separate) chat\b|\bone task per chat\b|\bhandover\b", re.I)
+FIRM_RULE = ("When a task is finished (committed, tests pass) and this chat is long, write the handover and tell me "
+             "to start a new chat; do not start the next task in this chat.")
+
+
+def long_chat(s: Session, P, home=None) -> Fix | None:
     """A long conversation carried on after a long break: every later call re-sent all of it. A new chat (or a
     compacted one) at the break would have carried a short summary instead. The saving is measured call by call:
     what each later call re-sent of the old conversation, minus the summary that would replace it."""
@@ -102,6 +118,14 @@ def long_chat(s: Session, P) -> Fix | None:
         return None
     turns = [t.n for t in splits]
     breaks = all(why[n].endswith("break") for n in turns)
+    from .. import workspace
+    have = workspace.of(s, home).find(_NEW_CHAT_RULE)
+    ask = handover_ask(s.agent)
+    if have:                    # the user has such a rule, and the chat still went on: quote it and firm it up
+        ask += (f" My rule {have[0].quote()} did not stop this chat going on into the next task. Replace it with: "
+                f"\"{FIRM_RULE}\" Propose the change and wait for my yes.")
+    else:
+        ask += f" Also add: \"{FIRM_RULE}\""
     where = (f"{len(turns)} long break{'s' if len(turns) > 1 else ''}" if breaks else
              f"{len(turns)} point{'s' if len(turns) > 1 else ''} where a task ended or a new one began")
     return Fix(
@@ -112,4 +136,5 @@ def long_chat(s: Session, P) -> Fix | None:
              "chat, or a compacted one, would have carried a short summary instead. (A fresh chat may re-read a "
              "file or two to catch up, so this is the most it could save.)"),
         saving_usd=led.usd, saving_tokens=led.tokens, where=_where(turns), turns=turns, items=items,
-        per_turn=led.per_turn(), calls=hit, claims=led.claims, how=new_chat_steps(s.agent), paste=False)
+        per_turn=led.per_turn(), calls=hit, claims=led.claims, how=new_chat_steps(s.agent), paste=False,
+        ask=ask)

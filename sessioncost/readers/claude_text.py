@@ -68,6 +68,27 @@ SENT_ATTACHMENTS = {
 }
 
 
+def skill_entries(content: str) -> list:
+    """Claude Code's skill list ("- name: description", a description may run over more lines): one entry per
+    skill with the characters it adds to every call."""
+    from ..model import SetupPart
+    out: list = []
+    for line in str(content or "").splitlines():
+        m = re.match(r"- ([^\s:][^\s]*?):(?:\s|$)", line)
+        if m:
+            out.append(SetupPart(m.group(1), len(line) + 1))
+        elif out:
+            out[-1].chars += len(line) + 1
+    return out
+
+
+def instruction_files(a: dict) -> list:
+    """The instruction files of an `instructions` attachment: one entry per file, what = its path."""
+    from ..model import SetupPart
+    return [SetupPart(str(f.get("path") or "instructions"), len(str(f.get("content") or "")))
+            for f in a.get("files") or [] if isinstance(f, dict) and f.get("content")]
+
+
 def _server(tool: str) -> str:
     """mcp__claude-in-chrome__computer -> claude-in-chrome"""
     return tool.split("__")[1] if tool.startswith("mcp__") and tool.count("__") >= 2 else ""
@@ -205,7 +226,8 @@ def describe(tool: str, inp: dict) -> tuple[str, str, str]:
         return kind, (f"asked you {n} question{'s' if n > 1 else ''}" if tool == "AskUserQuestion"
                       else "showed you a plan to approve"), ""
     if kind == "skill":
-        return kind, f"loaded the skill `{inp.get('skill', '')}`", str(inp.get("skill") or "")
+        args = f" ({short(inp.get('args'), 40)})" if inp.get("args") else ""     # "high": skill-cost reads the effort
+        return kind, f"loaded the skill `{inp.get('skill', '')}`{args}", str(inp.get("skill") or "")
     if kind == "plan":
         return kind, "updated its to-do list", ""
     if tool.startswith("mcp__"):          # the arguments, so the watch list can check them (a key in a body, a path)

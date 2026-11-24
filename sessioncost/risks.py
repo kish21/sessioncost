@@ -27,6 +27,9 @@ after_untrusted  a step above (or one that sends data out) taken in the same tur
                  the checkpoint: content read before it was seen by you
 env_dump         printed all the environment variables (where tokens and keys live): printenv, env, Get-ChildItem env:
 pipe_to_shell    ran a script straight from the internet: curl ... | sh, iex (iwr ...), bash <(curl ...)
+remote_access    opened this computer to others: a public tunnel (ngrok, cloudflared tunnel, ssh -R, serveo), a reverse
+                 shell (nc -e, socat exec:, /dev/tcp/)
+open_server      started a server on every network address (--host 0.0.0.0, php -S 0.0.0.0): asked, not blocked
 encoded_command  ran a hidden command: powershell -EncodedCommand, base64 -d ... | sh
 force_push       rewrote shared history: git push --force / -f / --force-with-lease, git filter-branch / filter-repo
 persistence      set itself up to run again later: crontab, schtasks /create, Register-ScheduledTask, a Run key, a
@@ -79,8 +82,8 @@ from . import risk_bypass
 from .model import Session
 from .risk_patterns import (_DB_CLIENT, _DB_WIPE, _DELETE, _ENCODED, _ENV_DUMP, _FILE_API, _FORCE, _GUARD, _GUARD_IN_CMD,
                             _INLINE, _INSTALL, _MCP_ACT, _MEMORY, _NET_CMD, _OUTWARD_TOOLS, _OWN_PATH, _PERSIST,
-                            _PIPE_SHELL, _PLUGINS_PATH, _PRINTS_KEY, _PRIVILEGE, _PUSH, _QUIET, _QUOTED, _RC_FILE,
-                            _READ_ONLY, _SCRIPT_ENV, _SEC_OFF, _SECRET, _SECRET_CMD, _SECRET_VALUE, _SECRET_VAR, _SEND,
+                            _NC_SHELL, _OPEN_SERVER, _PIPE_SHELL, _SSH_FWD_OPT, _PLUGINS_PATH, _REMOTE, _PRINTS_KEY, _PRIVILEGE, _PUSH, _QUIET, _QUOTED, _RC_FILE,
+                            _READ_ONLY, _SCRIPT_ENV, _SEC_OFF, _SET_VAR, _SECRET, _SECRET_CMD, _SECRET_VALUE, _SECRET_VAR, _SEND,
                             _SEND_ONLY, _SINKS, _SQL_DESTROY, _TAMPER_CMD, _TAMPER_PATH, _TO_PLUGINS, _VENDOR, _WIPE,
                             _WRITES, ALLOW_FILE, SEVERITY, _direct, _downloads_then_runs, _inner_cmds, _rules_file)
 from .risk_shell import (_LOOK_ONLY, _NAMES_ONLY, _RUNS_BODY, _moves_out, _no_prose, doc_bodies_out, _outside, _parts, _quoted_secret,
@@ -91,6 +94,45 @@ from .risk_patterns import (_COMMIT, _RULES_NAME, NEVER, WATCH, _norm, mark_comm
                             code_text, prints_key, real_key, tamper_write)
 
 
+_PRINTS_PATHS = re.compile(r"\s*(?:echo|printf|Write-Output|Write-Host|ls|dir|Get-ChildItem|gci|find|"
+                           r"Resolve-Path)\b", re.I)    # what it prints is a path: a pipe can hand it to a writer
+# pnpx is `pnpm dlx`: it always downloads, so only npx and bunx (which run node_modules/.bin first) are here
+_NPX_RUN = re.compile(r"^\s*(?:&\s*)?(?:npx|bunx)(?:\.cmd|\.exe)?\s+([a-z0-9][\w.\-]*)(?=\s|$)", re.I)
+# a part that starts a command from text or runs a package the install check does not see: xargs npx,
+# eval "npm i x", sh -c "...". npm run build, uv run pytest, ./test.sh are ordinary steps
+_MAY_INSTALL = re.compile(r"^\s*(?:&\s*)?(?:sudo\s+)?(?:pnpx|uvx|pipx\s+run|eval|xargs|iex|Invoke-Expression|"
+                          r"(?:ba|z|da)?sh\s+-\w*c|cmd(?:\.exe)?\s+/[ck]|(?:pwsh|powershell)(?:\.exe)?\s+-c)\b", re.I)
+
+
+def _local_npx(run: str, cwd: str, raw: str = "") -> bool:
+    """True when every install-like part is `npx <tool>` and the folder it runs in (after any `cd`) has
+    node_modules/.bin/<tool>: the project's own tool, nothing fetched (owner yes 2026-11-24). A version
+    (tsc@5), a flag before the name (-y, -p) or a tool not there still counts as fetching. Any other part that
+    names an installer or runs a command from text (xargs, eval) keeps the question."""
+    from .guard_reads import _CD_UNSURE, _from, _split_cmd, cd_target
+    if _CD_UNSURE.search(raw or run):
+        return False                          # cd sub | true; npx x: npx runs in the first folder (raw: the | is kept)
+    here = ""
+    for p in _split_cmd(run):
+        if (to := cd_target(p)) is None:
+            return False
+        if to:
+            here = _from(here, to)
+            continue
+        m = _NPX_RUN.match(p)
+        if not m:
+            if _INSTALL.search(p) or _MAY_INSTALL.search(p):
+                return False
+            continue
+        if re.search(r"&|\$\(|`|[<>]\(", p[m.end():]) or _INSTALL.search(p[m.end():]):
+            return False                      # npx tsc & npm i x, $(npm i x): an install hides in the same part
+        base = here if here and (os.path.isabs(here) or here[:1] in "\\/~") else os.path.join(cwd or ".", here)
+        bin_dir = os.path.join(os.path.expanduser(base), "node_modules", ".bin")
+        if not any(os.path.isfile(os.path.join(bin_dir, m.group(1) + ext)) for ext in ("", ".cmd", ".exe")):
+            return False
+    return True
+
+
 def watch_marks(a, cwd: str) -> list[str]:
     """The watch-list marks of one step (see the module notes)."""
     out = []
@@ -98,14 +140,15 @@ def watch_marks(a, cwd: str) -> list[str]:
     if a.kind == "command":
         full = risk_bypass.fold(full)                                     # '.' + 'env' is '.env'
     t = _unquote(_shell_part(full)) if a.kind == "command" else full
-    if a.kind == "command" and (inner := _inner_cmds(_shell_part(full))):
+    ticks = "powershell" not in tool                  # in PowerShell a backtick escapes a letter, it runs nothing
+    if a.kind == "command" and (inner := _inner_cmds(_shell_part(full), ticks=ticks)):
         t += "".join("\n" + _unquote(_shell_part(i)) for i in inner)      # bash -c "...": the inner command, on its own line
     if a.kind == "command":
         t = risk_bypass.expand(t, cwd)                                    # cat .e*, cat $(ls -a | grep en): the file named
     script = a.kind == "command" and bool(_INLINE.search(full) and _RUNS_BODY.search(t))
     by_script = risk_bypass.script_marks(full) if script else []
     # the steps it takes, search words left out
-    run = _without_searches(_shell_part(full), [_shell_part(i) for i in _inner_cmds(_shell_part(full))]) if a.kind == "command" else t
+    run = _without_searches(_shell_part(full), [_shell_part(i) for i in _inner_cmds(_shell_part(full), ticks=ticks)]) if a.kind == "command" else t
     if a.kind in ("edit", "write") and any(_outside(p, cwd) for p in full.splitlines()):
         out.append("outside_project")
     from .guard_scan import own_app_tool
@@ -132,8 +175,10 @@ def watch_marks(a, cwd: str) -> list[str]:
         out.append("deletes")
     if a.kind == "command" and _PUSH.search(run):
         out.append("git_push")
-    if a.kind == "command" and _INSTALL.search(run):
+    if a.kind == "command" and _INSTALL.search(run) and not _local_npx(run, cwd, _shell_part(full)):
         out.append("installs")
+    if a.kind == "command" and (_SSH_FWD_OPT.search(_shell_part(full)) or _NC_SHELL.search(_no_prose(_shell_part(full)))):
+        out.append("remote_access")
     if (a.kind in ("edit", "write") and any(_GUARD.search(p.strip()) or _MEMORY.search(p.strip()) or _rules_file(p.strip(), cwd)
                                             for p in full.splitlines())) or \
             (a.kind == "command" and (_GUARD_IN_CMD.search(t) or _rules_file(t, cwd)) and _WRITES.search(_QUIET.sub(" ", t))):
@@ -141,7 +186,8 @@ def watch_marks(a, cwd: str) -> list[str]:
     if a.kind == "command":
         for mark, rx, text in (("pipe_to_shell", _PIPE_SHELL, t), ("encoded_command", _ENCODED, full), ("env_dump", _ENV_DUMP, _QUOTED.sub("''", t)),
                                ("force_push", _FORCE, _no_prose(run)), ("persistence", _PERSIST, run), ("security_off", _SEC_OFF, run),
-                               ("wipe", _WIPE, run), ("privilege", _PRIVILEGE, run)):
+                               ("wipe", _WIPE, run), ("privilege", _PRIVILEGE, run), ("remote_access", _REMOTE, _no_prose(run)),
+                               ("open_server", _OPEN_SERVER, _no_prose(run))):
             if rx.search(text) or mark in by_script:
                 out.append(mark)
         if "env_dump" not in out and risk_bypass.env_print(t):
@@ -170,6 +216,34 @@ def watch_marks(a, cwd: str) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def _glob_own(word: str) -> bool:
+    """A path with a wildcard or {a,b} that can stand for the guard's folder or allow file: ~/.session*,
+    ~/.s*/gu?rd, ~/.sessio{n,}cost. The shell's * skips dot folders, so only a piece starting with "." can stand
+    for .sessioncost (cd packages/* is no guard path)."""
+    import fnmatch
+    word = word.strip("'\"")
+    if not re.search(r"[*?\[{]", word):
+        return False
+    words, done = [word], []
+    for _ in range(8):                        # {a,b} pieces, one at a time
+        nxt = []
+        for w in words:
+            m = re.search(r"\{([^{}]*)\}", w)
+            (nxt if m else done).extend([w[:m.start()] + alt + w[m.end():] for alt in m.group(1).split(",")]
+                                        if m else [w])
+        words = nxt
+    for w in done + words:
+        segs = [s for s in re.split(r"[\\/]+", w) if s]
+        for i, s in enumerate(segs):
+            if not s.startswith("."):
+                continue
+            if fnmatch.fnmatch(".sessioncost-allow", s) and i == len(segs) - 1:
+                return True
+            if fnmatch.fnmatch(".sessioncost", s) and (i == len(segs) - 1 or fnmatch.fnmatch("guard", segs[i + 1])):
+                return True
+    return False
+
+
 def _tampers(a, full: str, shell: str) -> bool:
     """A step that would change the guard or the rules you set (see guard_tamper in the module notes)."""
     if a.kind in ("edit", "write"):
@@ -179,14 +253,39 @@ def _tampers(a, full: str, shell: str) -> bool:
         if _TAMPER_CMD.search(_no_prose(full)):
             return True
         bare = _no_prose(shell)
-        parts = _parts(_QUIET.sub(" ", bare))   # each part of a pipe too: cat … | head reads; … | tee <file> writes
+        q = _QUIET.sub(" ", bare)
+        parts = _parts(q)                     # each part of a pipe too: cat … | head reads; … | tee <file> writes
         inside = False                        # after cd into the guard's folder, every later part acts on it
-        for p in parts:
-            if re.match(r"\s*(?:cd|pushd|Set-Location|sl)\b", p, re.I):
-                inside = bool(_OWN_PATH.search(p))
-                continue
-            if (inside or _OWN_PATH.search(p)) and not _READ_ONLY.search(p):
-                return True                   # the guard's folder and your allow file: read them, nothing else
+        names = []                            # $g = "<guard folder>": a later part that uses $g acts on it
+        stack = []                            # pushd remembers where it came from; popd goes back there
+        for seg in re.split(r"&&|\|\||;|\n", q):
+            fed = False                       # echo <guard path> | xargs rm: what a pipe hands on names the guard
+            for p in (x for x in seg.split("|") if x.strip()):
+                uses = any(re.search(rf"\$\{{?{n}\b", p) for n in names)
+                if re.match(r"\s*(?:popd|Pop-Location)\b", p, re.I):
+                    inside = stack.pop() if stack else False
+                    continue
+                if cd := re.match(r"\s*(cd|pushd|Push-Location|Set-Location|sl)\b", p, re.I):
+                    words = [w.strip("'\"") for w in p.split()[1:]
+                             if not re.fullmatch(r"-(?:Path|LiteralPath|P|L|-)", w, re.I)]
+                    to = words[0] if words else ""
+                    if cd.group(1).lower() in ("pushd", "push-location"):
+                        stack.append(inside)
+                    inside = (bool(_OWN_PATH.search(p)) or uses or _glob_own(to) or    # cd $g, cd ~/.session*
+                              (inside and to and not re.match(r"[\\/~$%]|[A-Za-z]:", to)))   # cd .. from it: beside it
+                    continue
+                if (m := _SET_VAR.match(p)) and _OWN_PATH.search(" " + m.group(2)):
+                    names.append(m.group(1))
+                    continue
+                if inside or uses or _OWN_PATH.search(p) or any(_glob_own(w) for w in p.split()[1:]):
+                    if not _READ_ONLY.search(p):
+                        return True           # the guard's folder and your allow file: read them, nothing else
+                    fed = fed or bool(_PRINTS_PATHS.match(p))
+                elif fed and not _READ_ONLY.search(p):
+                    return True
+        if any(re.search(rf"\b(?:export|setx|declare\s+-\w*x|typeset\s+-\w*x)\s+[^;&|\n]*\b{n}\b", q) for n in names) \
+                or (names and re.search(r"\bset\s+(?:-\w*a|-o\s+allexport)\b", q)):
+            return True                       # g=<guard folder>; export g; ./x.sh: a script it starts reads $g
         if _INLINE.search(full) and (_OWN_PATH.search(full.replace("~/", " ~/")) or "SESSIONCOST_GUARD_DIR" in full.upper()):
             return True                       # a script written into the command can do anything with them
         # an installed plugin: running its scripts is how skills work; a write, move or delete aimed at its files is not

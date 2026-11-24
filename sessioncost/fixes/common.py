@@ -15,6 +15,30 @@ def tok(chars: int) -> int:
     return max(0, int(chars) // 4)
 
 
+def changed_after_start(s: Session, paths) -> list[str]:
+    """The files among `paths` last saved after the chat began: the report's numbers are from before that change."""
+    from pathlib import Path
+    if not s.started:
+        return []
+    began = s.started.timestamp()
+    out = []
+    for p in paths:
+        try:
+            if p and Path(p).is_file() and Path(p).stat().st_mtime > began and str(p) not in out:
+                out.append(str(p))
+        except OSError:
+            continue
+    return out
+
+
+def before_change_note(names: list[str]) -> str:
+    """One sentence for a card whose files changed after the chat began."""
+    if not names:
+        return ""
+    return (f" You changed {' and '.join(names)} after this chat began, so these numbers are from before that "
+            "change: a new chat shows the effect.")
+
+
 def helper_name(s: Session, agent: str) -> str:
     """A helper as the report names it: its task ("Vision Co-Founder Reviewer"), else its id."""
     h = next((h for h in s.helpers if h.calls and h.calls[0].agent == agent), None)

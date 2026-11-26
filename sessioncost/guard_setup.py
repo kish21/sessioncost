@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .guard_agents import COPILOT_EVENTS, CURSOR_GATES
 from .guard_auto import reports_on
-from .guard_store import _read, _write, guard_on, home, project_allow_path
+from .guard_store import _read, _write, guard_on, home, offline_on, project_allow_path
 from .names import GUARD_CMD
 
 # ---- turning it on and off ----
@@ -22,15 +22,18 @@ SETTINGS = {"fail-closed": ("fail_closed", "If the guard itself breaks, every st
                            "Only risky steps ask you."),
             # on by default (owner 2026-11-19): config.json has "fresh_check": false only when you switch it off
             "fresh-releases": ("fresh_check", "Installing a package version released in the last few days pauses first. "
-                               "To check, the guard sends the package's name to its registry (pypi.org, "
-                               "registry.npmjs.org), nothing else.",
-                               "Package versions are not looked up: nothing is sent anywhere.")}
+                               "To check, the guard sends public package names to their registry (pypi.org, "
+                               "registry.npmjs.org), nothing else. Private registries and scoped npm packages are skipped.",
+                               "Package versions are not looked up: nothing is sent anywhere."),
+            "offline": ("offline", "Strict offline mode: zero outbound network calls (package release lookups, price "
+                        "updates and self-updates are disabled).",
+                        "Strict offline mode off. (Set SESSIONCOST_OFFLINE=1 to enforce offline mode via environment variable.)")}
 # never allowed by a saved project rule: keys stay out of the chat whatever the rule says
 NO_PROJECT_ALLOW = {"secrets", "key_in_output", "fresh_release", "runaway"}
 def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | None = None) -> str:
     cfg = home() / "config.json"
     keep = {k: v for k, v in _read(cfg, {}).items() if k in ("auto", "fix_auto", "long_chat", "long_chat_hint", "help_shown", "fresh_chat", "budget_usd",
-                                                                  "fresh_check", "fresh_days")}   # reports, fix auto, budgets: your choice stays
+                                                                  "fresh_check", "fresh_days", "offline")}   # reports, fix auto, budgets, offline: your choice stays
     if arg == "allow" and rule:
         from .risks import NEVER, SEVERITY
         mark, pat = rule[0].strip(), rule[1].strip()
@@ -94,7 +97,10 @@ def command(arg: str, cwd: str, strict: bool = False, rule: tuple[str, str] | No
                 "SessionCost auto: off. Reports are built only when you run /sessioncost. `sessioncost auto on` starts it again.")
     c = _read(cfg, {})
     live = len(list(home().glob("*.state.json"))) if home().exists() else 0
-    extra = "".join(f", {n}" for n, (k, *_) in SETTINGS.items() if c.get(k, k == "fresh_check")) + (", reports after each answer" if reports_on() else "")
+    off = offline_on(c)
+    active_settings = [n for n, (k, *_) in SETTINGS.items()
+                       if (off if k == "offline" else (False if k == "fresh_check" and off else c.get(k, k == "fresh_check")))]
+    extra = "".join(f", {n}" for n in active_settings) + (", reports after each answer" if reports_on() else "")
     return f"SessionCost guard: {'on for every chat' if guard_on(c) else 'off'}{extra}; {live} chat(s) guarded now. Logs: {home()}"
 
 
@@ -126,17 +132,24 @@ def _quiet_python() -> Path:
     return quiet if os.name == "nt" and exe.name.lower() == "python.exe" and quiet.is_file() else exe
 
 
-def _launch(event: str, agent: str) -> str:
+def _guard_script() -> Path:
     root = Path(__file__).resolve().parent.parent
     g = root / "guard.py"
+    # From the repo or a plugin: its own guard.py; installed as a package: the package's hook.py, which puts the
+    # package on the path itself.
+    return g if g.is_file() else Path(__file__).resolve().parent / "hook.py"
+
+
+def _launch_bash(event: str, agent: str) -> str:
+    return f'"{_quiet_python().as_posix()}" -S "{_guard_script().as_posix()}" hook {event} {agent}'
+
+
+def _launch(event: str, agent: str) -> str:
     # -S always: the guard needs only Python's own library, and add-ons that load at every Python start are skipped
-    # (2 s per step seen 2026-11-14; 1.4 s per check, twice a step, 2026-11-22). From the repo or a plugin: its own
-    # guard.py; installed as a package: the package's hook.py, which puts the package on the path itself.
-    if not g.is_file():
-        g = Path(__file__).resolve().parent / "hook.py"
+    # (2 s per step seen 2026-11-14; 1.4 s per check, twice a step, 2026-11-22).
     if agent == "claude":       # Claude Code runs hooks in bash, also on Windows: forward slashes, always quoted
-        return f'"{_quiet_python().as_posix()}" -S "{g.as_posix()}" hook {event} claude'
-    run = "-S " + _path_arg(str(g))
+        return _launch_bash(event, "claude")
+    run = "-S " + _path_arg(str(_guard_script()))
     # every agent: python.exe flashes a console window at each step (Copilot's VS Code panel, owner 2026-11-12);
     # bash, cmd.exe and PowerShell (`& exe`) all pass pythonw.exe's input and answer on (checked 2026-11-13)
     quiet = _quiet_python()
@@ -191,13 +204,20 @@ def setup(agent: str) -> str:
     elif agent == "copilot":                  # a file of its own in ~/.copilot/hooks: every other hook file is left alone
         from .readers.copilot import copilot_home
         p = copilot_home() / "hooks" / "sessioncost-guard.json"
-        run = lambda e: {"type": "command", "bash": _launch(e, "copilot"), "powershell": "& " + _launch(e, "copilot"),
-                         "timeoutSec": 15 if e == "session-start" else 10}
+        def run(e: str) -> dict:
+            # VS Code Copilot Chat reads `windows`/`command`/`timeout`; Copilot CLI reads `powershell`/`bash`/`timeoutSec`.
+            # Direct pythonw.exe invocation avoids bash on PATH, flashes no console window, and is unaffected by
+            # PowerShell ExecutionPolicy (no .ps1 script is executed).
+            cmd = _launch(e, "copilot")
+            ps = "& " + cmd
+            secs = 15 if e == "session-start" else 10
+            return {"type": "command", "command": cmd, "windows": ps if cmd.startswith('"') else cmd,
+                    "powershell": ps, "bash": _launch_bash(e, "copilot"), "timeout": secs, "timeoutSec": secs}
         p.parent.mkdir(parents=True, exist_ok=True)
         _write(p, {"version": 1, "hooks": {ev: [run(e)] for ev, e in COPILOT_EVENTS.items()}})
         return (f"SessionCost guard: added as {p} (your other hooks are untouched; delete that file to take it out). "
-                "Restart Copilot CLI. The guard is on when `sessioncost guard on` is set. A check that takes longer "
-                "than 10 s lets the step run (Copilot's rule), so a very slow computer weakens it.")
+                "Restart Copilot (VS Code or Copilot CLI). The guard is on when `sessioncost guard on` is set. A check "
+                "that takes longer than 10 s lets the step run (Copilot's rule), so a very slow computer weakens it.")
     else:
         return "SessionCost guard: setup is for claude, codex, cursor, antigravity or copilot."
     have = _read(p, {}) if p.exists() else {}

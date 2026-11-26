@@ -406,16 +406,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=10, help="list: how many sessions (default 10)")
     ap.add_argument("--port", type=int, default=0, help="serve: the port on this computer (default: a free one)")
     ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
+    ap.add_argument("--to", metavar="VERSION", help="update: pin to a specific release version (e.g. 1.2.8)")
+    ap.add_argument("--offline", action="store_true", help="setup: enable strict offline mode (zero outbound network calls)")
     ap.add_argument("--all", action="store_true", help="version: list every copy on this computer, not only this one")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     ap.add_argument("--live", action="store_true", help=argparse.SUPPRESS)   # the hooks' run after each answer
     args = ap.parse_args(argv)
 
     if args.target in ("setup", "clean"):
-        return cmd_setup() if args.target == "setup" else cmd_clean()
+        return cmd_setup(offline=args.offline) if args.target == "setup" else cmd_clean()
     if args.target == "update":
         from . import update
-        return update.run(dry_run=args.dry_run)
+        return update.run(dry_run=args.dry_run, version=args.to)
     if args.target == "version":
         from . import update
         return update.show_versions(every=args.all)

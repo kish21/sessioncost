@@ -14,18 +14,85 @@ Nothing is read or sent from your sessions; the commands only fetch SessionCost 
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-PUBLIC_ZIP = "https://github.com/kish21/sessioncost/archive/refs/heads/main.zip"   # what the installers use
+PYPI_JSON_URL = "https://pypi.org/pypi/sessioncost/json"
+RELEASE_TAG_URL = "https://github.com/kish21/sessioncost/archive/refs/tags/v{version}.zip"
+RELEASE_WHEEL_URL = "https://github.com/kish21/sessioncost/releases/download/v{version}/sessioncost-{version}-py3-none-any.whl"
+_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc|\.dev|\.post)[0-9]+)?$")
 NPX_HOME = "/.sessioncost/npm/"    # where `npx sessioncost` keeps its own Python environment (npm/bin/sessioncost.js)
 EDITOR_HOME = "/.sessioncost/editor/"   # the editor extension's own copy: made by uv (no pip), updated by the extension
 WINDOWS = sys.platform == "win32"
+
+
+def _fetch(url: str, timeout: float = 10.0) -> bytes:
+    from .guard_store import offline_on
+    if offline_on():
+        raise RuntimeError("SessionCost offline mode is on: outbound network calls are disabled")
+    req = urllib.request.Request(url, headers={"User-Agent": "sessioncost-update"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:      # noqa: S310 - fixed https release metadata URL
+        return r.read(2 * 1024 * 1024)
+
+
+FETCH = _fetch                 # tests plug in a fake response here
+
+
+def normalize_version(version: str) -> str:
+    """Validate and normalize a pinned release version (strips leading 'v'). Rejects mutable refs like 'main'."""
+    v = (version or "").strip()
+    if v.startswith(("v", "V")):
+        v = v[1:]
+    if not _VERSION_RE.fullmatch(v):
+        raise ValueError(f"invalid release version: {version!r} (expected a pinned version like 1.2.8)")
+    return v
+
+
+def pinned_spec(version: str) -> str:
+    """Pinned PyPI requirement specifier (e.g. 'sessioncost==1.2.8')."""
+    return f"sessioncost=={normalize_version(version)}"
+
+
+def pinned_tag_url(version: str) -> str:
+    """Immutable tagged GitHub Release archive URL."""
+    return RELEASE_TAG_URL.format(version=normalize_version(version))
+
+
+def pinned_wheel_url(version: str) -> str:
+    """Immutable tagged GitHub Release wheel URL."""
+    return RELEASE_WHEEL_URL.format(version=normalize_version(version))
+
+
+def verify_sha256(path: Path, expected_sha256: str) -> bool:
+    """Verify a downloaded release archive or wheel against a hex SHA-256 digest."""
+    want = (expected_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", want):
+        return False
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return hmac.compare_digest(h.hexdigest(), want)
+
+
+def resolve_latest_version(timeout: float = 10.0) -> str | None:
+    """Resolve the latest published SessionCost version from PyPI. Returns None in offline mode or on error."""
+    from .guard_store import offline_on
+    if offline_on():
+        return None
+    try:
+        data = json.loads(FETCH(PYPI_JSON_URL, timeout).decode("utf-8", "replace"))
+        return normalize_version(str((data.get("info") or {}).get("version") or ""))
+    except Exception:
+        return None
 
 
 @dataclass
@@ -52,27 +119,33 @@ def _plugin_keys(home: Path) -> list[str]:
 
 
 def plan(home: Path | None = None, exe: str | None = None, here: Path | None = None, which=shutil.which,
-         windows: bool = WINDOWS, launcher: str | None = None) -> list[Step]:
+         windows: bool = WINDOWS, launcher: str | None = None, version: str | None = None,
+         resolve: bool = False) -> list[Step]:
     """The steps for this computer. `exe` is the Python running SessionCost, `here` this package's folder,
-    `launcher` the program the user started (sys.argv[0])."""
+    `launcher` the program the user started (sys.argv[0]), `version` an explicit pinned release version."""
+    from . import __version__
     home = home or Path.home()
     exe = exe or sys.executable
     here_s = (here or Path(__file__).resolve().parent).as_posix().lower()
     started = Path(launcher if launcher is not None else sys.argv[0]).name.lower()
+    pin = normalize_version(version) if version else (resolve_latest_version() if resolve else None)
     steps: list[Step] = []
     in_plugin = "/plugins/cache/" in here_s                    # this run is a plugin's own bundled copy
     if not in_plugin:
         if NPX_HOME in Path(exe).as_posix().lower():          # npx's own environment: npx installs the new one
-            steps.append(Step("Update SessionCost (run with npx): run `npx sessioncost@latest` once"))
+            npx_pkg = f"sessioncost@{pin}" if pin else "sessioncost@latest"
+            steps.append(Step(f"Update SessionCost (run with npx): run `npx {npx_pkg}` once"))
         elif EDITOR_HOME in Path(exe).as_posix().lower():     # the extension installs the matching one when it updates
             steps.append(Step("SessionCost in your editor updates by itself when the SessionCost extension updates"))
         elif "/uv/tools/sessioncost/" in Path(exe).as_posix().lower() and which("uv"):
+            target = pinned_tag_url(pin or __version__)
             steps.append(Step("Update SessionCost (installed with the install line)",
                               [which("uv"), "pip", "install", "--quiet", "--python", exe, "--reinstall-package",
-                               "sessioncost", PUBLIC_ZIP]))
+                               "sessioncost", target]))
         else:
+            pip_args = [pinned_spec(pin)] if pin else ["-U", "sessioncost"]
             steps.append(Step("Update SessionCost (installed with pip)",
-                              [exe, "-m", "pip", "install", "--quiet", "-U", "sessioncost"],
+                              [exe, "-m", "pip", "install", "--quiet", *pip_args],
                               manual_after=windows and started == "sessioncost.exe"))   # pip would replace it
     for key in _plugin_keys(home):
         market = key.split("@", 1)[1]
@@ -219,12 +292,22 @@ def _run_step(st: Step) -> bool:
     return False
 
 
-def run(dry_run: bool = False) -> int:
+def run(dry_run: bool = False, version: str | None = None) -> int:
+    from .guard_store import offline_on
     try:
         sys.stdout.reconfigure(line_buffering=True)   # our step names before each command's own output
     except (AttributeError, ValueError):
         pass
-    steps = plan()
+    if offline_on() and not dry_run:
+        print("SessionCost update: offline mode is on (zero outbound network calls). To update offline, install a "
+              "local wheel or from your internal mirror (e.g. `pip install --no-index --find-links <dir> "
+              "sessioncost==<version>`), then run `sessioncost setup --offline`.")
+        return 1
+    try:
+        steps = plan(version=version, resolve=not offline_on())
+    except ValueError as e:
+        print(f"SessionCost update: {e}")
+        return 2
     failed, later = 0, []          # later: commands the user runs once this SessionCost has closed
     for n, st in enumerate(steps, 1):
         print(f"{n}. {st.what}")
@@ -247,6 +330,8 @@ def run(dry_run: bool = False) -> int:
         print("\n(dry run: nothing was changed)")
         return 0
     for argv in later:
-        print("\nSessionCost cannot replace itself while it runs. Close it, then run:\n   " + " ".join(argv))
+        print("\nSessionCost cannot replace itself while it runs. Close it, then run:\n   " + " ".join(argv) +
+              "\n(If you run that through an agent right after a new release, LiveGuard may pause once for a fresh "
+              "release — confirm it or run the command in your own terminal.)")
     print("\nRestart your agent so it picks up the new version.")
     return 1 if failed else 0

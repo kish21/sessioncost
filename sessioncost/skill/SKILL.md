@@ -96,7 +96,10 @@ how to do one of these, give the words to say first and the command in brackets.
 - An "Old reports: ..." line: show it as printed and ask nothing. Only when the user asks to delete or clean old
   reports ("delete my old reports", or "/sessioncost clean"), run `{{RUN}} clean` and show the line it prints.
 - Only when the user asks to update SessionCost ("update SessionCost", or "/sessioncost update"), run
-  `{{RUN}} update`, show its output as printed, then tell the user to restart the agent.
+  `{{RUN}} update`, show its output as printed, then tell the user to restart the agent. Never re-run the `irm | iex`
+  or `curl | sh` installer to update (LiveGuard blocks piped shell scripts). If updating via `pip install -U sessioncost`
+  right after a new release while LiveGuard is on, LiveGuard may pause once for a fresh release (`fresh_release`) — that
+  is expected; the user can confirm it or run the command in their own terminal.
 - When the user asks to remove or uninstall SessionCost: never run it yourself (it asks a question only a person can
   answer in a terminal). Tell them to type `{{RUN}} uninstall` in a terminal (PowerShell, Terminal), not in the
   chat. It shows what it takes out, keeps a backup, and lists what only they can remove.

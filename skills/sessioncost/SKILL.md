@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost 1.2.8) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
+description: (SessionCost 1.2.9) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -104,7 +104,10 @@ how to do one of these, give the words to say first and the command in brackets.
   reports ("delete my old reports", or "/sessioncost clean"), run `<run> clean` and show the line it
   prints.
 - Only when the user asks to update SessionCost ("update SessionCost", or "/sessioncost update"), run
-  `<run> update`, show its output as printed, then tell the user to restart the agent.
+  `<run> update`, show its output as printed, then tell the user to restart the agent. Never re-run the `irm | iex`
+  or `curl | sh` installer to update (LiveGuard blocks piped shell scripts). If updating via `pip install -U sessioncost`
+  right after a new release while LiveGuard is on, LiveGuard may pause once for a fresh release (`fresh_release`) — that
+  is expected; the user can confirm it or run the command in their own terminal.
 - When the user asks to remove or uninstall SessionCost: never run it yourself (it asks a question only a person can
   answer in a terminal). Tell them to type this in a terminal (PowerShell, Terminal), not in the chat, with the real
   folder: Windows `& "<folder>\run.cmd" uninstall`, Mac or Linux `sh "<folder>/run.sh" uninstall`. It shows what it

@@ -17,17 +17,43 @@ from the size of the text.
 
 ## Install
 
-One line adds `/sessioncost` to every agent on your computer: **Claude Code, Codex, Cursor, Antigravity and GitHub Copilot**. It needs
-neither Python nor Git. Open a terminal, paste the line for your computer, and press Enter:
+Adds `/sessioncost` and `/liveguard` to every agent on your computer: **Claude Code, Codex, Cursor, Antigravity and GitHub Copilot**.
 
-| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/main/install.ps1 \| iex` |
+### Standard package-manager install (recommended, corporate / InfoSec-friendly)
+
+Install a pinned release directly from PyPI — no `irm | iex`, no `curl | sh`, no `ExecutionPolicy Bypass`, and no unpinned branch archives:
+
+```sh
+# With pip (any OS with Python 3.10+)
+python -m pip install sessioncost==1.2.9
+python -m sessioncost setup
+
+# With uv
+uv tool install sessioncost==1.2.9
+sessioncost setup
+```
+
+**Zero-network / corporate environments:** pass `--offline` to `setup` (or set `SESSIONCOST_OFFLINE=1`) to guarantee **zero outbound network calls** at runtime:
+
+```sh
+python -m pip install sessioncost==1.2.9
+python -m sessioncost setup --offline
+```
+
+### Quick-install script
+
+If you prefer a one-line installer (installs the pinned PyPI release using `uv` or `python3` without `ExecutionPolicy Bypass`):
+
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/v1.2.9/install.ps1 \| iex` |
 |---|---|
-| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/main/install.sh \| sh` |
+| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/v1.2.9/install.sh \| sh` |
 
 It ends with `/sessioncost added` for each agent it found. Then restart your agent.
 
-Prefer PyPI (`python -m pip install -U sessioncost`, then `python -m sessioncost setup`), npm (`npx sessioncost`,
-then `npx sessioncost setup`) or your agent's plugin list
+Already installed? Update with **`/sessioncost update`** in a chat or **`sessioncost update`** (or `sessioncost update --to <version>`) in a terminal — do not
+re-run the install line above (LiveGuard blocks `irm | iex` / `curl | sh`).
+
+Prefer npm (`npx sessioncost`, then `npx sessioncost setup`) or your agent's plugin list
 (Claude Code: `claude plugin install sessioncost --marketplace kish21/sessioncost --scope user`; `--scope user` =
 every folder, not one)? Every way, step by step:
 **[Install SessionCost](https://kish21.github.io/sessioncost-help/start/install/)**.
@@ -76,11 +102,15 @@ Terminal commands, report options and the guard's settings:
 
 - Reads your agent's log on your computer. No AI model is called.
 - Nothing is sent anywhere: the report is one file on your computer.
-- One exception, in the guard: when the agent installs a package, the guard sends that package's name to its registry
-  (pypi.org or registry.npmjs.org) to check how new that version is. Nothing else. To stop it:
-  `sessioncost guard fresh-releases off`.
+- **Strict offline mode (zero outbound network calls):** run `sessioncost setup --offline`, `sessioncost guard offline on`,
+  or set `SESSIONCOST_OFFLINE=1`. This guarantees zero outbound network requests across the live guard, price updates,
+  and self-updates.
+- Without offline mode, the one outbound check is in the guard: when the agent installs a public package, the guard
+  checks its release age on `pypi.org` or `registry.npmjs.org` (nothing else). Installs using private/custom registries
+  (`--index-url`, `--registry`, etc.) and scoped npm packages (`@org/pkg`) are skipped automatically so internal package
+  names are never sent to public registries. To disable release-age lookups alone: `sessioncost guard fresh-releases off`.
 
-More: **[Privacy and security](https://kish21.github.io/sessioncost-help/reference/privacy/)**.
+More: **[SECURITY.md](SECURITY.md)** (local file & network access summary) · **[Threat model](docs/security/THREAT-MODEL.md)** · **[Privacy and security](https://kish21.github.io/sessioncost-help/reference/privacy/)**.
 
 ## More
 

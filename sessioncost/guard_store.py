@@ -39,6 +39,19 @@ def guard_on(cfg: dict) -> bool:
     return cfg.get("on", True) is not False
 
 
+def offline_on(cfg: dict | None = None) -> bool:
+    """True when strict offline mode is on (SESSIONCOST_OFFLINE=1 or config.json "offline": true).
+    Guarantees zero outbound network calls across the guard, price updates and self-updates."""
+    env = (os.environ.get("SESSIONCOST_OFFLINE") or "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    if cfg is None:
+        cfg = _read(home() / "config.json", {})
+    return bool(cfg.get("offline"))
+
+
 def fix_auto_on(cfg: dict) -> bool:
     """The to-do list after each answer is on unless you turned it off."""
     return cfg.get("fix_auto", True) is not False

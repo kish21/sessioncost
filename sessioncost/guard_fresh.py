@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -27,18 +28,64 @@ TIMEOUT, DEADLINE, MAX_PKGS = 4.0, 8.0, 5
 KEEP_S, DOWN_S = 6 * 3600, 10 * 60
 MAX_BYTES = 12 * 1024 * 1024
 URLS = {"py": "https://pypi.org/rss/project/{}/releases.xml", "js": "https://registry.npmjs.org/{}"}
+_PUBLIC_HOSTS = {
+    "py": {"pypi.org", "www.pypi.org", "files.pythonhosted.org"},
+    "js": {"registry.npmjs.org", "registry.yarnpkg.com"},
+}
+_CUSTOM_INDEX_FLAGS = {"-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--registry"}
+_CUSTOM_INDEX_ENV = {
+    "py": ("PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_EXTRA_INDEX_URL"),
+    "js": ("NPM_CONFIG_REGISTRY", "npm_config_registry"),
+}
 
 _PY = re.compile(r"^\s*(?:(?:python3?|py)(?:\.exe)?\s+-m\s+pip3?|pip3?(?:\.exe)?|uv\s+pip|pipx)\s+install\s+(.*)$|"
                  r"^\s*(?:uv|poetry)\s+add\s+(.*)$", re.I)
 _JS = re.compile(r"^\s*(?:npm|pnpm|bun)(?:\.cmd)?\s+(?:i|install|add)\s+(.*)$|^\s*yarn\s+(?:global\s+)?add\s+(.*)$", re.I)
 _TAKES_VALUE = {"-r", "--requirement", "-c", "--constraint", "-e", "--editable", "-i", "--index-url", "--extra-index-url",
-                "-f", "--find-links", "-t", "--target", "--prefix", "--root", "--group", "--registry", "--tag", "--python"}
+                "-f", "--find-links", "-t", "--target", "--prefix", "--root", "--group", "--registry", "--tag", "--python",
+                "--reinstall-package"}
 _PY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _JS_NAME = re.compile(r"^(?:@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*$")
 _PRE = re.compile(r"(?:a|b|rc|alpha|beta|dev|pre|c)\d*$|\.dev|\.post", re.I)
 
 
+def _is_public_registry(eco: str, url: str) -> bool:
+    """True only when `url` points at the standard public registry for `eco`."""
+    host = (urllib.parse.urlparse((url or "").strip()).hostname or "").lower()
+    return bool(host) and host in _PUBLIC_HOSTS.get(eco, set())
+
+
+def _env_private_registry(eco: str) -> bool:
+    """True when an ecosystem index/registry env var is configured to a non-public host."""
+    for var in _CUSTOM_INDEX_ENV.get(eco, ()):
+        val = (os.environ.get(var) or "").strip()
+        if val and not _is_public_registry(eco, val):
+            return True
+    return False
+
+
+def _cmd_private_registry(eco: str, words: list[str]) -> bool:
+    """True when the install command specifies a non-public index/registry or local find-links."""
+    it = iter(words)
+    for raw in it:
+        w = raw.strip("'\"")
+        if w in _CUSTOM_INDEX_FLAGS:
+            val = next(it, "").strip("'\"")
+            if w in ("-f", "--find-links") or (val and not _is_public_registry(eco, val)):
+                return True
+            continue
+        if "=" in w:
+            flag, _, val = w.partition("=")
+            if flag in _CUSTOM_INDEX_FLAGS:
+                if flag in ("-f", "--find-links") or (val and not _is_public_registry(eco, val)):
+                    return True
+    return False
+
+
 def _fetch(url: str, timeout: float) -> bytes:
+    from .guard_store import offline_on
+    if offline_on():
+        raise RuntimeError("SessionCost offline mode is on: outbound network calls are disabled")
     req = urllib.request.Request(url, headers={"User-Agent": "sessioncost-guard", "Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=timeout) as r:      # noqa: S310 - fixed https registry addresses
         body = r.read(MAX_BYTES + 1)
@@ -51,7 +98,9 @@ FETCH = _fetch                 # tests put a fake registry here
 
 
 def named(cmd: str) -> list[tuple[str, str, str]]:
-    """(ecosystem, name, pinned version or '') for each package an install command names from a registry."""
+    """(ecosystem, name, pinned version or '') for each public package an install command names from a registry.
+    Skips commands targeting non-public/internal registries and scoped npm packages (@org/pkg) so private package
+    names are never sent to public registries."""
     from .risks import _parts, _shell_part, _unquote
     out = []
     for part in _parts(_unquote(_shell_part(cmd or ""))):
@@ -61,8 +110,11 @@ def named(cmd: str) -> list[tuple[str, str, str]]:
             m = rx.match(part)
             if not m:
                 continue
+            words = (m.group(1) or m.group(2) or "").split()
+            if _env_private_registry(eco) or _cmd_private_registry(eco, words):
+                continue
             skip = False
-            for w in (m.group(1) or m.group(2) or "").split():
+            for w in words:
                 w = w.strip("'\"")
                 if skip or w.startswith("-"):
                     skip = not skip and w in _TAKES_VALUE
@@ -83,9 +135,10 @@ def _py_pkg(w: str) -> tuple[str, str] | None:
 
 
 def _js_pkg(w: str) -> tuple[str, str] | None:
-    scoped = w.startswith("@")
-    name, _, spec = (w[1:].partition("@") if scoped else w.partition("@"))
-    name = ("@" + name if scoped else name).lower()
+    if w.startswith("@"):
+        return None                           # scoped packages (@org/pkg) are often internal: never leak to public npmjs
+    name, _, spec = w.partition("@")
+    name = name.lower()
     if not _JS_NAME.match(name):
         return None
     return name, spec if re.fullmatch(r"\d+\.\d+\.\d+(?:-[\w.]+)?", spec or "") else ""
@@ -123,6 +176,9 @@ def _js_times(body: bytes) -> tuple[str, dict]:
 def released(eco: str, name: str, pin: str, cache: dict, timeout: float) -> tuple[str, float | None] | None:
     """(version, release time or None when older than the feed shows) for the version an install gets; None when
     the registry could not tell (unreachable, slow, or an answer it could not read)."""
+    from .guard_store import offline_on
+    if offline_on():
+        return None
     key, now = f"{eco}:{name}", time.time()
     hit = cache.get(key)
     if not hit or now - hit.get("at", 0) > (KEEP_S if hit.get("latest") is not None else DOWN_S):
@@ -142,7 +198,9 @@ def released(eco: str, name: str, pin: str, cache: dict, timeout: float) -> tupl
 def fresh(cmd: str, days: float = DAYS) -> tuple[list[str], list[str]]:
     """(the versions released less than `days` ago, as "name version (N hours ago)"; the packages it could not
     check). Fails open: what it could not check never pauses the install."""
-    from .guard_store import _read, _write, home
+    from .guard_store import _read, _write, home, offline_on
+    if offline_on():
+        return [], []
     pkgs = named(cmd)
     if not pkgs:
         return [], []
@@ -167,11 +225,13 @@ def fresh(cmd: str, days: float = DAYS) -> tuple[list[str], list[str]]:
 
 
 def check_on() -> tuple[bool, float]:
-    """(on, days) from the guard's config.json: on unless the user switched it off."""
-    from .guard_store import _read, home
+    """(on, days) from the guard's config.json: on unless offline mode is on or the user switched it off."""
+    from .guard_store import _read, home, offline_on
     c = _read(home() / "config.json", {})
     try:
         days = float(c.get("fresh_days", DAYS))
     except (TypeError, ValueError):
         days = DAYS
+    if offline_on(c):
+        return False, days
     return c.get("fresh_check", True) is not False, days

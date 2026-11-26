@@ -119,6 +119,11 @@ def cmd_team(argv: list[str]) -> int:
 
 
 def cmd_update() -> int:
+    from .guard_store import offline_on
+    if offline_on():
+        print("SessionCost prices: offline mode is on (zero outbound network calls). Nothing fetched; use "
+              "`sessioncost prices import <file>` or `sessioncost prices team <file>` to update prices offline.")
+        return 1
     now = P.the_list()
     try:
         with urllib.request.urlopen(UPDATE_URL, timeout=TIMEOUT) as r:

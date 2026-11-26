@@ -20,11 +20,13 @@ def _plural(n: int, word: str) -> str:
 
 def guard_line(g: dict | None = None, in_chat: bool = True) -> str:
     """g: this chat's guard summary (analyse's a["guard"]), None when no step of it was checked."""
-    from .guard_store import _read, guard_on, home
+    from .guard_store import _read, guard_on, home, offline_on
     cfg = _read(home() / "config.json", {})
     if not guard_on(cfg):
         return 'Guard: off; steps are not checked. Say "turn the guard on" (or type `sessioncost guard on`)'
-    line = f"Guard: on{' (strict)' if cfg.get('strict') else ''} for every chat"
+    modes = [m for m, on in (("strict", cfg.get("strict")), ("offline", offline_on(cfg))) if on]
+    tag = f" ({', '.join(modes)})" if modes else ""
+    line = f"Guard: on{tag} for every chat"
     if not in_chat:
         return line
     if not g:

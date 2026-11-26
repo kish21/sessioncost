@@ -106,7 +106,7 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
     return done
 
 
-def cmd_setup() -> int:
+def cmd_setup(offline: bool = False) -> int:
     done = setup()
     if not done:
         print("No Claude Code, Codex, Antigravity, Cursor or GitHub Copilot found for this user; nothing to set up. "
@@ -130,6 +130,9 @@ def cmd_setup() -> int:
     for name in guard.refresh():            # hooks an older version wrote get this version's commands
         if name not in {n for _, n in ready}:
             print(f"{name.capitalize():12} live guard hooks brought up to date")
+    if offline:
+        guard.command("offline-on", "")
+        print("Offline mode on: zero outbound network calls (package release lookups, price updates and self-updates disabled).")
     print(f'\nRestart the agent if it is open, then type /sessioncost in a chat. The live guard is already on: to turn '
           f'it off, say "turn the guard off" (or type /{GUARD_CMD} off).')
     return 0

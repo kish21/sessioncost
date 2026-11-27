@@ -8,8 +8,10 @@ rest; it holds no logic of its own. Read on this computer only; nothing is sent 
     project     the folder asked about
     guard       {"on", "strict", "dir"}: dir is the guard's folder (the extension watches it for changes)
     tips        {"on"}: token tips after each answer
+    setup       {"ok", "detected", "missing", "outdated"}: agent skill/hook setup status across detected agents
     chat        this folder's newest chat, any agent, or null: {"id", "agent", "agent_label", "title", "log",
-                "sent", "usd", "tokens_exact", "guard": {"checked", "blocked", "asked", "intact"} or null,
+                "sent", "usd", "tokens_exact", "context", "context_limit", "context_pct",
+                "guard": {"checked", "blocked", "asked", "intact"} or null,
                 "last_stop": {"ts", "decision", "what", "why"} or null, "last_tip"}
     handover    the handover file to continue from, or null
     watch       files whose change means this answer is out of date (the chat's log, its guard log, the switches)
@@ -52,7 +54,7 @@ def _guard_counts(g: dict | None) -> dict | None:
 def _chat(project: str) -> tuple[dict | None, str]:
     from . import locate, prices, readers
     from .analyse import analyse
-    from .fixer_store import _load, chat_file
+    from .fixer_store import _load, chat_file, long_chat
     found = locate.sessions(project)
     if not found:
         return None, ""
@@ -64,10 +66,15 @@ def _chat(project: str) -> tuple[dict | None, str]:
     meta, t = a["meta"], a["totals"]
     sid = str(meta.get("session_id") or "")
     last = (_load(chat_file(sid), {}).get("last_tip") or {}).get("line") if sid else ""
+    main = [c for c in a.get("calls") or [] if c.get("agent", "main") == "main"]
+    ctx = int(main[-1].get("context") or 0) if main else int(t.get("context_max") or 0)
+    limit = int(long_chat())
+    ctx_pct = min(100, round(ctx * 100 / limit)) if ctx > 0 and limit > 0 else 0
     return {"id": sid, "agent": meta.get("agent", ""), "agent_label": meta.get("agent_label", ""),
             "title": str(meta.get("title") or "")[:120], "log": str(path),
             "sent": int(t.get("sent") or 0), "usd": round(float(t.get("usd") or 0), 4),
             "tokens_exact": bool((a.get("money") or {}).get("tokens_exact", True)),
+            "context": ctx, "context_limit": limit, "context_pct": ctx_pct,
             "guard": _guard_counts(a.get("guard")), "last_stop": _last_stop(sid),
             "last_tip": str(last or "").replace("💡 SessionCost: ", "").strip()}, ""
 
@@ -115,6 +122,7 @@ def _cursor_db() -> list[str]:
 
 
 def answer(project: str) -> dict:
+    from .cli_setup import setup_status
     from .fixer_store import auto_on, find_handover, project_path
     from .guard_store import _read, guard_on, home, log_path
     cfg = _read(home() / "config.json", {})
@@ -123,7 +131,7 @@ def answer(project: str) -> dict:
     h = find_handover(project)
     out = {"schema": SCHEMA, "version": __version__, "project": project,
            "guard": {"on": guard_on(cfg), "strict": bool(guard_on(cfg) and cfg.get("strict")), "dir": str(home())},
-           "tips": {"on": auto_on()}, "chat": chat, "handover": str(h) if h else None,
+           "tips": {"on": auto_on()}, "setup": setup_status(), "chat": chat, "handover": str(h) if h else None,
            # Cursor's database changes whenever Cursor is used: watched only when this folder's chat is Cursor's (its
            # numbers live there) or there is none yet; otherwise the bar's minute timer finds a new Cursor chat
            "watch": list(dict.fromkeys([str(home() / "config.json")]

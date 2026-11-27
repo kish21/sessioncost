@@ -3,6 +3,7 @@ how each agent is found."""
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -61,10 +62,23 @@ def plugin_installed(folder: str, home: Path) -> bool:
     return False
 
 
-def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
+def _has_skill(home: Path, folder: str, sub: str) -> bool:
+    """True when this agent already has a SessionCost skill (/sessioncost, /liveguard, or an older guard name)."""
+    for name in ("sessioncost", GUARD_CMD, *OLD_GUARD_CMDS):
+        p = home / folder / sub / name / "SKILL.md"
+        try:
+            if f"name: {name}" in p.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def setup(home: Path | None = None, only_existing: bool = False) -> list[tuple[str, Path | None]]:
     """Add the /sessioncost and /liveguard skills to every agent installed for this user (/liveguard runs that
-    agent's `guard setup`). Returns (agent, the /sessioncost skill file written), with None for an agent whose
-    SessionCost plugin already provides both."""
+    agent's `guard setup`). When only_existing is True, only refresh agents that already have a SessionCost skill.
+    Returns (agent, the /sessioncost skill file written), with None for an agent whose SessionCost plugin already
+    provides both."""
     home = home or Path.home()
     # The skills name this exact Python, so they run even when no 'python' or 'sessioncost' is on the PATH.
     exe = Path(sys.executable).as_posix()
@@ -77,6 +91,8 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
     done = []
     for agent, folder, sub, guard_name in SKILL_HOMES:
         if not agent_installed(folder, home):
+            continue
+        if only_existing and not _has_skill(home, folder, sub):
             continue
         skills = {"sessioncost": text}
         if guard_name:
@@ -106,7 +122,21 @@ def setup(home: Path | None = None) -> list[tuple[str, Path | None]]:
     return done
 
 
-def cmd_setup(offline: bool = False) -> int:
+def cmd_setup(offline: bool = False, refresh_only: bool = False) -> int:
+    if refresh_only:
+        from . import guard
+        done = setup(only_existing=True)
+        for agent, dest in done:
+            if not dest:
+                print(f"{agent:12} /sessioncost comes from the SessionCost plugin; removed duplicate copy")
+            else:
+                print(f"{agent:12} /sessioncost and /{GUARD_CMD} refreshed to {__version__} ({dest.parent.parent})")
+        refreshed = guard.refresh()
+        for name in refreshed:
+            print(f"{name.capitalize():12} live guard hooks brought up to date")
+        if not done and not refreshed:
+            print("No existing SessionCost agent skills or hooks to refresh.")
+        return 0
     done = setup()
     if not done:
         print("No Claude Code, Codex, Antigravity, Cursor or GitHub Copilot found for this user; nothing to set up. "
@@ -133,6 +163,9 @@ def cmd_setup(offline: bool = False) -> int:
     if offline:
         guard.command("offline-on", "")
         print("Offline mode on: zero outbound network calls (package release lookups, price updates and self-updates disabled).")
+    from .guard_compat import compat_warnings
+    for warn in compat_warnings():
+        print(f"Note: {warn}")
     print(f'\nRestart the agent if it is open, then type /sessioncost in a chat. The live guard is already on: to turn '
           f'it off, say "turn the guard off" (or type /{GUARD_CMD} off).')
     return 0
@@ -160,3 +193,59 @@ def fix_hooks(home: Path | None = None) -> list[str]:
         guard.setup(name)
         out.append(f"{agent:12} hooks added (the guard stays off unless you turn it on); restart {agent}")
     return out
+
+
+_SKILL_VER_RE = re.compile(r"\(SessionCost ([^)]+)\)")
+
+
+def _skill_version(path: Path, name: str) -> str | None:
+    """Version from a SessionCost SKILL.md, '' if it exists without a version tag, or None if missing."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if f"name: {name}" not in text:
+        return None
+    m = _SKILL_VER_RE.search(text)
+    return m.group(1).strip() if m else ""
+
+
+def _has_hooks(agent_key: str, home: Path | None = None) -> bool:
+    """True when this agent's hooks file contains SessionCost guard hooks."""
+    from . import guard_setup
+    try:
+        text = guard_setup._hooks_file(agent_key, home).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "sessioncost" in text.lower() and " hook " in text
+
+
+def setup_status(home: Path | None = None) -> dict:
+    """Report which detected agents are missing SessionCost skills/hooks or have outdated skill versions."""
+    h = home or Path.home()
+    detected: list[str] = []
+    missing: list[str] = []
+    outdated: list[str] = []
+    for agent, folder, sub, guard_name in SKILL_HOMES:
+        if not agent_installed(folder, h):
+            continue
+        detected.append(agent)
+        has_plugin = plugin_installed(folder, h)
+        skills_missing = False
+        skills_outdated = False
+        if not has_plugin:
+            skill_names = ("sessioncost", GUARD_CMD) if guard_name else ("sessioncost",)
+            for name in skill_names:
+                ver = _skill_version(h / folder / sub / name / "SKILL.md", name)
+                if ver is None:
+                    skills_missing = True
+                elif ver != __version__:
+                    skills_outdated = True
+        hooks_missing = False
+        if guard_name and not (guard_name == "claude" and claude_plugin_installed(h)):
+            hooks_missing = not _has_hooks(guard_name, home)
+        if skills_missing or hooks_missing:
+            missing.append(agent)
+        elif skills_outdated:
+            outdated.append(agent)
+    return {"ok": not missing and not outdated, "detected": detected, "missing": missing, "outdated": outdated}

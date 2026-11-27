@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__, locate, prices as pricemod, readers, report, zfile
@@ -104,11 +106,15 @@ def summary(a: dict, path: Path | None) -> str:
 
 KEEP_REPORTS = 20          # one report per chat, ~0.5 MB each: after each report, older ones past the newest 20 go
 GUARD_PAGE = "guard.html"  # the guard report across every chat: rewritten with each report, never an "old report"
+TOTALS_PAGE = "totals.html"
+WEEK_PAGE = "week.html"
+INSIGHTS_PAGE = "insights.html"
+SUMMARY_PAGES = (GUARD_PAGE, TOTALS_PAGE, WEEK_PAGE, INSIGHTS_PAGE)
 
 
 def old_reports(keep: Path | None, folder: Path = REPORTS) -> list[Path]:
     """Every saved report except the one to keep (the current one; by default the newest)."""
-    files = sorted((f for f in folder.glob("*.html") if f.name != GUARD_PAGE), key=lambda f: f.stat().st_mtime,
+    files = sorted((f for f in folder.glob("*.html") if f.name not in SUMMARY_PAGES), key=lambda f: f.stat().st_mtime,
                    reverse=True) if folder.is_dir() else []
     keep = keep or (files[0] if files else None)
     return [f for f in files if keep is None or f.resolve() != keep.resolve()]
@@ -140,7 +146,7 @@ def cmd_clean(folder: Path = REPORTS) -> int:
     freed = sum(f.stat().st_size for f in old)
     for f in old:
         f.unlink()
-    kept = sorted(f for f in folder.glob("*.html") if f.name != GUARD_PAGE)
+    kept = sorted(f for f in folder.glob("*.html") if f.name not in SUMMARY_PAGES)
     print(f"Deleted {plural(len(old), 'older report')} ({size(freed)})." +
           (f" Kept the latest: {kept[0]}" if kept else ""))
     return 0
@@ -185,7 +191,9 @@ def build(path, args) -> tuple[dict, Path | None]:
             used = cursor.apply_usage_csv(s, cursor.read_usage_csv(args.cursor_usage))
             note(args, f"sessioncost: {used} requests from the usage export matched this chat" if used else
                  "sessioncost: no row of the usage export falls inside this chat's turns (check the export's dates)")
-    a = analyse(s, pricemod.load(args.prices), subscription=args.subscription)
+    a = analyse(s, pricemod.load(args.prices, provider=getattr(args, "provider", "") or "",
+                                 tier=getattr(args, "tier", "") or "", region=getattr(args, "region", "") or ""),
+                subscription=args.subscription)
     from . import fixer, guard
     a["guard_all"] = guard_totals(s.cwd)
     project = getattr(args, "project", None) or s.cwd
@@ -204,8 +212,10 @@ def build(path, args) -> tuple[dict, Path | None]:
     out = None
     if not args.json and not (getattr(args, "live", False) and not guard.reports_on()):
         REPORTS.mkdir(parents=True, exist_ok=True)
-        out = REPORTS / f"{s.session_id}.html"
-        out.write_text(report.render(a), encoding="utf-8", errors="replace")   # an old guard log's broken character: '?'
+        out = REPORTS / f"{_safe_report_name(s.session_id)}.html"
+        if out.resolve().parent != REPORTS.resolve() or out.is_symlink():
+            raise ValueError(f"Refusing unsafe report path: {out}")
+        _atomic_write_text(out, report.render(a))   # an old guard log's broken character: '?'
         a["reports_trimmed"] = trim_reports(out, out.parent)
         if a["guard_all"]:                 # the report's "Open the full guard report" opens this page, next to it
             try:
@@ -214,6 +224,30 @@ def build(path, args) -> tuple[dict, Path | None]:
             except OSError:
                 pass
     return a, out
+
+
+def _safe_report_name(session_id: str) -> str:
+    """Sanitize a session id to a single safe filename stem (no path traversal or drive letters)."""
+    clean = re.sub(r"[^A-Za-z0-9._-]", "_", str(session_id or "")).lstrip(".")
+    return clean[:120] or "session"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically via a sibling temp file + os.replace, refusing symlinks."""
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink: {path}")
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def guard_totals(cwd: str | None) -> dict | None:
@@ -315,6 +349,9 @@ def cmd_fix(argv: list[str]) -> int:
     ap.add_argument("--undo", action="store_true", help="put back this project's newest fix")
     ap.add_argument("--handover", action="store_true", help="print where the handover of this project's last chat is")
     ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
+    ap.add_argument("--provider", help="cloud provider pricing: direct, bedrock, vertex, azure")
+    ap.add_argument("--tier", help="service tier pricing: standard, batch, priority, flex, fast")
+    ap.add_argument("--region", help="region / data-residency pricing: global, us, eu, regional, or cloud region")
     args = ap.parse_args(argv)
     project = fixer.project_path(args.project or os.getcwd())     # as given: the key itself follows links
     if args.handover:
@@ -331,7 +368,9 @@ def cmd_fix(argv: list[str]) -> int:
     if path is None:
         return 1
     try:
-        a = analyse(readers.read(path), pricemod.load(args.prices))
+        a = analyse(readers.read(path), pricemod.load(args.prices, provider=getattr(args, "provider", "") or "",
+                                                      tier=getattr(args, "tier", "") or "",
+                                                      region=getattr(args, "region", "") or ""))
     except (readers.NotSupported, ValueError, OSError) as e:
         print(f"sessioncost fix: could not read that chat: {e}")
         return 2
@@ -363,6 +402,54 @@ def newest_agent(project) -> str:
         return ""
 
 
+def cmd_status(argv: list[str] | None = None) -> int:
+    """`sessioncost status`: guard state, token tips, number exactness, cache warmth, and compatibility warnings."""
+    from . import status as statusmod
+    from .guard_compat import compat_warnings
+
+    ap = argparse.ArgumentParser(
+        prog="sessioncost status",
+        description="Show guard state, token tips, number exactness, cache warmth, and agent compatibility warnings.",
+    )
+    ap.add_argument("target", nargs="?", default="last",
+                    help="'last' (newest chat of this project, the default), a session id, or a log file")
+    ap.add_argument("--project", help="project folder (default: the current folder)")
+    ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
+    ap.add_argument("--provider", help="cloud provider pricing: direct, bedrock, vertex, azure")
+    ap.add_argument("--tier", help="service tier pricing: standard, batch, priority, flex, fast")
+    ap.add_argument("--region", help="region / data-residency pricing: global, us, eu, regional, or cloud region")
+    ap.add_argument("--subscription", action="store_true", help="label money as API-equivalent")
+    try:
+        args = ap.parse_args(list(argv or []))
+    except SystemExit as e:
+        return int(e.code or 2)
+    args.cursor_usage = None
+    args.json = True
+    args.live = False
+    args.no_open = True
+    args.brief = False
+    args.sarif = None
+    project = args.project or os.getcwd()
+    import contextlib, io
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        path = find_session(args)
+        a = None
+        if path is not None and path.is_file():
+            try:
+                a, _ = build(path, args)
+            except (readers.NotSupported, ValueError, OSError):
+                a = None
+    if a is not None:
+        print(statusmod.block(a, a.get("fix_project") or project))
+        return 0
+    lines = [statusmod.guard_line(in_chat=False), statusmod.tips_line()]
+    for warn in compat_warnings():
+        lines.append(f"Warning: {warn}")
+    lines.append("Chat: no recorded chat found for this project yet.")
+    print("\n".join([statusmod.HEAD, *("  " + x for x in lines)]))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -385,12 +472,26 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] in (["editor"], ["uninstall"]):   # the editor extension's status bar (editor.py); removing it (uninstall.py)
         from . import editor, uninstall
         return (editor if argv[0] == "editor" else uninstall).main(argv[1:])
+    if argv[:1] == ["mcp"]:         # local-only stdio MCP server (`sessioncost mcp` / `sessioncost mcp config`)
+        from . import mcp_server
+        return mcp_server.main(argv[1:])
+    if argv[:1] == ["totals"]:      # totals across every chat by project, team, agent, model, week + budgets + CSV
+        from . import totals
+        return totals.main(argv[1:])
+    if argv[:1] == ["week"]:        # weekly summary across all chats: top 3 wastes, fixes, week-over-week trend
+        from . import week
+        return week.main(argv[1:])
+    if argv[:1] == ["insights"]:    # insights across all sessions & agents: Summary, Projects, Agents, Waste, Safety, Recommendations, Trend
+        from . import insights
+        return insights.main(argv[1:])
+    if argv[:1] == ["status"]:      # guard state, token tips, number exactness, cache warmth, compat warnings
+        return cmd_status(argv[1:])
     ap = argparse.ArgumentParser(
         prog="sessioncost",
         description="See where every token of your agent session went, turn by turn, and what to fix. "
                     "Local: reads log files on this computer and sends nothing anywhere.")
     ap.add_argument("target", nargs="?", default="last",
-                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'fix' (this project's token waste and the change for each, applied on your yes with a backup; `sessioncost fix --undo` puts it back; `sessioncost fix auto on|off`: the list after each answer, in the chat), 'list', 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'uninstall' (take SessionCost out of every agent, with a backup; asks first), 'prices' (the prices used, where each came from and its date; `sessioncost prices set|import|team|update`), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
+                    help="'last' (newest Claude Code, Codex, Copilot CLI, Antigravity or Cursor session of this project, the default), 'fix' (this project's token waste and the change for each, applied on your yes with a backup; `sessioncost fix --undo` puts it back; `sessioncost fix auto on|off`: the list after each answer, in the chat), 'list', 'totals' (totals across every project, team, agent, model and week, with budgets and CSV/JSON/HTML export), 'week' (weekly summary across all chats and projects: top 3 wastes, what they cost, the fix for each, and comparison with last week), 'insights' (cross-agent insights page across all sessions: Summary, Projects, Agents, Waste, Safety, Recommendations, and Trend), 'serve' (a live report page on this computer only, with a Refresh button; Ctrl+C stops it), 'mcp' (local-only stdio MCP server for agents; `sessioncost mcp config` prints its config snippet), 'setup' (add /sessioncost to your agents), 'clean' (delete all saved reports but the latest), 'update' (update every copy of SessionCost on this computer), 'version' (this copy's version; --all lists every copy on this computer), 'uninstall' (remove SessionCost and LiveGuard cleanly in one go: hooks, skills, plugins, extensions, package, and backups; add --backup to keep a copy; asks first), 'prices' (the prices used, where each came from and its date; `sessioncost prices set|import|team|update`), 'auto' (`sessioncost auto on|off`: rebuild each chat's report after each answer, on by default), 'guard' (the live guard: `sessioncost guard on|off|auto on|off`; `sessioncost guard` alone shows its state), or a session file (.jsonl, or an Antigravity .db)")
     ap.add_argument("--project", help="project folder (default: the current folder)")
     ap.add_argument("--no-open", action="store_true", help="write the report but do not open it")
     ap.add_argument("--brief", action="store_true", help="print only the report's path, not the summary (for agents: "
@@ -399,6 +500,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sarif", metavar="FILE", help="also write the steps worth a look and the live guard's decisions "
                                                      "as SARIF 2.1.0 (for security tools)")
     ap.add_argument("--prices", help="a prices.json to merge over the built-in one")
+    ap.add_argument("--provider", help="cloud provider pricing: direct, bedrock, vertex, azure")
+    ap.add_argument("--tier", help="service tier pricing: standard, batch, priority, flex, fast")
+    ap.add_argument("--region", help="region / data-residency pricing: global, us, eu, regional, or cloud region")
     ap.add_argument("--subscription", action="store_true",
                     help="you are on a subscription plan (Claude Pro/Max, ChatGPT): label money as API-equivalent, not billed")
     ap.add_argument("--cursor-usage", metavar="CSV",
@@ -408,13 +512,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="update: show the steps without running them")
     ap.add_argument("--to", metavar="VERSION", help="update: pin to a specific release version (e.g. 1.2.8)")
     ap.add_argument("--offline", action="store_true", help="setup: enable strict offline mode (zero outbound network calls)")
+    ap.add_argument("--refresh", action="store_true",
+                    help="setup: only refresh already-configured agent skills and hooks (skip unconfigured agents)")
     ap.add_argument("--all", action="store_true", help="version: list every copy on this computer, not only this one")
     ap.add_argument("--version", action="version", version=f"sessioncost {__version__}")
     ap.add_argument("--live", action="store_true", help=argparse.SUPPRESS)   # the hooks' run after each answer
     args = ap.parse_args(argv)
 
     if args.target in ("setup", "clean"):
-        return cmd_setup(offline=args.offline) if args.target == "setup" else cmd_clean()
+        return cmd_setup(offline=args.offline, refresh_only=args.refresh) if args.target == "setup" else cmd_clean()
     if args.target == "update":
         from . import update
         return update.run(dry_run=args.dry_run, version=args.to)
@@ -484,6 +590,9 @@ def find_session(args, chat: str | None = None) -> Path | None:
             note(args, locate.none_found(args.project))
             return None
         return found[0][1]
+    if "\x00" in target or target.startswith(("\\\\", "//")):
+        note(args, f"sessioncost: refusing unsafe session path: {target!r}")
+        return None
     path = Path(target).expanduser()
     if not path.is_file():   # a session id (or its first characters) from `sessioncost list`
         loose = []

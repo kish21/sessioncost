@@ -50,8 +50,12 @@ def says_allow(text: str) -> bool:
 # The guard's switches in plain words (owner, 2026-11-11: nothing has to be typed). The phrase must be the whole
 # message, with "please" at most: "why did the guard turn off?" or "turn the guard off and run the tests" switch nothing.
 _G = r"(?:the\s+)?(?:live\s*)?guard"
+_GG = r"(?:the\s+)?git\s+(?:live\s*)?guard"
 _RULES = r"(?:all\s+)?(?:my\s+|the\s+|this\s+project'?s\s+)?allow(?:ed)?\s+(?:steps|rules|list)"
 _SAID_SWITCH = [(arg, re.compile(rf"^\s*(?:please\s+)?(?:{words})[\s.!]*(?:please[\s.!]*)?$", re.I)) for arg, words in (
+    ("git-off", rf"(?:turn|switch|shut|disable)\s+{_GG}\s+off|(?:turn|switch|shut)\s+off\s+{_GG}|disable\s+{_GG}|{_GG}\s+off|stop\s+{_GG}"),
+    ("git-on", rf"(?:turn|switch|enable)\s+{_GG}\s+on|(?:turn|switch)\s+on\s+{_GG}|enable\s+{_GG}|{_GG}\s+on|start\s+{_GG}"),
+    ("git-status", rf"{_GG}\s+status|is\s+{_GG}\s+on\??"),
     ("off", rf"(?:turn|switch|shut)\s+{_G}\s+off|(?:turn|switch|shut)\s+off\s+{_G}|{_G}\s+off|stop\s+{_G}"),
     ("strict", rf"{_G}\s+strict|(?:turn|switch|make|set)\s+{_G}\s+(?:to\s+)?strict|(?:turn|switch)\s+on\s+(?:the\s+)?strict\s+(?:live\s*)?guard"),
     ("on", rf"(?:turn|switch)\s+{_G}\s+on|(?:turn|switch)\s+on\s+{_G}|{_G}\s+on|start\s+{_G}"),

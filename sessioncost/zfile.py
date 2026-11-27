@@ -56,7 +56,12 @@ def open_text(path: Path) -> IO[str]:
         if m.__name__ == "compression.zstd":
             stream = m.open(path, "rb")
         else:
-            stream = m.ZstdDecompressor().stream_reader(path.open("rb"), closefd=True, read_across_frames=True)
+            raw_fh = path.open("rb")
+            try:
+                stream = m.ZstdDecompressor().stream_reader(raw_fh, closefd=True, read_across_frames=True)
+            except Exception:
+                raw_fh.close()
+                raise
     except Exception as e:             # a broken file must not stop the others
         raise OSError(f"{path.name}: {e}") from e
     return io.TextIOWrapper(stream, encoding="utf-8", errors="replace")

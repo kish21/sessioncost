@@ -95,8 +95,9 @@ def injection_quote(txt: str, width: int = 120) -> str:
     [hidden character]. Only for the warning in the chat, so you can judge it: never logged."""
     t = txt[:SCAN] if txt else ""
     h = _no_pattern_sets(t)
-    m = _INJECTION.search(t) or _HIDDEN_ALWAYS.search(h) or _ZERO_WIDTH.search(h)
-    t = t if _INJECTION.search(t) else h
+    m_inj = _INJECTION.search(t)
+    m = m_inj or _HIDDEN_ALWAYS.search(h) or _ZERO_WIDTH.search(h)
+    t = t if m_inj else h
     if not m:
         return ""
     pad = max(20, (width - len(m.group(0))) // 2)
@@ -129,17 +130,70 @@ def test_file(path: str) -> bool:
     return bool(_TEST_FILE.search((path or "").strip().strip("'\"")))
 
 
+# Lowercased, single-prefix, ASCII-mode regexes run directly on `tl = t.lower()` (avoids 4x redundant _DROP
+# alternation and Unicode case-folding overhead on 400KB tool outputs).
+_INJ_DROP_RE = re.compile(
+    _DROP + r"\s+(?:"
+    r"(?:(?:all|any|the|your|of\s+the)\s+)*(?:previous|prior|above|earlier|preceding|"
+    r"system|original)\s+(?:instructions?|prompts?|rules|messages?|directions|guidelines)\b|"
+    r"(?:all\s+|any\s+)?(?:of\s+)?(?:what|everything|anything|whatever)\s+(?:you(?:'ve\s+been|\s+were|\s+have\s+been|\s+got)|"
+    r"was|has\s+been)\s+(?:told|given|asked|instructed|said|taught|programmed)\b(?:\s+\w+){0,3}?\s+(?:before|previously|"
+    r"earlier|so\s+far|until\s+now|up\s+to\s+now|above)\b|"
+    r"(?:all\s+|any\s+)?(?:of\s+)?(?:what|everything|whatever)\s+you(?:'ve\s+been|\s+were|\s+have\s+been)\s+"
+    r"(?:instructed|programmed)\b|"
+    r"(?:all\s+(?:of\s+)?)?your\s+(?:(?:previous|prior|earlier|original|initial|current|existing|old|system|"
+    r"developer)\s+)?(?:instructions?|directives?|orders|guidelines|guardrails|programming|system\s+prompt|safety\s+rules|rules)\b"
+    r")",
+    re.ASCII,
+)
+_INJ_STOP_RE = re.compile(
+    r"\bstop\s+(?:following|obeying)\s+(?:your|the|all|any)\s+(?:(?:previous|prior|original|system)\s+)?"
+    r"(?:instructions?|rules|guidelines|orders)\b",
+    re.ASCII,
+)
+_INJ_YOUR_RE = re.compile(
+    r"\byour\s+(?:new|real|actual|true|updated)\s+(?:task|instructions?|goal|objective|job|mission|orders)\s+(?:is|are)\s*(?:to\b|:)",
+    re.ASCII,
+)
+_INJ_HIDE_RE = re.compile(HIDE.lower(), re.ASCII)
+_INJ_OTHER_RE = re.compile(
+    r"\byou\s+are\s+now\s+(?:a|an|in|the)\s|\bnew\s+(?:system\s+)?instructions?\s*:|"
+    r"<\s*/?\s*(?:system|im_start|im_end)\s*>|\bbegin\s+(?:system|admin|developer)\s+(?:prompt|instructions?|message)\b|"
+    r"\b(?:important|urgent|attention)\b[\s:!-]{0,4}(?:to|for)\s+(?:the\s+)?(?:ai|assistant|agent|model|llm|claude)\b",
+    re.ASCII,
+)
+_DROP_WORDS = ("ignore", "disregard", "forget", "override", "aside", "discard", "abandon", "throw")
+_YOUR_WORDS = ("task", "instruction", "goal", "objective", "job", "mission", "order")
+_OTHER_WORDS = ("instruction", "system", "im_start", "im_end", "begin", "important", "urgent", "attention")
+
+
+def _has_injection(t: str) -> bool:
+    tl = t.lower()
+    if any(w in tl for w in _DROP_WORDS) and _INJ_DROP_RE.search(tl):
+        return True
+    if ("following" in tl or "obeying" in tl) and _INJ_STOP_RE.search(tl):
+        return True
+    if "your" in tl and any(w in tl for w in _YOUR_WORDS) and _INJ_YOUR_RE.search(tl):
+        return True
+    if "the user" in tl and _INJ_HIDE_RE.search(tl):
+        return True
+    if (("now" in tl and "you" in tl) or any(w in tl for w in _OTHER_WORDS)) and _INJ_OTHER_RE.search(tl):
+        return True
+    return False
+
+
 def injection_signs(txt: str) -> list[str]:
     """Yes/no signs that a result tries to steer the agent (see the module notes)."""
     if not txt:
         return []
     t = txt[:SCAN]
     out = []
-    if _INJECTION.search(t):
+    if _has_injection(t):
         out.append("injection")
-    h = _no_pattern_sets(t)
-    if _HIDDEN_ALWAYS.search(h) or len(_ZERO_WIDTH.findall(h)) >= 3:
-        out.append("hidden_text")
+    if not t.isascii() and (_HIDDEN_ALWAYS.search(t) or _ZERO_WIDTH.search(t)):
+        h = _no_pattern_sets(t)
+        if _HIDDEN_ALWAYS.search(h) or len(_ZERO_WIDTH.findall(h)) >= 3:
+            out.append("hidden_text")
     return out
 
 

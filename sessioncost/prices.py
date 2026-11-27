@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 from datetime import date, datetime
@@ -37,10 +38,11 @@ def team_pointer() -> Path:
 
 def team_file() -> Path | None:
     try:
-        f = json.loads(team_pointer().read_text(encoding="utf-8")).get("file")
+        raw = json.loads(team_pointer().read_text(encoding="utf-8"))
+        f = raw.get("file") if isinstance(raw, dict) else None
     except (OSError, ValueError, AttributeError):
         return None
-    return Path(f) if f else None
+    return Path(f) if isinstance(f, str) and f else None
 
 
 def checked_day(as_of: str) -> str:
@@ -77,7 +79,7 @@ def valid_list(p) -> bool:
     if not isinstance(p, dict) or age_days(p.get("as_of", "")) is None or not isinstance(p.get("models"), dict):
         return False
     return all(isinstance(r, dict) and all(isinstance(r.get(c), (int, float)) and not isinstance(r.get(c), bool)
-                                           and r[c] >= 0 for c in CLASSES) for r in p["models"].values())
+                                           and math.isfinite(r[c]) and r[c] >= 0 for c in CLASSES) for r in p["models"].values())
 
 
 def built_in() -> dict:
@@ -102,7 +104,7 @@ def number(v, what: str) -> float | None:
         n = float(str(v).strip().lstrip("$"))
     except ValueError:
         raise ValueError(f"{what} must be a number (dollars per million tokens), not {v!r}") from None
-    if n < 0 or n != n:
+    if not math.isfinite(n) or n < 0:
         raise ValueError(f"{what} cannot be {v!r}")
     return n
 
@@ -165,12 +167,35 @@ def _merge(base: dict, extra: dict) -> dict:
             for m, r in v.items():
                 models[m] = {**models.get(m, {}), **r}
             out["models"] = models
+        elif k == "providers" and isinstance(v, dict):
+            provs = {p: {m: dict(r) for m, r in tbl.items()} for p, tbl in (base.get("providers") or {}).items()
+                     if isinstance(tbl, dict)}
+            for p, tbl in v.items():
+                if isinstance(tbl, dict):
+                    pk = norm_provider(p)
+                    provs.setdefault(pk, {})
+                    for m, r in tbl.items():
+                        if isinstance(r, dict):
+                            provs[pk][normalise(m)] = {**provs[pk].get(normalise(m), {}), **r}
+            out["providers"] = provs
+        elif k == "pricing" and isinstance(v, dict):
+            out["pricing"] = {**(out.get("pricing") or {}), **{pk: pv for pk, pv in v.items() if pv is not None}}
+        elif k == "modifiers" and isinstance(v, dict):
+            mods = dict(base.get("modifiers") or {})
+            for mk, mv in v.items():
+                mods[mk] = {**(mods.get(mk) or {}), **mv} if isinstance(mv, dict) and isinstance(mods.get(mk), dict) else mv
+            out["modifiers"] = mods
+        elif k in ("provider", "tier", "region", "inference_geo") and v is not None:
+            pr = dict(out.get("pricing") or {})
+            pr["region" if k == "inference_geo" else k] = v
+            out["pricing"] = pr
         else:
             out[k] = v
     return out
 
 
-def load(extra_file: str | None = None, user_file=AUTO) -> dict:
+def load(extra_file: str | None = None, user_file=AUTO, *,
+         provider: str = "", tier: str = "", region: str = "") -> dict:
     """user_file: AUTO = the list (or its update), your team's file and your own under ~/.sessioncost; None = the built-in
     list alone; a path = that file as your own."""
     personal = user_file == AUTO
@@ -189,6 +214,10 @@ def load(extra_file: str | None = None, user_file=AUTO) -> dict:
     mine = own_file() if personal else user_file
     problems = []
     for f, label in ((mine, "your own"), (Path(extra_file).expanduser() if extra_file else None, "--prices")):
+        if f and not Path(f).is_file():
+            if label == "--prices":
+                raise ValueError(f"the price file {f} does not exist")
+            continue
         if f and Path(f).is_file():
             try:
                 data = json.loads(Path(f).read_text(encoding="utf-8-sig"))
@@ -200,42 +229,289 @@ def load(extra_file: str | None = None, user_file=AUTO) -> dict:
                 problems.append(f"Your own price file {f} could not be read ({e}), so list prices were used: fix "
                                 "it, or delete it and set your prices again with `sessioncost prices set`.")
                 continue
-            bad = [m for m, r in (data.get("models") or {}).items() if not isinstance(r, dict)]
+            bad = []
+            for m, r in (data.get("models") or {}).items():
+                if not isinstance(r, dict):
+                    bad.append(m)
+                    continue
+                for c in CLASSES:
+                    if c in r:
+                        v = r[c]
+                        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+                            bad.append(m)
+                            break
             if bad:
                 data = {**data, "models": {m: r for m, r in data["models"].items() if m not in bad}}
-                problems.append(f"In the price file {f}, {', '.join(bad)} {'is' if len(bad) == 1 else 'are'} not "
-                                "a list of prices, so list prices were used for "
+                problems.append(f"In the price file {f}, {', '.join(bad)} {'has' if len(bad) == 1 else 'have'} invalid "
+                                "or non-numeric prices, so list prices were used for "
                                 f"{'it' if len(bad) == 1 else 'them'}.")
             prices = _merge(prices, data)
             for m, r in (data.get("models") or {}).items():
                 set_on = r.get("set_on") if isinstance(r, dict) else None
                 src[m] = f"{label}, set {set_on}" if set_on else f"{label} ({Path(f).name})"
-            own.append(Path(f).name)
+            if data.get("models") or data.get("providers"):
+                own.append(Path(f).name)
     if own:
         prices["own"] = own
     if problems:
         prices["own_problem"] = " ".join(problems)
+    cli_pricing = {k: v for k, v in (("provider", provider), ("tier", tier), ("region", region)) if v}
+    if cli_pricing:
+        prices = _merge(prices, {"pricing": cli_pricing})
     prices["from"] = src
     return prices
+
+
+_PROVIDER_ALIASES = {
+    "": "direct", "direct": "direct", "anthropic": "direct", "openai": "direct", "google": "direct",
+    "xai": "direct", "cursor": "direct",
+    "bedrock": "bedrock", "aws": "bedrock", "aws-bedrock": "bedrock", "aws_bedrock": "bedrock",
+    "vertex": "vertex", "vertex-ai": "vertex", "vertex_ai": "vertex", "gcp": "vertex", "google-vertex": "vertex",
+    "azure": "azure", "azure-openai": "azure", "azure_openai": "azure", "azure_ai": "azure",
+    "azure-ai": "azure", "foundry": "azure",
+}
+_PROVIDER_NAMES = {
+    "bedrock": "AWS Bedrock",
+    "vertex": "Google Vertex AI",
+    "azure": "Azure OpenAI",
+}
+_TIER_ALIASES = {
+    "": "standard", "default": "standard", "standard": "standard", "on-demand": "standard", "on_demand": "standard",
+    "batch": "batch", "flex": "flex", "priority": "priority", "fast": "fast",
+}
+_DEFAULT_MODIFIERS = {
+    "tier": {
+        "standard": 1.0,
+        "batch": 0.5,
+        "flex": 0.5,
+        "priority": {"openai": 2.0, "anthropic": 1.0, "google": 1.0, "default": 2.0},
+        "fast": {"cursor": 2.0, "default": 2.0},
+    },
+    "region": {
+        "global": 1.0,
+        "direct": {"anthropic": {"us": 1.1}},
+        "bedrock": {"regional": 1.1},
+        "vertex": {"regional": 1.1},
+        "azure": {"regional": 1.1},
+    },
+}
+
+
+def norm_provider(provider: str) -> str:
+    p = (provider or "").strip().lower()
+    return _PROVIDER_ALIASES.get(p, p or "direct")
+
+
+def norm_tier(tier: str) -> str:
+    t = (tier or "").strip().lower()
+    return _TIER_ALIASES.get(t, t or "standard")
+
+
+def norm_region(region: str) -> str:
+    r = (region or "").strip().lower()
+    if r in ("", "default", "global", "not_available", "none"):
+        return "global"
+    if r in ("us-only", "us_only"):
+        return "us"
+    return r
+
+
+def _vendor(model: str) -> str:
+    m = normalise(model)
+    if m.startswith("claude"):
+        return "anthropic"
+    if re.match(r"(gpt|codex|o\d)", m):
+        return "openai"
+    if m.startswith("gemini"):
+        return "google"
+    if m.startswith(("composer", "grok-4.7")):
+        return "cursor"
+    return "default"
+
+
+def parse_model(model: str) -> tuple[str, str, str]:
+    """Extract (canonical_model, detected_provider, detected_region) from a raw model id.
+    Handles AWS Bedrock ('us.anthropic.claude-opus-4-6-20251001-v1:0', 'global.anthropic...', 'bedrock/...'),
+    Google Vertex AI ('publishers/anthropic/models/claude-...@20251001', 'vertex/us-east5/...', '...@20251001'),
+    and Azure OpenAI ('azure/gpt-5.5', 'azure/eastus/gpt-5.5')."""
+    raw = re.sub(r"\[.*?\]", "", (model or "").strip().lower())
+    provider, region = "", ""
+    if raw.startswith("bedrock/"):
+        provider, raw = "bedrock", raw[len("bedrock/"):]
+    elif raw.startswith(("vertex_ai/", "vertex/")):
+        provider, raw = "vertex", raw.split("/", 1)[1]
+        if "/" in raw and not raw.startswith("publishers/"):
+            region, raw = raw.split("/", 1)
+    elif raw.startswith(("azure_ai/", "azure/")):
+        provider, raw = "azure", raw.split("/", 1)[1]
+        if "/" in raw:
+            region, raw = raw.split("/", 1)
+    if raw.startswith("publishers/"):
+        m = re.match(r"publishers/[^/]+/models/(.+)$", raw)
+        if m:
+            provider, raw = provider or "vertex", m.group(1)
+    # AWS Bedrock cross-region / regional model IDs: [us|eu|ap|apac|global.]anthropic.claude-...-v1:0
+    bm = re.match(r"^(?:(global|us|eu|ap|apac)\.)?(?:anthropic|amazon|meta|mistral|cohere)\.(.+)$", raw)
+    if bm:
+        provider = provider or "bedrock"
+        prefix, raw = bm.group(1), bm.group(2)
+        if not region:
+            region = "ap" if prefix == "apac" else (prefix or "regional")
+        raw = re.sub(r"-v\d+(?::\d+)?$", "", raw)
+    # Google Vertex AI uses @YYYYMMDD instead of -YYYYMMDD
+    if re.search(r"@\d{8}$", raw):
+        provider = provider or "vertex"
+        raw = re.sub(r"@\d{8}$", "", raw)
+    raw = re.sub(r"-v\d+:\d+$", "", raw)
+    raw = re.sub(r"-\d{8}$", "", raw)
+    return raw, provider, region
 
 
 def normalise(model: str) -> str:
     """'claude-opus-5[1m]' -> 'claude-opus-5'; 'claude-haiku-4-5-20251001' -> 'claude-haiku-4-5'."""
     m = re.sub(r"\[.*?\]", "", (model or "").strip().lower())
+    m = re.sub(r"@\d{8}$", "", m)
+    m = re.sub(r"-v\d+:\d+$", "", m)
     return re.sub(r"-\d{8}$", "", m)
 
 
-def rates(model: str, prices: dict) -> tuple[dict, bool, str]:
+def resolve_context(model: str, prices: dict, *, provider: str = "", tier: str = "", region: str = "") -> dict:
+    """Resolve effective (provider, tier, region) with precedence: explicit call/session -> model id -> price file -> default."""
+    canonical, det_provider, det_region = parse_model(model)
+    cfg = prices.get("pricing") if isinstance(prices.get("pricing"), dict) else {}
+    eff_provider = norm_provider(provider or det_provider or str(cfg.get("provider") or ""))
+    eff_tier = norm_tier(tier or str(cfg.get("tier") or ""))
+    eff_region = norm_region(region or det_region or str(cfg.get("region") or cfg.get("inference_geo") or ""))
+    return {"canonical": canonical, "provider": eff_provider, "tier": eff_tier, "region": eff_region}
+
+
+def pricing_label(info: dict) -> str:
+    """Plain-English label of the non-default pricing applied, or '' for standard direct global pricing."""
+    provider = info.get("provider") or "direct"
+    tier = info.get("tier") or "standard"
+    region = info.get("region") or "global"
+    mult = float(info.get("multiplier") or 1.0)
+    explicit = bool(info.get("explicit_provider_rate"))
+    if provider == "direct" and tier == "standard" and region == "global" and not explicit:
+        return ""
+    mult_s = f"{mult:g}x" if abs(mult - 1.0) > 1e-6 else ""
+    if provider in _PROVIDER_NAMES:
+        bits = [region]
+        if tier != "standard":
+            bits.append(tier)
+        if mult_s:
+            bits.append(mult_s)
+        elif explicit:
+            bits.append("custom rates")
+        return f"{_PROVIDER_NAMES[provider]} ({', '.join(bits)})"
+    parts = []
+    if tier != "standard":
+        names = {"batch": "Batch API", "flex": "Flex tier", "priority": "Priority tier", "fast": "Fast mode"}
+        parts.append(names.get(tier, f"{tier} tier"))
+    if region != "global":
+        parts.append("US-only inference" if region == "us" else f"{region} region")
+    text = ", ".join(parts) if parts else provider
+    return f"{text} ({mult_s})" if mult_s else text
+
+
+def rates(model: str, prices: dict, *, provider: str = "") -> tuple[dict, bool, str]:
     """(rates per million, checked?, the price-table key used)."""
     table = prices["models"]
-    for key in (model, normalise(model)):
+    canonical, det_provider, _ = parse_model(model)
+    eff_provider = norm_provider(provider or det_provider)
+    if eff_provider != "direct":
+        prov_tbl = (prices.get("providers") or {}).get(eff_provider) or {}
+        for k in (model, canonical, normalise(model)):
+            if k in prov_tbl:
+                r = prov_tbl[k]
+                return r, bool(r.get("checked", True)), f"{eff_provider}/{k}"
+        prefixed = f"{eff_provider}/{canonical}"
+        if prefixed in table:
+            r = table[prefixed]
+            return r, bool(r.get("checked", True)), prefixed
+    for key in (model, normalise(model), canonical):
         if key in table:
             r = table[key]
             return r, bool(r.get("checked")), key
-    m = normalise(model)
+    m = canonical or normalise(model)
     key = "default-openai" if re.match(r"(gpt|codex|o\d)", m) else "default-gemini" if m.startswith("gemini") else ""
     key = key if key in table else "default"
     return table[key], False, key
+
+
+def apply_modifiers(r: dict, model: str, prices: dict, *, provider: str = "", tier: str = "", region: str = "",
+                    prompt_tokens: int = 0, explicit_provider_rate: bool = False) -> tuple[dict, dict]:
+    """Apply prompt-length rules and tier/provider/region multipliers to a model's rates.
+    Returns (adjusted_rates, pricing_info)."""
+    ctx = resolve_context(model, prices, provider=provider, tier=tier, region=region)
+    canonical = ctx["canonical"]
+    eff_provider, eff_tier, eff_region = ctx["provider"], ctx["tier"], ctx["region"]
+    vendor = _vendor(canonical)
+    mods = prices.get("modifiers") if isinstance(prices.get("modifiers"), dict) else {}
+    tier_mods = mods.get("tier") if isinstance(mods.get("tier"), dict) else _DEFAULT_MODIFIERS["tier"]
+    reg_mods = mods.get("region") if isinstance(mods.get("region"), dict) else _DEFAULT_MODIFIERS["region"]
+
+    # Cursor Fast mode on a base model name (e.g. grok-4.7 or composer-2.5 with tier="fast"):
+    # <=256k is 2x standard, >256k is 3x standard (whereas a *-fast model already has 2x / 3x in prices.json).
+    already_fast = canonical.endswith("-fast")
+    if eff_tier == "fast" and vendor == "cursor" and not already_fast:
+        over = r.get("over")
+        long_ctx = bool(over and prompt_tokens > over["above"])
+        tier_mult = 3.0 if long_ctx else 2.0
+        base = r
+    else:
+        base = for_prompt(r, prompt_tokens)
+        if eff_tier == "fast" and already_fast:
+            tier_mult = 1.0
+        else:
+            raw_t = tier_mods.get(eff_tier, _DEFAULT_MODIFIERS["tier"].get(eff_tier, 1.0))
+            if isinstance(raw_t, dict):
+                tier_mult = float(raw_t.get(vendor, raw_t.get("default", 1.0)))
+            else:
+                tier_mult = float(raw_t)
+
+    region_mult = 1.0
+    if not explicit_provider_rate and eff_region != "global":
+        if eff_provider == "direct":
+            d_tbl = reg_mods.get("direct") if isinstance(reg_mods.get("direct"), dict) else _DEFAULT_MODIFIERS["region"]["direct"]
+            v_tbl = d_tbl.get(vendor) if isinstance(d_tbl.get(vendor), dict) else {}
+            if eff_region in v_tbl:
+                region_mult = float(v_tbl[eff_region])
+        elif eff_provider in ("bedrock", "vertex", "azure"):
+            p_tbl = reg_mods.get(eff_provider) if isinstance(reg_mods.get(eff_provider), dict) else _DEFAULT_MODIFIERS["region"].get(eff_provider, {})
+            region_mult = float(p_tbl.get(eff_region, p_tbl.get("regional", 1.1)))
+
+    mult = round(tier_mult * region_mult, 6)
+    out = dict(base)
+    if abs(mult - 1.0) > 1e-6:
+        for c in CLASSES:
+            if c in out and isinstance(out[c], (int, float)):
+                out[c] = round(out[c] * mult, 6)
+    info = {
+        "provider": eff_provider,
+        "tier": eff_tier,
+        "region": eff_region,
+        "multiplier": mult,
+        "explicit_provider_rate": explicit_provider_rate,
+    }
+    info["label"] = pricing_label(info)
+    return out, info
+
+
+def call_rates(model: str, prices: dict, *, day: str = "", prompt_tokens: int = 0,
+               provider: str = "", tier: str = "", region: str = "") -> tuple[dict, bool, str, dict]:
+    """Full per-call rate resolution: model/provider lookup -> dated change -> prompt length -> modifiers."""
+    ctx = resolve_context(model, prices, provider=provider, tier=tier, region=region)
+    r, checked, key = rates(model, prices, provider=ctx["provider"])
+    explicit_prov = ctx["provider"] != "direct" and key.startswith(f"{ctx['provider']}/")
+    if day:
+        r = on_day(r, day)
+    adj, info = apply_modifiers(
+        r, model, prices,
+        provider=ctx["provider"], tier=ctx["tier"], region=ctx["region"],
+        prompt_tokens=prompt_tokens, explicit_provider_rate=explicit_prov,
+    )
+    return adj, checked, key, info
 
 
 def on_day(r: dict, day: str) -> dict:

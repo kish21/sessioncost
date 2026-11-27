@@ -82,16 +82,39 @@ def _cmd_private_registry(eco: str, words: list[str]) -> bool:
     return False
 
 
+_ALLOWED_HOSTS = frozenset({"pypi.org", "registry.npmjs.org"})
+
+
+class _RegistryRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        import urllib.error
+        import urllib.parse
+        parsed = urllib.parse.urlparse(newurl)
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() not in _ALLOWED_HOSTS:
+            raise urllib.error.URLError(f"Refusing redirect to untrusted host: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _gunzip_bounded(data: bytes, limit: int) -> bytes:
+    import io
+    with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+        out = gz.read(limit + 1)
+    if len(out) > limit:
+        raise ValueError("decompressed answer too large")
+    return out
+
+
 def _fetch(url: str, timeout: float) -> bytes:
     from .guard_store import offline_on
     if offline_on():
         raise RuntimeError("SessionCost offline mode is on: outbound network calls are disabled")
     req = urllib.request.Request(url, headers={"User-Agent": "sessioncost-guard", "Accept-Encoding": "gzip"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:      # noqa: S310 - fixed https registry addresses
+    opener = urllib.request.build_opener(_RegistryRedirectHandler)
+    with opener.open(req, timeout=timeout) as r:      # noqa: S310 - fixed https registry addresses
         body = r.read(MAX_BYTES + 1)
         if len(body) > MAX_BYTES:
             raise ValueError("answer too large")
-        return gzip.decompress(body) if r.headers.get("Content-Encoding") == "gzip" else body
+        return _gunzip_bounded(body, MAX_BYTES) if r.headers.get("Content-Encoding") == "gzip" else body
 
 
 FETCH = _fetch                 # tests put a fake registry here

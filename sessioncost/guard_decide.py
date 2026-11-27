@@ -7,7 +7,8 @@ import os
 import re
 
 from .guard_checks import (INSTEAD, SCRIPT, SCRIPT_MAX, WHY, _git, _new_packages, rule_for,
-                           _outside_read_step, _push_dest, _raw_never, _run_scripts, _secret_commit, _step_fp)
+                           _outside_read_step, _push_dest, _raw_never, _run_scripts, _script_tampers_guard,
+                           _secret_commit, _step_fp)
 from .guard_store import _read, home
 from .names import GUARD_CMD
 
@@ -226,7 +227,7 @@ def decide(st: dict, a, cwd: str) -> tuple[str, list[str], str]:
     if "git_push" in marks:
         _push_dest(a, cwd)
     body = _run_scripts(a.target or "", cwd) if a.kind == "command" else ""
-    if a.kind == "command" and _raw_never(body):
+    if a.kind == "command" and (_raw_never(body) or _script_tampers_guard(body)):
         marks.append("staged_script")         # running a script file that holds a never-list step: asked once per version
     if body and ("staged_script" in marks or risks.prints_key(body)):
         a.script_fp = hashlib.sha1(body.encode("utf-8", "replace")).hexdigest()[:16]

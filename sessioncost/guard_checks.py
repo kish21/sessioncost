@@ -293,6 +293,34 @@ def _raw_never(cmd: str) -> bool:
     return any(rx.search(cmd or "") for rx in _RAW_NEVER)
 
 
+_SCRIPT_MUTATES = re.compile(
+    r"\b(?:write_text|write_bytes|json\.dump|unlink|rmtree|remove|rmdir|rename|replace|"
+    r"writeFile(?:Sync)?|rm(?:Sync)?|unlink(?:Sync)?|Remove-Item|Set-Content|Out-File|Clear-Content)\b|"
+    r"\bopen\s*\([^)]*['\"][wax+]|(?<![A-Za-z0-9_])(?:rm|del|erase|mv|sed\s+-i|truncate)\s+",
+    re.I,
+)
+_AGENT_DIR_PIECE = re.compile(
+    r"""['"](?:\.claude|\.codex|\.cursor|\.gemini|\.copilot|\.agents|\.sessioncost)(?:[\\/][^'"]*)?['"]""",
+    re.I,
+)
+_GUARD_TARGET_PIECE = re.compile(
+    r"""['"](?:[^'"]*(?:hooks\.json|settings(?:\.local)?\.json|sessioncost-guard(?:\.json)?|\.sessioncost-allow|"""
+    r"""sessioncost|liveguard|skills(?:[\\/][^'"]*)?))['"]""",
+    re.I,
+)
+
+
+def _script_tampers_guard(body: str) -> bool:
+    """True when a script on disk writes or deletes agent hook/settings/skill files, even when paths are
+    constructed dynamically from pieces (e.g. `Path.home() / d / n` in a loop, #35)."""
+    if not body or not _SCRIPT_MUTATES.search(body):
+        return False
+    from .risk_patterns import _TAMPER_PATH
+    if _TAMPER_PATH.search(body):
+        return True
+    return bool(_AGENT_DIR_PIECE.search(body) and _GUARD_TARGET_PIECE.search(body))
+
+
 _RUN_FILE = re.compile(r"(?:^|[;&|(]\s*)(?:sudo\s+)?(?:(?:sh|bash|zsh|python3?|py|node|pwsh|powershell|source|\.)\s+"
                        r"(?:-(?:File|ExecutionPolicy\s+\w+|\w+)\s+)*|\.[\\/]|&\s+)['\"]?([\w.\\/~:-]+\.(?:sh|bash|zsh|py|js|mjs|ps1|psm1|bat|cmd)|"
                        r"(?<=\./)[\w.-]+)['\"]?(?=\s|$|[;&|)])", re.I | re.M)

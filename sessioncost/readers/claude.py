@@ -35,7 +35,8 @@ class _Thread:
         mid = m.get("id")
         if not mid:
             return None
-        u = _usage(m.get("usage") or {})
+        raw_u = m.get("usage") or {}
+        u = _usage(raw_u)
         rts = ts(r.get("timestamp"))
         c = self.calls.get(mid)
         if c is None:
@@ -48,6 +49,14 @@ class _Thread:
         else:
             _merge_usage(c.usage, u)
             c.ts_last = rts or c.ts_last
+        tier = str(raw_u.get("service_tier") or "").strip().lower()
+        if tier and tier not in ("default", "standard"):
+            c.service_tier = tier
+        elif not c.service_tier and str(raw_u.get("speed") or "").strip().lower() == "fast":
+            c.service_tier = "fast"
+        geo = str(raw_u.get("inference_geo") or "").strip().lower()
+        if geo and geo not in ("not_available", "global"):
+            c.region = geo
         diag = m.get("diagnostics") or r.get("diagnostics") or {}
         cmr = diag.get("cache_miss_reason") if isinstance(diag, dict) else None
         if isinstance(cmr, dict) and cmr.get("type"):

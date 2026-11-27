@@ -1,6 +1,6 @@
 ---
 name: sessioncost
-description: (SessionCost {{VERSION}}) Show how many tokens each turn of THIS coding session sent, the heaviest turn, and the top fix to cut them (with what it cost), and fix that waste for the user. Use when the user asks where the tokens went, why the context is so big, what this session or chat cost, why it was expensive, runs /sessioncost or /sessioncost fix, or says it in plain words: "show my report", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "update the prices", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to do something with SessionCost.
+description: '(SessionCost {{VERSION}}) Show where THIS session''s tokens went, the heaviest turn, and fix token waste. Use when the user asks where tokens went, what this chat cost, runs /sessioncost (fix|week|insights|totals), or says: "show my report", "how was my week?", "show my insights", "compare my agents", "show my totals", "fix my token waste", "fix it", "write a handover", "continue from handover", "undo the fix", "turn token tips on/off", "warn me at 150k tokens", "set my budget to $5", "show my prices", "use batch/bedrock/vertex pricing", "update the prices", "set up MCP", "sessioncost status", "uninstall sessioncost", "which version do I have", "show me the SessionCost help", "what can SessionCost do", or asks how to use SessionCost.'
 ---
 
 # SessionCost: where did this session's tokens go?
@@ -77,9 +77,34 @@ how to do one of these, give the words to say first and the command in brackets.
 - When the user says "continue from handover": run `{{RUN}} fix --handover`. It prints the handover file's path; read
   that file and carry on from its "what is next".
 
+## Weekly summary
+
+- "show my weekly summary", "how was my week?" (or "/sessioncost week"): run `{{RUN}} week` and show its printed
+  summary as printed, in a code block, plus the report path as a clickable link. Add `--project .`, `--week YYYY-Www`,
+  `--days N`, or `--open` when the user asks for this project, a specific week, a custom window, or to open it.
+
+## Insights across all sessions and agents
+
+- "show my insights", "open my insights", "compare my agents", "insights across all sessions" (or "/sessioncost insights"):
+  run `{{RUN}} insights` (add `--days N`, `--project .`, `--agent <name>`, `--all`, or `--open` when asked
+  for a window like 7 days, this project, one agent, all time, or to open it) to build `~/.sessioncost/reports/insights.html`.
+  Show the clickable path and write a concise narrative (headline spend/waste, top saving, safety status, trend)
+  strictly from the tool's output — never read raw session logs. SessionCost uses no AI model and sends nothing anywhere.
+
+## Totals, project budgets & CSV
+
+- "show my totals", "spend by project", "how much did I spend this month?" (or "/sessioncost totals"): run `{{RUN}} totals`
+  (add `--project .`, `--team <name>`, `--days N`, `--open`, or `--csv <file>` / `--csv-group project` when asked to
+  filter, open, or export CSV) and show the printed summary and clickable report path.
+- "set a $50 monthly budget for <project>", "show my project budgets": run `{{RUN}} totals budget <project> 50` (add
+  `--team <name>` when given) or `{{RUN}} totals budget` alone.
+
 ## Prices
 
 - "show my prices" (or "/sessioncost prices"): run `{{RUN}} prices` and show its output as printed, in a code block.
+- When the user asks for cloud provider, tier, or region pricing (e.g. "use batch pricing", "price with Bedrock US",
+  "Vertex regional pricing"), add `--provider direct|bedrock|vertex|azure`, `--tier standard|batch|priority|flex|fast`,
+  and/or `--region global|us|eu|regional` to `{{RUN}} last` or `{{RUN}} fix`.
 - When the user gives their own prices in their words (for example "Opus: 4 input, 20 output"), run
   `{{RUN}} prices set <model> --input 4 --output 20` (add `--cache-read R` and `--cache-write W` only when they gave
   those) and show the lines it prints. Use the model name as the report or `prices` shows it. Prices are US dollars
@@ -102,7 +127,10 @@ how to do one of these, give the words to say first and the command in brackets.
   is expected; the user can confirm it or run the command in their own terminal.
 - When the user asks to remove or uninstall SessionCost: never run it yourself (it asks a question only a person can
   answer in a terminal). Tell them to type `{{RUN}} uninstall` in a terminal (PowerShell, Terminal), not in the
-  chat. It shows what it takes out, keeps a backup, and lists what only they can remove.
+  chat. It removes SessionCost and LiveGuard cleanly in one go (hooks, skills, plugins, editor extensions, package,
+  and old backups; add `--backup` to keep a copy first).
+- "set up MCP", "show MCP config" (or "/sessioncost mcp config"): run `{{RUN}} mcp config` and show the JSON snippet.
+- "sessioncost status", "what is SessionCost doing?": run `{{RUN}} status` and show its output as printed.
 - Only when the user asks which version they have ("which version do I have?", or "/sessioncost version"), run
   `{{RUN}} version` and show its output as printed, adding no advice of your own (add `--all` only when they ask for
   every copy).

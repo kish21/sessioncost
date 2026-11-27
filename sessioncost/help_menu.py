@@ -10,12 +10,13 @@ from .guard_store import _read, _write, home
 GUIDE = "https://kish21.github.io/sessioncost-help/"
 MENU = ("SessionCost: what you can say in this chat\n"
         '- "show my report": where this chat\'s tokens went\n'
+        '- "show my insights", "how was my week?", "show my totals"\n'
         '- "fix my token waste": what to change, done on your yes, with undo\n'
         '- "write a handover", then "continue from handover" in a new chat\n'
         '- "warn me at 1m tokens": when the handover is offered\n'
-        '- "turn the guard off" / "turn the guard on"\n'
+        '- "turn the guard off" / "turn the guard on" / "turn on git guard"\n'
         '- "show my allowed steps": what you let the guard pass\n'
-        '- "show my prices", "which version do I have"\n'
+        '- "show my prices", "set up MCP", "which version do I have"\n'
         "Or just tell me what you want to do with SessionCost, in your own words.\n"
         f'Guide: {GUIDE} . To see this list again, say "show me the SessionCost help".')
 

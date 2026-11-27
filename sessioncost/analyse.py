@@ -25,8 +25,16 @@ from .analyse_calls import (CATEGORIES, CLASS_LABELS, SAID, Pricer, _hide_keys, 
 from .analyse_lists import _base, _folder, agents, cursor_range, plain, top_files
 
 
+def _context_limit() -> int:
+    try:
+        from .fixer_store import long_chat
+        return int(long_chat())
+    except Exception:
+        return 200_000
+
+
 def analyse(s: Session, prices: dict, subscription: bool = False, engines: list | None = None) -> dict:
-    P = Pricer(prices)
+    P = Pricer(prices, session_provider=s.provider, session_tier=s.service_tier, session_region=s.region)
     subscription = subscription or not s.billed_per_token
     main_calls = s.calls
     # Step 0, the fixed setup: the first call has no history yet, so everything it sent except what you said is the
@@ -199,6 +207,10 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             long_label, short_label = "at " + mine, "at your own prices"
         else:
             long_label += "; with " + mine
+    pricing_used = ", ".join(P.pricing_used)
+    if pricing_used:
+        long_label += f" ({pricing_used})"
+        short_label += f" · {pricing_used}"
     reasons = []      # why the total is not exact, biggest first
     if not s.tokens_exact:
         reasons.append("This log keeps no token counts, so tokens are estimated from the size of the text.")
@@ -209,6 +221,8 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         reasons.append("The log does not split cache writes into 5-minute and 1-hour, so all are priced at the "
                        "5-minute rate.")
     why = " ".join(reasons) or "Every model has a confirmed price and every token class is in the log."
+    if pricing_used:
+        why += f" Priced using {pricing_used}."
     if subscription:
         why += " Your plan is not billed per token: read the figures as API-equivalent."
 
@@ -233,6 +247,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
         },
         "money": {"label": long_label, "short": short_label, "as_of": as_of, "day": checked_day(as_of), "exact": exact,
                   "own": own, "stale": pricemod.stale_note(prices),
+                  "pricing": pricing_used, "pricing_contexts": list(P.pricing_contexts),
                   "range": cursor_range(s, P) if not s.tokens_exact else None,
                   # a usage export was used but did not cover every turn (a later turn, or an older export)
                   "export_partial": s.agent == "cursor" and not s.tokens_exact and
@@ -249,6 +264,7 @@ def analyse(s: Session, prices: dict, subscription: bool = False, engines: list 
             "turns": len([t for t in s.turns if t.n > 0]),
             "working_min": round(working, 1), "waiting_min": round(waiting / 60, 1),
             "context_max": max((d["context"] for d in calls if d["agent"] == "main"), default=0),
+            "context_limit": _context_limit(),
             "sent": sum(d["sent"]["tokens"] for d in calls),
             "sent_by": {k: sum(d["sent"][k] for d in calls) for k in ("setup", "history", "new")},
             "output": sum(d["usage"]["output"] for d in calls), "thinking": thinking,

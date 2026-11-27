@@ -56,7 +56,10 @@ def _ts(meta: bytes | None, field: int) -> datetime | None:
     sec = _pb.num(meta, field, 1)
     if not sec:
         return None
-    return datetime.fromtimestamp(sec + (_pb.num(meta, field, 2) or 0) / 1e9, tz=timezone.utc)
+    try:
+        return datetime.fromtimestamp(sec + (_pb.num(meta, field, 2) or 0) / 1e9, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _usage(u: bytes) -> Usage:
@@ -75,25 +78,31 @@ def _rest(payload: bytes | None) -> bytes:
 MIN_PIECE = 64       # shorter strings in a step are ids, names and times, not what the tool returned
 
 
+_CTRL_BYTES = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
 def _texty(b: bytes) -> bool:
+    if not b or _CTRL_BYTES.search(b) is not None:   # message framing is control bytes; C-speed check before decode
+        return False
     try:
-        s = b.decode("utf-8")
+        b.decode("utf-8")
     except UnicodeDecodeError:
         return False
-    return bool(s) and not any(ord(ch) < 32 and ch not in "\n\r\t" for ch in s)   # message framing is control bytes
+    return True
 
 
 def _pieces(b: bytes, out: dict, depth: int = 0) -> None:
     """The text a step carries, piece by piece: nested messages are opened, short strings (ids, times) are left out,
     and a piece stored twice (late-2026 builds keep a second copy of the step inside it) counts once."""
+    if len(b) < MIN_PIECE:
+        return
     f = {} if _texty(b) or depth > 8 else _pb.fields(b)
     if not f:
-        if len(b) >= MIN_PIECE:
-            out[hashlib.sha1(b).digest()] = b
+        out[hashlib.sha1(b).digest()] = b
         return
     for vs in f.values():
         for v in vs:
-            if isinstance(v, bytes):
+            if isinstance(v, bytes) and len(v) >= MIN_PIECE:
                 _pieces(v, out, depth + 1)
 
 
@@ -115,26 +124,35 @@ def _content(rest: bytes, raw: str) -> tuple[int, str]:
     found: dict[bytes, bytes] = {}
     _pieces(rest, found)
     found.pop(hashlib.sha1(raw.encode("utf-8", "replace")).digest(), None)
+    if len(found) <= 1:
+        if not found:
+            return 0, hashlib.sha1(b"").hexdigest()[:16]
+        k, v = next(iter(found.items()))
+        return len(v), hashlib.sha1(k).hexdigest()[:16]
     big = sorted(found.items(), key=lambda kv: -len(kv[1]))
     keep: list[tuple[bytes, bytes]] = []
-    joined, index = bytearray(), {}            # every bigger piece so far; line -> the pieces that hold it
-    for i, (k, v) in enumerate(big):
-        s = _lines(v)
+    joined, index = bytearray(), {}            # every kept bigger piece so far; line -> kept piece indices
+    for k, v in big:
         if b"\x00" in v:
-            copy = any(v in w for _, w in big[:i])
+            copy = any(v in w for _, w in keep)
         else:
             copy = v in joined
-        if not copy and s:
-            shared: dict[int, int] = {}
-            for ln in s:
-                for j in index.get(ln, ()):
-                    shared[j] = shared.get(j, 0) + 1
-            copy = any(n >= 0.9 * len(s) for n in shared.values())
+        s: set[str] | None = None
         if not copy:
+            s = _lines(v)
+            if s and index:
+                shared: dict[int, int] = {}
+                for ln in s:
+                    for j in index.get(ln, ()):
+                        shared[j] = shared.get(j, 0) + 1
+                copy = any(n >= 0.9 * len(s) for n in shared.values())
+        if not copy:
+            idx = len(keep)
             keep.append((k, v))
-        joined += b"\x00" + v
-        for ln in s:
-            index.setdefault(ln, []).append(i)
+            joined += b"\x00" + v
+            if s:
+                for ln in s:
+                    index.setdefault(ln, []).append(idx)
     return sum(len(v) for _, v in keep), hashlib.sha1(b"".join(sorted(k for k, _ in keep))).hexdigest()[:16]
 
 
@@ -245,11 +263,14 @@ class _Thread:
                     self.children.append((m.group(1), str(args.get("Role") or ""), str(args.get("TypeName") or "")))
             size, digest = _content(rest, raw)
             img_n = 1 if name == "generate_image" else 0
+            raw_len = len(raw.encode("utf-8", "replace"))
+            # Cap decoded bytes to avoid decoding multi-MB protobuf blobs before text_flags slices [:SCAN].
+            scan_slice = rest[raw_len : raw_len + 1_600_000]
             self.order[-1].actions.append(Action(
                 id=_pb.text(call, 1), tool=name, kind=kind, label=label, target=target, args_chars=len(raw),
                 written_chars=written, result_chars=size, images=img_n, image_chars=6_000 * img_n,
                 result_hash=digest, is_error=error, ts=created, result_ts=done,
-                result_flags=text_flags(rest[len(raw.encode('utf-8', 'replace')):].decode('utf-8', 'replace'))))
+                result_flags=text_flags(scan_slice.decode("utf-8", "replace"))))
             self.last_ts = done or created or self.last_ts
         return None
 
@@ -289,7 +310,8 @@ def workspace(con: sqlite3.Connection) -> str:
 
 
 def connect(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    import urllib.parse
+    return sqlite3.connect(f"file:{urllib.parse.quote(path.as_posix(), safe='/:')}?mode=ro", uri=True)
 
 
 def user_text(payload: bytes | None) -> str:
@@ -382,9 +404,11 @@ class AntigravityReader:
         return s
 
     def _child(self, folder: Path, cid: str, role: str, kind: str, models: dict[int, str], seen: set[str],
-               out: list[Helper], parent: str = "") -> None:
+               out: list[Helper], parent: str = "", depth: int = 0) -> None:
         """A helper's own conversation file, and the helpers it started in turn. send_message can wake the same
         helper again in a later turn, so each one is read once."""
+        if depth > 12:
+            return
         f = folder / f"{cid}.db"
         if cid in seen or not f.is_file():
             return
@@ -406,7 +430,7 @@ class AntigravityReader:
             out.append(Helper(id=cid[:8], description=short(role or "helper", 90),
                               agent_type=f"{kind} helper" if kind else "helper", calls=th.order, parent=parent))
         for grand in th.children:
-            self._child(folder, *grand, models, seen, out, parent=short(role or "helper", 90))
+            self._child(folder, *grand, models, seen, out, parent=short(role or "helper", 90), depth=depth + 1)
 
     def _browser(self, payload: bytes | None, meta: bytes | None, models: dict[int, str], k: int) -> Helper | None:
         th = _Thread(f"helper:browser{k}", models)

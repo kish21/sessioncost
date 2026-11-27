@@ -85,21 +85,36 @@ def last_stamp(path: Path, tail_bytes: int = 262144, types=("user", "assistant")
     from .zfile import is_zst, open_text
     if is_zst(path):
         try:
+            # Bounded rolling tail read to prevent zstd decompression bombs (max 128 MiB).
+            max_chars = 128 * 1024 * 1024
+            buf = ""
+            total = 0
             with open_text(path) as f:
-                lines = f.read()[-tail_bytes:].splitlines()
+                while total < max_chars:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    buf = (buf + chunk)[-tail_bytes:]
+            lines = buf.splitlines()
         except Exception:
             return None
     else:
-        size = path.stat().st_size
-        with path.open("rb") as f:
-            f.seek(max(0, size - tail_bytes))
-            lines = f.read().decode("utf-8", "replace").splitlines()
+        try:
+            size = path.stat().st_size
+            with path.open("rb") as f:
+                f.seek(max(0, size - tail_bytes))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            return None
     for line in reversed(lines):
         if '"timestamp"' not in line:
             continue
         try:
             row = json.loads(line)
         except ValueError:
+            continue
+        if not isinstance(row, dict):
             continue
         if types and row.get("type") not in types:
             continue
@@ -322,7 +337,8 @@ def cursor_links(db: Path, home: Path | None = None) -> tuple[dict[str, set[str]
                 folder = _file_uri_path(json.loads((d / "workspace.json").read_text(encoding="utf-8")).get("folder") or "")
                 if not folder or not (d / "state.vscdb").is_file():
                     continue
-                con = sqlite3.connect(f"file:{(d / 'state.vscdb').as_posix()}?mode=ro", uri=True)
+                import urllib.parse
+                con = sqlite3.connect(f"file:{urllib.parse.quote((d / 'state.vscdb').as_posix(), safe='/:')}?mode=ro", uri=True)
                 try:
                     row = con.execute("select value from ItemTable where key = 'composer.composerData'").fetchone()
                 finally:
@@ -396,6 +412,11 @@ def none_found(project: str | Path | None = None) -> str:
             "sessioncost --project <that folder>" + zfile.codex_note("\n"))
 
 
+def _sort_key(dt: datetime) -> datetime:
+    from datetime import timezone
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def sessions(project: str | Path | None = None, home: Path | None = None, codex: Path | None = None,
              antigravity: Path | None = None, cursor: Path | None = None, cursor_dir: Path | None = None,
              unlinked: list | None = None, copilot: Path | None = None,
@@ -412,7 +433,128 @@ def sessions(project: str | Path | None = None, home: Path | None = None, codex:
     found += antigravity_sessions(project, antigravity)
     found += cursor_sessions(project, cursor, cursor_dir, loose)
     out = [(t, p) for t, p in found if t is not None]
-    out.sort(key=lambda x: x[0], reverse=True)
+    out.sort(key=lambda x: _sort_key(x[0]), reverse=True)
     if unlinked is not None:
-        unlinked += sorted([(t, p) for t, p in loose if t is not None], key=lambda x: x[0], reverse=True)
+        unlinked += sorted([(t, p) for t, p in loose if t is not None], key=lambda x: _sort_key(x[0]), reverse=True)
+    return out
+
+
+def all_sessions(home: Path | None = None, codex: Path | None = None, antigravity: Path | None = None,
+                 cursor: Path | None = None, copilot: Path | None = None,
+                 vscode: list[Path] | None = None) -> list[tuple[datetime, object]]:
+    """Every main session across every project on this computer (Claude Code, Codex, Copilot CLI, VS Code Copilot Chat,
+    Antigravity, Cursor), newest first. Unreadable files or locked databases are skipped so one broken log never hides
+    the rest."""
+    found: list[tuple[datetime | None, object]] = []
+
+    # 1. Claude Code: ~/.claude/projects/<project-key>/*.jsonl
+    claude_root = (home or claude_home()) / "projects"
+    if claude_root.is_dir():
+        for d in claude_root.iterdir():
+            if not d.is_dir():
+                continue
+            for p in d.glob("*.jsonl"):
+                try:
+                    found.append((last_stamp(p), p))
+                except OSError:
+                    continue
+
+    # 2. Codex: ~/.codex/{sessions,archived_sessions}/**/rollout-*.jsonl*
+    for p in codex_files(codex):
+        meta = codex_meta(p)
+        if not meta or codex_is_helper(meta):
+            continue
+        try:
+            found.append((last_stamp(p, types=None), p))
+        except OSError:
+            continue
+
+    # 3. Copilot CLI: ~/.copilot/session-state/<id>/events.jsonl
+    from .readers.copilot import copilot_home, is_copilot
+    cop_root = (copilot or copilot_home()) / "session-state"
+    if cop_root.is_dir():
+        for f in sorted(cop_root.glob("*/events.jsonl")):
+            try:
+                if is_copilot(f):
+                    found.append((last_stamp(f, types=None), f))
+            except OSError:
+                continue
+
+    # 4. VS Code Copilot Chat: <VS Code user>/workspaceStorage/<hash>/chatSessions/*.{json,jsonl}
+    from .readers.vscode_chat import replay, vscode_homes
+    for vh in vscode if vscode is not None else vscode_homes():
+        ws_root = vh / "workspaceStorage"
+        if not ws_root.is_dir():
+            continue
+        for d in sorted(ws_root.glob("*/chatSessions")):
+            for f in sorted(d.glob("*.json")) + sorted(d.glob("*.jsonl")):
+                try:
+                    if not any(isinstance(q, dict) and (q.get("message") or {}).get("text")
+                               for q in replay(f).get("requests") or []):
+                        continue
+                    found.append((datetime.fromtimestamp(f.stat().st_mtime).astimezone(), f))
+                except (OSError, ValueError, AttributeError):
+                    continue
+
+    # 5. Antigravity: ~/.gemini/antigravity/conversations/*.db
+    from .readers.antigravity import _ts, antigravity_homes, connect as ag_connect, is_helper as ag_is_helper
+    ag_best: dict[str, tuple[datetime | None, Path]] = {}
+    for base in [antigravity] if antigravity else antigravity_homes():
+        root = base / "conversations"
+        if not root.is_dir():
+            continue
+        for p in root.glob("*.db"):
+            try:
+                con = ag_connect(p)
+                try:
+                    if ag_is_helper(con):
+                        continue
+                    row = con.execute("select metadata from steps order by idx desc limit 1").fetchone()
+                finally:
+                    con.close()
+            except Exception:
+                continue
+            ts = _ts(row[0], 1) if row else None
+            old = ag_best.get(p.stem)
+            if old is None or (ts and (old[0] is None or ts > old[0])):
+                ag_best[p.stem] = (ts, p)
+    found += list(ag_best.values())
+
+    # 6. Cursor: state.vscdb
+    from .readers.cursor import CursorChat, chats as cur_chats, connect as cur_connect, helper_ids, state_db
+    db = cursor or state_db()
+    if Path(db).is_file():
+        try:
+            con = cur_connect(db)
+            try:
+                cur_found = cur_chats(con)
+            finally:
+                con.close()
+        except Exception:
+            cur_found = []
+        helpers = helper_ids(cur_found)
+        for d in cur_found:
+            cid = str(d["composerId"])
+            if cid in helpers or not (d.get("fullConversationHeadersOnly") or d.get("conversation")):
+                continue
+            ms = d.get("lastUpdatedAt") or d.get("createdAt")
+            when = None
+            if isinstance(ms, (int, float)) and not isinstance(ms, bool):
+                try:
+                    when = datetime.fromtimestamp(ms / 1000).astimezone()
+                except (OSError, OverflowError, ValueError):
+                    when = None
+            found.append((when, CursorChat(Path(db), cid)))
+
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[datetime, object]] = []
+    for t, p in found:
+        if t is None:
+            continue
+        key = (type(p).__name__, str(p))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((t, p))
+    out.sort(key=lambda x: _sort_key(x[0]), reverse=True)
     return out

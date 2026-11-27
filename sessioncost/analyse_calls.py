@@ -100,17 +100,31 @@ def secs(a: datetime | None, b: datetime | None) -> float:
 
 
 class Pricer:
-    def __init__(self, prices: dict):
+    def __init__(self, prices: dict, *, session_provider: str = "", session_tier: str = "", session_region: str = ""):
         self.prices = prices
+        self.session_provider = session_provider
+        self.session_tier = session_tier
+        self.session_region = session_region
         self.unchecked: set[str] = set()
+        self.pricing_used: list[str] = []
+        self.pricing_contexts: list[dict] = []
 
     def rates(self, c: Call) -> dict:
-        r, checked, _ = pricemod.rates(c.model, self.prices)
+        when = c.ts_first or c.ts_last                      # the price of the call's own day (a vendor's dated change)
+        day = when.date().isoformat() if when else datetime.now().date().isoformat()
+        r, checked, _, info = pricemod.call_rates(
+            c.model, self.prices, day=day, prompt_tokens=c.usage.context,
+            provider=c.provider or self.session_provider,
+            tier=c.service_tier or self.session_tier,
+            region=c.region or self.session_region,
+        )
         if not checked:
             self.unchecked.add(c.model or "unknown model")
-        when = c.ts_first or c.ts_last                      # the price of the call's own day (a vendor's dated change)
-        r = pricemod.on_day(r, when.date().isoformat() if when else datetime.now().date().isoformat())
-        return pricemod.for_prompt(r, c.usage.context)      # a long prompt may cost more (Haiku 5.5, GPT over 272K)
+        label = info.get("label") or ""
+        if label and label not in self.pricing_used:
+            self.pricing_used.append(label)
+            self.pricing_contexts.append(info)
+        return r
 
     def cost(self, c: Call) -> dict:
         return pricemod.cost(c.usage, self.rates(c))

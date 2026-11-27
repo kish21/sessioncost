@@ -100,11 +100,19 @@ def cache_line(a: dict, now: datetime | None = None) -> str:
 
 
 def block(a: dict, cwd: str = "") -> str:
+    from .guard_compat import compat_warnings
     chat = str((a.get("meta") or {}).get("session_id") or "")
     lines = [guard_line(a.get("guard")), tips_line(chat), numbers_line(a), cache_line(a)]
+    for warn in compat_warnings():
+        lines.append(f"Warning: {warn}")
     return "\n".join([HEAD, *("  " + x for x in lines)])
 
 
 def short() -> str:
-    """For `sessioncost guard` (no chat in hand): the guard is printed above it, so only the tips line."""
-    return "  " + tips_line()
+    """For `sessioncost guard` (no chat in hand): the guard is printed above it, so only the tips line (plus any
+    compatibility warnings)."""
+    from .guard_compat import compat_warnings
+    lines = ["  " + tips_line()]
+    for warn in compat_warnings():
+        lines.append(f"  Warning: {warn}")
+    return "\n".join(lines)

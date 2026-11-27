@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
+import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -11,6 +15,8 @@ from . import prices as P
 
 # our own list, filled from LiteLLM's after the owner's review; fetched only when you run `sessioncost prices update`
 UPDATE_URL = "https://raw.githubusercontent.com/kish21/sessioncost/main/sessioncost/prices.json"
+ALLOWED_UPDATE_HOSTS = frozenset({"raw.githubusercontent.com", "github.com", "objects.githubusercontent.com"})
+MAX_UPDATE_BYTES = 2 * 1024 * 1024  # 2 MiB cap for prices.json
 TIMEOUT = 15
 HOW = ("sessioncost prices                      the prices used, where each came from and its date\n"
        "sessioncost prices set <model> --input X --output Y [--cache-read R] [--cache-write W]\n"
@@ -24,13 +30,46 @@ def _num(v: float) -> str:
     return f"{v:g}"
 
 
+_ORIG_URLOPEN = urllib.request.urlopen
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urllib.parse.urlparse(newurl)
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() not in ALLOWED_UPDATE_HOSTS:
+            raise urllib.error.URLError(f"Refusing redirect to untrusted URL: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    if path.is_symlink():
+        raise OSError(f"Refusing to overwrite symlink: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def _save_own(models: dict) -> Path:
     f = P.own_file()
     data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    existing = data.get("models")
+    if not isinstance(existing, dict):
+        existing = {}
     today = date.today().isoformat()
-    data["models"] = {**(data.get("models") or {}), **{m: {**r, "set_on": today} for m, r in models.items()}}
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+    data["models"] = {**existing, **{m: {**r, "set_on": today} for m, r in models.items()}}
+    _atomic_write_text(f, json.dumps(data, indent=1) + "\n")
     return f
 
 
@@ -38,9 +77,13 @@ def _own_data_ok() -> str:
     """'' if your own price file can be added to; else why not."""
     f = P.own_file()
     try:
-        if f.is_file() and not isinstance(json.loads(f.read_text(encoding="utf-8")), dict):
-            raise ValueError("not a JSON object")
-    except ValueError as e:
+        if f.is_file():
+            loaded = json.loads(f.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError("not a JSON object")
+            if "models" in loaded and not isinstance(loaded["models"], dict):
+                raise ValueError("'models' is not a JSON object")
+    except (OSError, ValueError) as e:
         return f"SessionCost prices: {f} could not be read ({e}). Fix or remove it first; nothing was changed."
     return ""
 
@@ -111,8 +154,7 @@ def cmd_team(argv: list[str]) -> int:
     except (OSError, ValueError) as e:
         print(f"SessionCost prices: team file not set: {e}.")
         return 2
-    P.team_pointer().parent.mkdir(parents=True, exist_ok=True)
-    P.team_pointer().write_text(json.dumps({"file": str(f)}), encoding="utf-8")
+    _atomic_write_text(P.team_pointer(), json.dumps({"file": str(f)}))
     print(f"SessionCost prices: using the team file {f} ({len(got)} models). It is read again for every report, so "
           "a change there is used at once. Your own prices still win over it.")
     return 0
@@ -126,8 +168,16 @@ def cmd_update() -> int:
         return 1
     now = P.the_list()
     try:
-        with urllib.request.urlopen(UPDATE_URL, timeout=TIMEOUT) as r:
-            got = json.loads(r.read().decode("utf-8"))
+        fetch = (
+            urllib.request.build_opener(_SafeRedirectHandler).open
+            if urllib.request.urlopen is _ORIG_URLOPEN
+            else urllib.request.urlopen
+        )
+        with fetch(UPDATE_URL, timeout=TIMEOUT) as r:
+            raw = r.read(MAX_UPDATE_BYTES + 1)
+            if len(raw) > MAX_UPDATE_BYTES:
+                raise ValueError("price list response exceeds 2 MiB limit")
+            got = json.loads(raw.decode("utf-8"))
     except (OSError, ValueError) as e:
         print(f"SessionCost prices: could not fetch the price list ({e}). Nothing changed; the list from "
               f"{P.checked_day(now['as_of'])} is still used.")
@@ -140,8 +190,7 @@ def cmd_update() -> int:
         return 0
     changed = sum(1 for m, r in got["models"].items() if any(r.get(c) != now["models"].get(m, {}).get(c)
                                                              for c in P.CLASSES))
-    P.update_file().parent.mkdir(parents=True, exist_ok=True)
-    P.update_file().write_text(json.dumps(got, indent=1), encoding="utf-8")
+    _atomic_write_text(P.update_file(), json.dumps(got, indent=1))
     print(f"SessionCost prices: updated to the list checked {P.checked_day(got['as_of'])} (was "
           f"{P.checked_day(now['as_of'])}); {changed} model{'s' if changed != 1 else ''} new or changed. Your own and "
           "your team's prices still win over it.")
@@ -159,6 +208,11 @@ def show() -> int:
     print(f"Team file: {team}" if team else "Team file: none")
     print(f"Your own: {mine}" if mine.is_file() else "Your own: none (`sessioncost prices set <model> --input X "
                                                        "--output Y`)")
+    if isinstance(p.get("pricing"), dict) and p["pricing"]:
+        ctx = P.resolve_context("", p)
+        lbl = P.pricing_label({**ctx, "multiplier": 1.0})
+        if lbl:
+            print(f"Pricing defaults: {lbl}")
     note = P.stale_note(p)
     if note:
         print("⚠ " + note)

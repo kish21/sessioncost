@@ -139,6 +139,7 @@ def _on_line(st: dict, inp: dict, event: str, note: str = "") -> dict:
 
 YES = re.compile(r"^\s*(?:y|yes|allow it)\b(?!\s*,?\s*but\b)", re.I)   # a stopped step: a plain yes, not "okay"
 _LIVEGUARD = re.compile(rf"^\s*[/$](?:sessioncost:)?{GUARD_CMD}(?:\s+(on|off|strict))?[\s.!]*$", re.I)   # "off." too
+_LIVEGUARD_GIT = re.compile(rf"^\s*[/$](?:sessioncost:)?{GUARD_CMD}\s+git(?:\s+(on|off|status))?[\s.!]*$", re.I)
 _LIVEGUARD_ALLOW = re.compile(rf"^\s*[/$](?:sessioncost:)?{GUARD_CMD}\s+allow(?:\s+(--list|--clear|(\w+)\s+(.+?)))?\s*$", re.I)
 
 
@@ -164,8 +165,15 @@ def _switch(inp: dict) -> tuple[str, str] | None:
         if ma.group(2) and ma.group(3):
             return "allow", command("allow", cwd, rule=(ma.group(2), ma.group(3)))
         return "allow", command("allow-list-rules", cwd)
+    if mg := _LIVEGUARD_GIT.match(text):
+        from . import guard_git
+        sub = (mg.group(1) or "status").lower()
+        return f"git-{sub}", (guard_git.install(cwd) if sub == "on" else guard_git.uninstall(cwd) if sub == "off" else guard_git.status(cwd))
     m = _LIVEGUARD.match(text)
     said = None if m else says_switch(text)            # the same switches in plain words (owner, 2026-11-11)
+    if said in ("git-on", "git-off", "git-status"):
+        from . import guard_git
+        return said, (guard_git.install(cwd) if said == "git-on" else guard_git.uninstall(cwd) if said == "git-off" else guard_git.status(cwd))
     if said in ("allow-clear", "allow-list-rules"):
         return "allow", command(said, cwd)
     if not m and not said:
@@ -374,6 +382,27 @@ def _run(event: str, inp: dict, agent: str) -> dict | None:
     return EVENTS[event](inp) if event in EVENTS else None
 
 
+def _check_hook_health(agent: str, raw_event: str, event: str, inp: dict, raw_in: dict) -> None:
+    """Warn if an agent's hook ran but sent no step the guard could read (format changed, #35)."""
+    from .guard_compat import clear_unreadable, record_unreadable
+    if agent == "cursor" and not event and raw_event in ("gate", "note"):
+        record_unreadable(agent, str(raw_in.get("hook_event_name") or raw_event), "unrecognized hook event")
+        return
+    if event not in ("pre", "post", "read"):
+        return
+    tool = str(inp.get("tool_name") or "").strip()
+    ti = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
+    missing = (
+        not tool
+        or (tool == "Bash" and not str(ti.get("command") or "").strip())
+        or (tool == "Read" and not str(ti.get("file_path") or "").strip())
+    )
+    if missing:
+        record_unreadable(agent, event, "missing tool step fields")
+    else:
+        clear_unreadable(agent)
+
+
 def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
     """(exit code, stdout) for one hook call of `agent` (claude, codex, cursor, antigravity or copilot). Never raises."""
     gate = False
@@ -383,6 +412,8 @@ def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
         inp = None
     try:
         if not isinstance(inp, dict):         # bad input is a broken check like any other: fail-closed decides
+            from .guard_compat import record_unreadable
+            record_unreadable(agent, event, "invalid JSON")
             raise ValueError("the hook input is not a JSON object")
         raw_in, raw_event = inp, event
         if agent == "cursor":
@@ -400,6 +431,7 @@ def hook(event: str, raw: str, agent: str = "claude") -> tuple[int, str]:
             inp = _copilot_in(event, inp)
             inp.setdefault("command", raw_cmd)
         inp.setdefault("_agent", agent)       # who is asking: a tip only Claude Code can show at once waits for the others
+        _check_hook_health(agent, raw_event, event, inp, raw_in)
         # an agent running steps at once runs their hooks at once: each reads the chat's state and writes it back,
         # so they take turns, or one overwrites what another saved (an injected page's "untrusted" mark, an ask)
         with _locked(state_path(str(inp.get("session_id") or "")), STATE_WAIT):
@@ -446,6 +478,34 @@ def main(argv: list[str] | None = None) -> int:
             code, out = hook(argv[1], raw, agent)
             sys.stdout.write(out)
             return code
+    if argv[:1] == ["git-check"] and len(argv) > 1:
+        from . import guard_git
+        cwd = os.getcwd()
+        if argv[1] == "pre-commit":
+            code, msg = guard_git.check_pre_commit(cwd)
+        elif argv[1] == "pre-push":
+            raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace") if sys.stdin else ""
+            code, msg = guard_git.check_pre_push(cwd, raw)
+        else:
+            return 0
+        if msg:
+            sys.stderr.write(msg + "\n")
+        return code
+    if argv[:1] == ["git"]:
+        from . import guard_git
+        sub = argv[1] if len(argv) > 1 else "status"
+        cwd = os.getcwd()
+        if "--project" in argv:
+            idx = argv.index("--project")
+            if idx + 1 < len(argv):
+                cwd = argv[idx + 1]
+        if sub == "on":
+            print(guard_git.install(cwd))
+        elif sub == "off":
+            print(guard_git.uninstall(cwd))
+        else:
+            print(guard_git.status(cwd))
+        return 0
     if argv[:1] == ["setup"] and len(argv) > 1:
         print(setup(argv[1]))
         return 0

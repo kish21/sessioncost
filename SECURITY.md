@@ -17,7 +17,7 @@ For the full LiveGuard security architecture, supported agent hooks, known gaps,
 
 ## Safe installation and updates
 
-- **Recommended (corporate / InfoSec-friendly):** install a pinned release directly from PyPI (`python -m pip install sessioncost==1.2.9` or `uv tool install sessioncost==1.2.9`) and run `sessioncost setup --offline` for zero-network environments.
+- **Recommended (corporate / InfoSec-friendly):** install a pinned release directly from PyPI (`python -m pip install sessioncost==1.2.10` or `uv tool install sessioncost==1.2.10`) and run `sessioncost setup --offline` for zero-network environments.
 - **Updates:** run `sessioncost update` (or `/sessioncost update` in chat) — do not pipe remote install scripts into a shell (`irm | iex` and `curl | sh` are intentionally blocked by LiveGuard).
 
 ## Reporting a vulnerability

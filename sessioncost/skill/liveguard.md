@@ -1,6 +1,6 @@
 ---
 name: liveguard
-description: '(SessionCost {{VERSION}}) Turn the live guard on for every chat until "/liveguard off": every tool step is checked before it runs; dangerous steps are stopped and risky ones wait for the user's yes. Use when the user runs /liveguard, "/liveguard strict" or "/liveguard off", says "turn the guard on", "guard strict", "turn the guard off", "show my allowed steps" or "clear my allowed steps", or asks to guard, watch or protect their sessions live.'
+description: '(SessionCost {{VERSION}}) Turn the live guard on for every chat until "/liveguard off": every tool step is checked before it runs; dangerous steps are stopped and risky ones wait for the user''s yes. Use when the user runs /liveguard, "/liveguard strict", "/liveguard off", or "/liveguard git on|off", says "turn the guard on", "guard strict", "turn the guard off", "turn on git guard", "turn off git guard", "show my allowed steps" or "clear my allowed steps", or asks to guard, watch or protect their sessions live.'
 ---
 
 # /liveguard: the SessionCost guard
@@ -9,9 +9,9 @@ The guard runs inside {{AGENT}}'s hooks. It checks each tool step before it runs
 and writes every decision to a log the SessionCost report reads. It has one switch for every chat.
 
 Every switch also comes in plain words, as the user's whole message: "turn the guard on" (/liveguard), "guard
-strict" (/liveguard strict), "turn the guard off" (/liveguard off), "show my allowed steps" (/liveguard allow
---list), "clear my allowed steps" (/liveguard allow --clear). When you tell the user how to switch it, give the words
-first and the command in brackets.
+strict" (/liveguard strict), "turn the guard off" (/liveguard off), "turn on git guard" (/liveguard git on), "turn off
+git guard" (/liveguard git off), "show my allowed steps" (/liveguard allow --list), "clear my allowed steps"
+(/liveguard allow --clear). When you tell the user how to switch it, give the words first and the command in brackets.
 
 ## Steps
 

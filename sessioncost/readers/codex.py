@@ -210,6 +210,7 @@ class _Thread:
         self.uses: dict[str, Action] = {}
         self.pending: Call | None = None
         self.model = ""
+        self.service_tier = ""
         self.total = None
         self.copied: set = set()        # running totals of the parent thread: a count with one of them is a copy
 
@@ -270,6 +271,9 @@ class _Thread:
         c = self._call(rts)
         c.usage = _usage(info["last_token_usage"])
         c.model = c.model or self.model
+        tier = str(info.get("service_tier") or self.service_tier or "").strip().lower()
+        if tier and tier not in ("default", "standard"):
+            c.service_tier = tier
         c.n = len(self.order) + 1
         c.msg_id = f"{self.agent}#{c.n}"
         self.order.append(c)
@@ -314,7 +318,8 @@ class CodexReader:
     def read(self, path: Path) -> Session:
         meta = _meta(path)
         s = Session(agent=self.name, session_id=str(meta.get("id") or path.stem), source=str(path),
-                    cwd=str(meta.get("cwd") or ""), agent_version=str(meta.get("cli_version") or ""))
+                    cwd=str(meta.get("cwd") or ""), agent_version=str(meta.get("cli_version") or ""),
+                    provider=str(meta.get("model_provider") or "").strip().lower())
         th = _Thread("main")
         turns, setup = self._read(path, th, s, top=True)
         s.turns = [t for t in turns if t.calls or t.n > 0]
@@ -370,8 +375,11 @@ class CodexReader:
                 continue
             rts = ts(r.get("timestamp"))
             pt = p.get("type")
-            if t == "turn_context" and p.get("model"):
-                th.model = str(p["model"])
+            if t == "turn_context":
+                if p.get("model"):
+                    th.model = str(p["model"])
+                if p.get("service_tier"):
+                    th.service_tier = str(p["service_tier"]).strip().lower()
             elif t == "world_state" and top and not turns:
                 skills = ((p.get("state") or {}).get("host_skills") or {}).get("body")
                 if skills and not any(x.what == "skill list" for x in setup.parts):

@@ -242,17 +242,19 @@ def setup(agent: str) -> str:
     return f"SessionCost guard: added to {p} (your other hooks kept; the old file is next to it).{note}"
 
 
-def _hooks_file(agent: str) -> Path:
+def _hooks_file(agent: str, home: Path | None = None) -> Path:
+    h = home or Path.home()
     if agent == "claude":
-        return Path.home() / ".claude" / "settings.json"
+        return h / ".claude" / "settings.json"
     if agent == "codex":
-        return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "hooks.json"
+        return Path(os.environ.get("CODEX_HOME") or h / ".codex") / "hooks.json"
     if agent == "cursor":
-        return Path.home() / ".cursor" / "hooks.json"
+        return h / ".cursor" / "hooks.json"
     if agent == "antigravity":
-        return Path.home() / ".gemini" / "config" / "hooks.json"
+        return h / ".gemini" / "config" / "hooks.json"
     from .readers.copilot import copilot_home
-    return copilot_home() / "hooks" / "sessioncost-guard.json"
+    base = home / ".copilot" if home is not None and not os.environ.get("COPILOT_HOME") else copilot_home()
+    return base / "hooks" / "sessioncost-guard.json"
 
 
 def refresh() -> list[str]:

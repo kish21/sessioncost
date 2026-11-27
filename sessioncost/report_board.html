@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none';">
 <title>__TITLE__ · SessionCost</title>
-<script>try{var th=localStorage.getItem('sessioncost-theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th;}catch(e){}</script><!-- light unless dark was chosen (owner, 2026-10-30) -->
+<script>try{var th=localStorage.getItem('sessioncost-theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th;var au=localStorage.getItem('sessioncost-audience');if(au==='developer'||au==='security')document.documentElement.dataset.audience=au;}catch(e){}</script><!-- light unless dark was chosen (owner, 2026-10-30) -->
 <style>
 /* The session board. A sidebar that stays (the session, its key numbers, the sections) and one story, top to bottom:
    Overview (before/after + the top fixes) · The path (Board | Charts | Table; Charts holds the Cost breakdown) ·
@@ -104,6 +105,32 @@ button:focus-visible,a:focus-visible,.toggle input:focus-visible,summary:focus-v
 .theme svg{width:22px;height:22px}
 .side .brand .theme{margin-left:auto}
 .side .brand .theme + .pin{margin-left:2px}
+
+/* ---- A0: answer-first screen (two sentences: cost & safety; developer vs security view) */
+.answer-first{background:var(--hero);gap:14px}
+.af-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
+.af-head h2{font-size:16px;font-weight:700}
+.af-list{display:grid;gap:10px}
+.af-item{display:grid;grid-template-columns:68px minmax(0,1fr) auto;gap:8px 12px;align-items:baseline;padding:12px 14px;border:1px solid var(--line);border-left:4px solid var(--keep);border-radius:11px;background:var(--surface);color:var(--ink);text-decoration:none;transition:border-color .15s,background .15s}
+.af-item:hover{border-color:var(--keep);background:var(--raise)}
+.af-item.af-warn{border-left-color:var(--cut)}
+.af-item.af-ok{border-left-color:var(--out)}
+.af-item.af-muted{border-left-color:var(--ink-2)}
+.af-tag{font:700 11px/1.3 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.af-text{font-size:15px;line-height:1.45;font-weight:600;color:var(--ink)}
+.af-go{font-size:13px;font-weight:600;color:var(--new);white-space:nowrap}
+.af-more{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;color:var(--ink-2)}
+.af-more a{color:var(--ink-2);text-decoration:none;font-weight:600}
+.af-more a:hover{color:var(--keep);text-decoration:underline}
+:root[data-audience="security"] .wrap > .mbar{order:-4}
+:root[data-audience="security"] .wrap > .top{order:-3}
+:root[data-audience="security"] .wrap > #secAnswerFirst{order:-2}
+:root[data-audience="security"] .wrap > #secGuard{order:-1}
+:root[data-audience="security"] .wrap > #secSafety{order:-1}
+@media (max-width:560px){
+  .af-item{grid-template-columns:minmax(0,1fr);gap:4px}
+  .af-go{justify-self:start}
+}
 
 /* ---- A: the answer */
 .answer{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:22px;align-items:start}
@@ -1120,6 +1147,28 @@ table.t tr.sum td{border-bottom:0;border-top:1.5px solid var(--ink-2);font-weigh
     <button type="button" class="theme" id="theme" aria-label="Switch between light and dark"></button>
   </header>
 
+  <!-- A0: answer-first screen (one sentence for cost, one for safety; developer or security view) -->
+  <section class="card answer-first" aria-labelledby="afTitle" id="secAnswerFirst">
+    <div class="af-head">
+      <div style="display:grid;gap:2px"><span class="eyebrow">At a glance</span><h2 id="afTitle">Cost and safety in two sentences</h2></div>
+      <div class="seg" role="group" aria-label="Audience view" id="audienceSwitch">
+        <button type="button" id="viewDev" data-audience="developer" aria-pressed="true">Developer</button>
+        <button type="button" id="viewSec" data-audience="security" aria-pressed="false">Security</button>
+      </div>
+    </div>
+    <div class="af-list" id="afList">
+      __ANSWER_FIRST__
+    </div>
+    <nav class="af-more" aria-label="Jump to report sections">
+      <span>Jump to:</span>
+      <a href="#secOverview">Overview</a>
+      <a href="#secPath">The path</a>
+      <a href="#secFixes">How to save</a>
+      <a href="#secGuard">Guard report</a>
+      <a href="#skyview" data-sky="1">Trace &amp; risk map</a>
+    </nav>
+  </section>
+
   <!-- A: the answer -->
   <section class="card answer" aria-labelledby="ansH" id="secOverview">
     <div style="display:grid;gap:12px;min-width:0">
@@ -1328,6 +1377,42 @@ const sum = (xs, f) => xs.reduce((a, x) => a + (f ? f(x) : x), 0);
   paint();
 })();
 
+/* ======================= audience view: Developer (cost first) vs Security (guard first) ======================= */
+(function audience(){
+  const root = document.documentElement, list = $('afList'), sw = $('audienceSwitch');
+  if (!list || !sw) return;
+  const apply = mode => {
+    const m = mode === 'security' ? 'security' : 'developer';
+    root.dataset.audience = m;
+    sw.querySelectorAll('button[data-audience]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.audience === m)));
+    const cost = list.querySelector('[data-kind="cost"]'), safety = list.querySelector('[data-kind="safety"]');
+    if (cost && safety){
+      if (m === 'security'){ list.appendChild(safety); list.appendChild(cost); }
+      else { list.appendChild(cost); list.appendChild(safety); }
+    }
+  };
+  sw.addEventListener('click', e => {
+    const b = e.target.closest('button[data-audience]'); if (!b) return;
+    const m = b.dataset.audience;
+    apply(m);
+    try { localStorage.setItem('sessioncost-audience', m); } catch (err) {}
+  });
+  list.addEventListener('click', e => {
+    const link = e.target.closest('a.af-item'); if (!link) return;
+    const id = (link.getAttribute('href') || '').replace(/^#/, '');
+    const target = id && $(id);
+    if (!target) return;
+    e.preventDefault();
+    if (document.body.classList.contains('skyon') && typeof skyOn === 'function') skyOn(false);
+    if (document.body.classList.contains('agentson') && typeof agentsOn === 'function') agentsOn(false);
+    history.replaceState(null, '', '#' + id);
+    target.scrollIntoView({behavior: smooth(), block: 'start'});
+  });
+  let initial = root.dataset.audience;
+  if (initial !== 'security' && initial !== 'developer') initial = 'developer';
+  apply(initial);
+})();
+
 /* ======================= the session, shaped for the board ======================= */
 const MAIN = C.filter(c => c.agent === 'main');
 const CALLS = MAIN.length, HCALLS = C.length - CALLS;
@@ -1469,7 +1554,7 @@ $('ansSub').innerHTML = `${ALL_CUT ? pct(ALL_CUT, SENT) + ' less' : 'Nothing obv
 $('ansCount').innerHTML = (MO.tokens_exact === false
     ? "<b>Tokens: estimated</b> from the size of the text (this agent's log keeps no counts). "
     : "<b>Tokens: exact</b>, from the agent's own log. ") +
-  `<b>Money: an estimate</b> ${MO.subscription ? '(API-equivalent; your plan is not billed per token)' : (MO.own || []).length ? `at your own prices (${esc(MO.own.join(', '))})` : `at list prices checked ${esc(MO.day || '')}`}; ` +
+  `<b>Money: an estimate</b> ${MO.subscription ? '(API-equivalent; your plan is not billed per token)' : (MO.own || []).length ? `at your own prices (${esc(MO.own.join(', '))})` : `at list prices checked ${esc(MO.day || '')}`}${MO.pricing ? ` · ${esc(MO.pricing)}` : ''}; ` +
   'your bill may differ (plan, contract rates, batch, cloud provider).' + (MO.stale ? ` <b>⚠ ${esc(MO.stale)}</b>` : '');
 /* when it was made: a saved page does not update itself, so a stale one should look stale */
 (function(){
@@ -2675,7 +2760,7 @@ function priceHTML(){
   ].filter(([k]) => CLS(k).tokens || (R[k] && !k.startsWith('cache_write')));   // cache-write rows only when this chat wrote to the cache (Gemini, Codex and Cursor mostly do not)
   const rmax = Math.max(1e-9, ...ladder.map(([k]) => R[k] || 0));
   const times = k => !R.input ? '' : R[k] === R.input ? 'the normal price' : R[k] < R.input ? `1/${Math.round(R.input / R[k])} of the normal price` : `${+(R[k] / R.input).toFixed(2)}× the normal price`;
-  return `<p class="big2"><b>${esc(model)}, API list prices, checked ${esc(MO.as_of ? doneDay(MO.as_of + 'T12:00') : '?')}.</b> ${MO.subscription ? 'Your plan is not billed per token, so these are what the tokens would cost on the API.' : 'Every dollar in this report is an estimate at these prices; the token counts are exact, from the log.'}</p>
+  return `<p class="big2"><b>${esc(model)}, ${MO.pricing ? esc(MO.pricing) + ', ' : ''}API list prices, checked ${esc(MO.as_of ? doneDay(MO.as_of + 'T12:00') : '?')}.</b> ${MO.subscription ? 'Your plan is not billed per token, so these are what the tokens would cost on the API.' : 'Every dollar in this report is an estimate at these prices; the token counts are exact, from the log.'}</p>
     <p class="sub2" style="margin:2px 0 8px">Per million tokens. ${ratio ? `Re-reading from the cache costs 1/${ratio} of the normal input price. ` : ''}${R.cache_write_5m > R.input && (CLS('cache_write_5m').tokens || CLS('cache_write_1h').tokens) ? 'New input saved to the cache costs a little more once, so later calls can re-read it cheaply. ' : ''}What the model writes costs the most. The last column is the whole chat.</p>
     <div class="ladder"><div class="lad head"><span>Kind of token</span><span>Price per million</span><span class="v">$ / million</span><span class="v">Tokens</span></div>${ladder.map(([k, label, col]) => { const c = CLS(k); return `<div class="lad">
       <span>${label}</span>

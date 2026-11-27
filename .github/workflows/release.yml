@@ -14,6 +14,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      sha256: ${{ steps.hash.outputs.sha256 }}
     permissions:
       contents: read
       id-token: write          # to sign the provenance
@@ -28,6 +31,14 @@ jobs:
           python3 -m pip install --user build==1.6.1
           python3 -m build
           ls -l dist
+      - name: Record artifact SHA-256 digests
+        id: hash
+        run: |
+          {
+            echo "sha256<<EOF"
+            (cd dist && sha256sum *)
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Sign where they were built
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -40,6 +51,7 @@ jobs:
     if: ${{ inputs.publish }}
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: pypi               # set "Required reviewers" on this environment: nothing is published without your click
       url: https://pypi.org/p/sessioncost
@@ -50,4 +62,10 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Verify artifact SHA-256 digests
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          printf '%s\n' "$EXPECTED_SHA256" > "$RUNNER_TEMP/expected.sha256"
+          (cd dist && sha256sum -c "$RUNNER_TEMP/expected.sha256")
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

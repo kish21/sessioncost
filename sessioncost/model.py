@@ -93,6 +93,9 @@ class Call:
     actions: list[Action] = field(default_factory=list)
     cache_miss_reason: str = ""  # why the prompt cache missed, when the log records it
     cache_missed_tokens: int = 0 # tokens that missed the cache, when the log records it
+    provider: str = ""           # "direct" | "bedrock" | "vertex" | "azure" ("" = auto-detect)
+    service_tier: str = ""       # "standard" | "batch" | "priority" | "flex" | "fast"
+    region: str = ""             # "global" | "us" | "eu" | "regional" | cloud region (e.g. "us-east-1")
 
 
 @dataclass
@@ -217,6 +220,9 @@ class Session:
     fixes: list[Fix] = field(default_factory=list)   # filled by the fix engines (see fixes.py)
     fixes_found: list[Fix] = field(default_factory=list)   # every fix found, before the report keeps the top ones
     added: list[Added] = field(default_factory=list) # setup-like text added after the first call
+    provider: str = ""           # session-level provider when recorded in the log (e.g. Codex model_provider)
+    service_tier: str = ""       # session-level service tier when recorded in the log
+    region: str = ""             # session-level region / inference_geo when recorded in the log
 
     @property
     def calls(self) -> list[Call]:

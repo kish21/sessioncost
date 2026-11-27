@@ -71,7 +71,8 @@ class CursorChat:
 
 
 def connect(db: Path) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{Path(db).as_posix()}?mode=ro", uri=True)
+    import urllib.parse
+    return sqlite3.connect(f"file:{urllib.parse.quote(Path(db).as_posix(), safe='/:')}?mode=ro", uri=True)
 
 
 def _value(con: sqlite3.Connection, key: str) -> dict:

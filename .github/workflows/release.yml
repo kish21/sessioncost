@@ -9,6 +9,10 @@ on:
         description: "Also publish to PyPI (needs the trusted publisher set up on PyPI and your approval)"
         type: boolean
         default: false
+      publish_npm:
+        description: "Also publish to npm (runs after PyPI when both are ticked, or standalone if PyPI already has this version)"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -69,3 +73,29 @@ jobs:
           printf '%s\n' "$EXPECTED_SHA256" > "$RUNNER_TEMP/expected.sha256"
           (cd dist && sha256sum -c "$RUNNER_TEMP/expected.sha256")
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+  npm:
+    if: ${{ inputs.publish_npm && !cancelled() && (needs.pypi.result == 'success' || needs.pypi.result == 'skipped') }}
+    needs: [build, pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: npm                # set "Required reviewers" on this environment: nothing is published without your click
+      url: https://www.npmjs.com/package/sessioncost
+    permissions:
+      contents: read
+      id-token: write          # trusted publishing: npm checks this workflow, no token is stored
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Verify this version is already on PyPI
+        working-directory: npm
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          curl -fsS "https://pypi.org/pypi/sessioncost/${ver}/json" > /dev/null
+      - name: Publish to npm with provenance
+        working-directory: npm
+        run: npm publish --provenance --access public

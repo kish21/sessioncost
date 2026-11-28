@@ -25,18 +25,18 @@ Install a pinned release directly from PyPI — no `irm | iex`, no `curl | sh`, 
 
 ```sh
 # With pip (any OS with Python 3.10+)
-python -m pip install sessioncost==1.2.10
+python -m pip install sessioncost==1.2.11
 python -m sessioncost setup
 
 # With uv
-uv tool install sessioncost==1.2.10
+uv tool install sessioncost==1.2.11
 sessioncost setup
 ```
 
 **Zero-network / corporate environments:** pass `--offline` to `setup` (or set `SESSIONCOST_OFFLINE=1`) to guarantee **zero outbound network calls** at runtime:
 
 ```sh
-python -m pip install sessioncost==1.2.10
+python -m pip install sessioncost==1.2.11
 python -m sessioncost setup --offline
 ```
 
@@ -44,9 +44,9 @@ python -m sessioncost setup --offline
 
 If you prefer a one-line installer (installs the pinned PyPI release using `uv` or `python3` without `ExecutionPolicy Bypass`):
 
-| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/v1.2.10/install.ps1 \| iex` |
+| Windows (PowerShell) | `irm https://raw.githubusercontent.com/kish21/sessioncost/v1.2.11/install.ps1 \| iex` |
 |---|---|
-| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/v1.2.10/install.sh \| sh` |
+| **Mac / Linux** | `curl -fsSL https://raw.githubusercontent.com/kish21/sessioncost/v1.2.11/install.sh \| sh` |
 
 It ends with `/sessioncost added` for each agent it found. Then restart your agent.
 

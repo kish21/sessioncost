@@ -30,6 +30,7 @@ from pathlib import Path
 from . import fixer_store, guard_report, locate, prices as pricemod, readers, week
 from .analyse import analyse
 from .guard import WHY as GUARD_WHY
+from .summary_cache import SummaryCache
 from .totals import (
     _as_dt,
     _iso_week,
@@ -248,6 +249,7 @@ def collect(
     waste_agg: dict[str, dict] = {}
     rules_in_files: dict[str, dict] = {}
     skipped = 0
+    cache = SummaryCache(P)
 
     for stamp, path in found:
         if cutoff and stamp is not None:
@@ -255,8 +257,7 @@ def collect(
             if stamp_dt is not None and (stamp_dt.astimezone().date() + timedelta(days=1)) < cutoff:
                 continue
         try:
-            s = readers.read(path)
-            a = analyse(s, P, engines=engines)
+            a = cache.get_or_analyse(path, P, mode="full", engines=engines)
         except Exception:
             skipped += 1
             continue
@@ -271,7 +272,7 @@ def collect(
         if cutoff and chat_date < cutoff:
             continue
 
-        proj_path = str(meta.get("cwd") or s.cwd or "").strip()
+        proj_path = str(meta.get("cwd") or "").strip()
         proj_name = _project_name(proj_path)
         if project and not _key_matches(project, proj_path, proj_name):
             continue
@@ -281,7 +282,7 @@ def collect(
         if agent_filter and agent_key != agent_filter:
             continue
 
-        matched_for_week.append((when_dt, path, s, a))
+        matched_for_week.append((when_dt, path, None, a))
 
         # Track rules found in project instruction files
         for r in (meta.get("rules_check") or {}).get("rules") or []:
@@ -301,7 +302,8 @@ def collect(
         calls_n = int(tot.get("calls") or 0) + int(tot.get("helper_calls") or 0)
         working_min = float(tot.get("working_min") or 0.0)
         waiting_min = float(tot.get("waiting_min") or 0.0)
-        tools_n, commits_n = _session_tool_and_commit_counts(s)
+        tools_n = int(a.get("tools") or 0)
+        commits_n = int(a.get("commits") or 0)
         saving = a.get("saving") or {}
         waste_usd = float(saving.get("usd") or 0.0)
         waste_tok = int(saving.get("tokens") or 0)
@@ -448,6 +450,8 @@ def collect(
         wrec["waste_tokens"] += waste_tok
         wrec["waste_usd"] += waste_usd
         wrec["session_ids"].append(sid)
+
+    cache.save()
 
     # Sort sessions newest first
     session_rows.sort(key=lambda r: r["when"], reverse=True)

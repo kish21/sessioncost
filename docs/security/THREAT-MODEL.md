@@ -1,6 +1,6 @@
 # SessionCost LiveGuard: Threat Model
 
-Version: 1.2.10 · Updated: 2026-11-27 · Audience: Developers, team leads, and InfoSec reviewers.
+Version: 1.2.11 · Updated: 2026-11-28 · Audience: Developers, team leads, and InfoSec reviewers.
 
 See [SECURITY.md](../../SECURITY.md) for a concise summary of local file access, network behavior, and vulnerability reporting.
 
@@ -11,7 +11,7 @@ SessionCost LiveGuard is a local hook-based guard for AI coding agents. **Claude
 - **100% local, zero AI model calls, zero telemetry:** LiveGuard evaluates every step locally using deterministic rules and writes each decision to a SHA-256 hash-chained local audit log (`~/.sessioncost/guard/`).
 - **Strict offline mode (zero outbound network calls):** run `sessioncost setup --offline`, `sessioncost guard offline on`, or set `SESSIONCOST_OFFLINE=1` to disable all outbound network requests across LiveGuard, price updates, and self-updates.
 - **Default online mode (one narrow check):** when offline mode is off, the only automatic outbound request is LiveGuard's fresh-release check, which queries `pypi.org` or `registry.npmjs.org` with a public package's name when an agent installs a public package, to warn on newly published versions. Installs targeting private/custom registries (`--index-url`, `--extra-index-url`, `--find-links`, `--registry`, `PIP_INDEX_URL`, `UV_INDEX_URL`, `NPM_CONFIG_REGISTRY`, etc.) and scoped npm packages (`@org/pkg`) are skipped automatically so internal package names are never sent to public registries. If the registry is unreachable, the check fails open. Disable this check alone with `sessioncost guard fresh-releases off`.
-- **Installation and updates:** SessionCost recommends pinned package-manager installs (`python -m pip install sessioncost==1.2.10` or `uv tool install sessioncost==1.2.10`). Existing installs update via `sessioncost update` (or `sessioncost update --to <version>`), which passes LiveGuard cleanly on Windows and macOS/Linux while `irm | iex` and `curl | sh` remain strictly blocked.
+- **Installation and updates:** SessionCost recommends pinned package-manager installs (`python -m pip install sessioncost==1.2.11` or `uv tool install sessioncost==1.2.11`). Existing installs update via `sessioncost update` (or `sessioncost update --to <version>`), which passes LiveGuard cleanly on Windows and macOS/Linux while `irm | iex` and `curl | sh` remain strictly blocked.
 
 LiveGuard is **a strong extra safety layer, not a sandbox**. It inspects each tool step as text before execution. A determined attacker running with the same OS user privileges can bypass text-based rules. Combine LiveGuard with an OS-level sandbox (see [Recommended setup with a sandbox](#recommended-setup-with-a-sandbox)).
 

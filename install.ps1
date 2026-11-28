@@ -1,11 +1,11 @@
 ﻿# SessionCost installer for Windows (PowerShell):
 # Recommended (no remote script execution):
-#   python -m pip install sessioncost==1.2.10 && python -m sessioncost setup
-#   uv tool install sessioncost==1.2.10 && sessioncost setup
+#   python -m pip install sessioncost==1.2.11 && python -m sessioncost setup
+#   uv tool install sessioncost==1.2.11 && sessioncost setup
 # Corporate / zero-network mode: add `--offline` to `setup` (or set `$env:SESSIONCOST_OFFLINE = '1'`).
 # First-time install only. To update an existing install, run `sessioncost update` (or `/sessioncost update` in a chat) — do not re-run the installer.
 $ErrorActionPreference = 'Stop'
-$ver = if ($env:SESSIONCOST_VERSION) { $env:SESSIONCOST_VERSION } else { '1.2.10' }
+$ver = if ($env:SESSIONCOST_VERSION) { $env:SESSIONCOST_VERSION } else { '1.2.11' }
 $src = if ($env:SESSIONCOST_SOURCE) { $env:SESSIONCOST_SOURCE } else { "sessioncost==$ver" }
 $offline = ($args -contains '--offline') -or ($env:SESSIONCOST_OFFLINE -match '^(1|true|yes|on)$')
 $setupArgs = if ($offline) { @('setup', '--offline') } else { @('setup') }
@@ -36,4 +36,4 @@ if ($py) {
     exit $LASTEXITCODE
 }
 
-throw 'Neither uv nor Python 3.10+ was found. Install uv (e.g. `winget install astral-sh.uv`) or Python 3.10+, then run `pip install sessioncost==1.2.10` and `python -m sessioncost setup`.'
+throw 'Neither uv nor Python 3.10+ was found. Install uv (e.g. `winget install astral-sh.uv`) or Python 3.10+, then run `pip install sessioncost==1.2.11` and `python -m sessioncost setup`.'

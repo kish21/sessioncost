@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import locate, prices as pricemod, readers
 from .analyse import analyse
+from .summary_cache import SummaryCache
 
 AUTO = "auto"
 NO_PROJECT = "(no project)"
@@ -329,11 +330,11 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
     project_agg: dict[str, dict] = {}
     agent_agg: dict[str, dict] = {}
     week_agg: dict[str, dict] = {}
+    cache = SummaryCache(P)
 
     for stamp, path in found:
         try:
-            s = readers.read(path)
-            a = analyse(s, P, engines=[])
+            a = cache.get_or_analyse(path, P, mode="totals")
         except Exception:
             skipped += 1
             continue
@@ -348,7 +349,7 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
         if cutoff and chat_date < cutoff:
             continue
 
-        proj_path = str(meta.get("cwd") or s.cwd or "").strip()
+        proj_path = str(meta.get("cwd") or "").strip()
         proj_name = _project_name(proj_path)
         if project and not _key_matches(project, proj_path, proj_name):
             continue
@@ -433,31 +434,45 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
         w_rec["usd"] += usd
 
         # Group by model (call-level so helper/secondary models get accurate attribution)
-        seen_models: set[str] = set()
-        call_list = a.get("calls") or []
-        if call_list:
-            for c in call_list:
-                mname = str(c.get("model") or primary_model or "unknown")
+        by_model = a.get("by_model")
+        if by_model:
+            for mrow in by_model:
+                mname = str(mrow.get("model") or primary_model or "unknown")
                 m_rec = model_agg.setdefault(mname, {
                     "model": mname, "chats": 0, "calls": 0, "sent": 0, "output": 0, "usd": 0.0,
                 })
-                m_rec["calls"] += 1
-                m_rec["sent"] += int((c.get("sent") or {}).get("tokens") or 0)
-                m_rec["output"] += int((c.get("written") or {}).get("tokens") or 0)
-                m_rec["usd"] += float(c.get("usd") or 0.0)
-                seen_models.add(mname)
-            for mname in seen_models:
-                model_agg[mname]["chats"] += 1
+                m_rec["chats"] += 1
+                m_rec["calls"] += int(mrow.get("calls") or 0)
+                m_rec["sent"] += int(mrow.get("sent") or 0)
+                m_rec["output"] += int(mrow.get("output") or 0)
+                m_rec["usd"] += float(mrow.get("usd") or 0.0)
         else:
-            m_rec = model_agg.setdefault(primary_model, {
-                "model": primary_model, "chats": 0, "calls": 0, "sent": 0, "output": 0, "usd": 0.0,
-            })
-            m_rec["chats"] += 1
-            m_rec["calls"] += calls_n
-            m_rec["sent"] += sent
-            m_rec["output"] += output
-            m_rec["usd"] += usd
+            seen_models: set[str] = set()
+            call_list = a.get("calls") or []
+            if call_list:
+                for c in call_list:
+                    mname = str(c.get("model") or primary_model or "unknown")
+                    m_rec = model_agg.setdefault(mname, {
+                        "model": mname, "chats": 0, "calls": 0, "sent": 0, "output": 0, "usd": 0.0,
+                    })
+                    m_rec["calls"] += 1
+                    m_rec["sent"] += int((c.get("sent") or {}).get("tokens") or 0)
+                    m_rec["output"] += int((c.get("written") or {}).get("tokens") or 0)
+                    m_rec["usd"] += float(c.get("usd") or 0.0)
+                    seen_models.add(mname)
+                for mname in seen_models:
+                    model_agg[mname]["chats"] += 1
+            else:
+                m_rec = model_agg.setdefault(primary_model, {
+                    "model": primary_model, "chats": 0, "calls": 0, "sent": 0, "output": 0, "usd": 0.0,
+                })
+                m_rec["chats"] += 1
+                m_rec["calls"] += calls_n
+                m_rec["sent"] += sent
+                m_rec["output"] += output
+                m_rec["usd"] += usd
 
+    cache.save()
     chats.sort(key=lambda c: c["when"], reverse=True)
 
     # Finalize projects with budgets

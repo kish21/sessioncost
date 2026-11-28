@@ -22,6 +22,7 @@ from pathlib import Path
 
 from . import fixer_store, locate, prices as pricemod, readers
 from .analyse import analyse
+from .summary_cache import SummaryCache
 from .totals import _as_dt, _key_matches, _money, _norm_path, _project_name, _tok, home, load_prices
 
 WEEK_PAGE = "week.html"
@@ -245,6 +246,7 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
     rules_in_files: dict[str, dict] = {}
     skipped = 0
     prefilter_cutoff = prev_start - timedelta(days=2)
+    cache = SummaryCache(P) if pre_analysed is None else None
 
     items = (
         [(stamp, path, s, a) for stamp, path, s, a in pre_analysed]
@@ -256,10 +258,10 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
         stamp_dt = _as_dt(stamp)
         if stamp_dt is not None and stamp_dt.astimezone().date() < prefilter_cutoff:
             continue
-        if s is None or a is None:
+        if a is None:
             try:
-                s = readers.read(path)
-                a = analyse(s, P, engines=engines)
+                assert cache is not None
+                a = cache.get_or_analyse(path, P, mode="full", engines=engines)
             except Exception:
                 skipped += 1
                 continue
@@ -279,7 +281,7 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
         else:
             continue
 
-        proj_path = str(meta.get("cwd") or s.cwd or "").strip()
+        proj_path = str(meta.get("cwd") or (getattr(s, "cwd", "") if s is not None else "") or "").strip()
         proj_name = _project_name(proj_path)
         if project and not _key_matches(project, proj_path, proj_name):
             continue
@@ -373,6 +375,9 @@ def collect(sessions: list[tuple[datetime, object]] | None = None, prices: dict 
             "waste_usd": round(chat_waste_usd, 6),
             "waste_tokens": chat_waste_tok,
         })
+
+    if cache is not None:
+        cache.save()
 
     applied_fixes = _load_applied_fixes()
     this_summary = _finalize_bucket(this_b)

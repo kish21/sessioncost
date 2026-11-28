@@ -1,12 +1,12 @@
 #!/bin/sh
 # SessionCost installer for macOS and Linux:
 # Recommended (no remote script execution):
-#   python3 -m pip install sessioncost==1.2.10 && python3 -m sessioncost setup
-#   uv tool install sessioncost==1.2.10 && sessioncost setup
+#   python3 -m pip install sessioncost==1.2.11 && python3 -m sessioncost setup
+#   uv tool install sessioncost==1.2.11 && sessioncost setup
 # Corporate / zero-network mode: pass `--offline` (or set `SESSIONCOST_OFFLINE=1`).
 # First-time install only. To update an existing install, run `sessioncost update` (or `/sessioncost update` in a chat) — do not re-run the installer.
 set -e
-VERSION="${SESSIONCOST_VERSION:-1.2.10}"
+VERSION="${SESSIONCOST_VERSION:-1.2.11}"
 SRC="${SESSIONCOST_SOURCE:-sessioncost==${VERSION}}"
 OFFLINE=""
 for arg in "$@"; do
